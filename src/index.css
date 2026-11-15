@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #FAF8F5;
+    color: #1C1917;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Barra de rolagem discreta para guarda-roupa e catálogo */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D6CFC7;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B8AEA3;
+}
+
+@keyframes diamondSheen {
+  0% {
+    transform: translateX(-140%) skewX(-20deg);
+  }
+  50%, 100% {
+    transform: translateX(220%) skewX(-20deg);
+  }
+}
+
+.diamond-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.diamond-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 55%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.72) 50%,
+    transparent 100%
+  );
+  animation: diamondSheen 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes avatarWalkBob {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2.6px);
+  }
+}
+
+@keyframes avatarLegLeftWalk {
+  0%, 100% {
+    transform: rotate(-4.5deg);
+  }
+  50% {
+    transform: rotate(4.5deg);
+  }
+}
+
+@keyframes avatarLegRightWalk {
+  0%, 100% {
+    transform: rotate(4.5deg);
+  }
+  50% {
+    transform: rotate(-4.5deg);
+  }
+}
+
+@keyframes targetRingPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.45);
+    opacity: 0;
+  }
+}
+
+.avatar-walk-bob {
+  animation: avatarWalkBob 0.36s ease-in-out infinite;
+}
+
+@keyframes avatarIdleBreathe {
+  0%, 100% {
+    transform: translateY(0px) scaleY(1);
+  }
+  50% {
+    transform: translateY(-1.8px) scaleY(1.005);
+  }
+}
+
+@keyframes avatarEyeBlink {
+  0%, 91%, 100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.08);
+  }
+  97% {
+    transform: scaleY(1);
+  }
+}
+
+.avatar-idle-breathe {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: avatarIdleBreathe 3.8s ease-in-out infinite;
+}
+
+.avatar-eye-blink {
+  transform-box: fill-box;
+  transform-origin: 50% 55%;
+  animation: avatarEyeBlink 4.6s ease-in-out infinite;
+}
+
+.avatar-leg-left-walk {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  animation: avatarLegLeftWalk 0.36s ease-in-out infinite;
+}
+
+.avatar-leg-right-walk {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  animation: avatarLegRightWalk 0.36s ease-in-out infinite;
+}
+
+.target-ring-pulse {
+  animation: targetRingPulse 0.85s ease-out infinite;
+}
+
+.legendary-sheen {
+  background: linear-gradient(135deg, #FFFDF5 0%, #FEF3C7 45%, #FDE68A 100%);
+  border-color: #D97706;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-walk-bob,
+  .avatar-idle-breathe,
+  .avatar-eye-blink,
+  .avatar-leg-left-walk,
+  .avatar-leg-right-walk,
+  .target-ring-pulse,
+  .diamond-shimmer::after {
+    animation: none !important;
+  }
+}
