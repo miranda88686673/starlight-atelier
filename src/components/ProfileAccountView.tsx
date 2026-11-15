@@ -224,7 +224,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
       return;
     }
     flashSaved(
-      `Identidade atualizada em todo o atelier (-${NAME_CHANGE_FEE_SC} SC descontados).`,
+      `Identidade atualizada em todo o atelier (-${NAME_CHANGE_FEE_SC} AM descontados).`,
     );
   };
 
@@ -367,7 +367,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
 
             <p className="text-xs text-[#6B645D] font-mono-num">
               {account.email} · Conta criada em {account.createdAt} · Nível {playerLevel} ·{' '}
-              {playerState.starcoins.toLocaleString('pt-BR')} SC · {activeOwnedCount} peças
+              {playerState.starcoins.toLocaleString('pt-BR')} AM · {activeOwnedCount} peças
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -698,7 +698,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                   </div>
                 </div>
                 <span className="font-mono-num text-[11px] font-semibold text-[#92400E] bg-[#FFFBEB] border border-[#FCD34D] px-2.5 py-0.5 rounded-md">
-                  Taxa obrigatória: {NAME_CHANGE_FEE_SC} SC
+                  Taxa obrigatória: {NAME_CHANGE_FEE_SC} AM
                 </span>
               </div>
 
@@ -741,8 +741,8 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
               {!hasEnoughForNameChange && identityChanged && (
                 <p className="text-xs font-medium text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] px-3 py-2 rounded-lg">
                   Saldo insuficiente para alterar o nome: são necessários{' '}
-                  <strong className="font-mono-num">{NAME_CHANGE_FEE_SC} SC</strong> (você possui{' '}
-                  <strong className="font-mono-num">{playerState.starcoins} SC</strong>).
+                  <strong className="font-mono-num">{NAME_CHANGE_FEE_SC} AM</strong> (você possui{' '}
+                  <strong className="font-mono-num">{playerState.starcoins} AM</strong>).
                 </p>
               )}
 
@@ -759,7 +759,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                 <span className="text-[11px] text-[#78716C]">
                   Nomes exclusivos em todo o jogo · Mudanças custam{' '}
                   <strong className="font-mono-num text-[#1C1917]">
-                    {NAME_CHANGE_FEE_SC} SC
+                    {NAME_CHANGE_FEE_SC} AM
                   </strong>
                   .
                 </span>
@@ -769,7 +769,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] disabled:bg-[#D6CFC7] disabled:text-[#78716C] disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  Alterar Nome ({NAME_CHANGE_FEE_SC} SC)
+                  Alterar Nome ({NAME_CHANGE_FEE_SC} AM)
                 </button>
               </div>
             </form>

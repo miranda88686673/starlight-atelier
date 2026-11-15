@@ -287,7 +287,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
 
         <div className="mt-4 pt-3 border-t border-[#EFEAE3] flex items-center justify-between gap-2">
           <span className="font-mono-num text-sm font-semibold text-[#1C1917]">
-            {item.price === 0 ? 'Grátis' : `${item.price} SC`}
+            {item.price === 0 ? 'Grátis' : `${item.price} AM`}
           </span>
 
           {isVipLocked ? (
@@ -356,7 +356,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
             {isAccountVip && <VipBadge />}
           </div>
           <p className="text-sm text-[#57534E] mt-1 max-w-2xl">
-            Adquira coleções de moda, móveis temáticos (Boate, Casa, Bares e Hotel de Luxo), Salas exclusivas e Papéis de Parede personalizados com Starcoins.
+            Adquira coleções de moda, móveis temáticos (Boate, Casa, Bares e Hotel de Luxo), Salas exclusivas e Papéis de Parede personalizados com AM.
           </p>
         </div>
 
@@ -366,7 +366,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
             <div>
               <p className="text-[11px] text-[#6B645D] leading-none">Saldo disponível</p>
               <p className="font-mono-num text-base font-semibold text-[#1C1917] mt-0.5">
-                {starcoins.toLocaleString('pt-BR')} SC
+                {starcoins.toLocaleString('pt-BR')} AM
               </p>
             </div>
           </div>
@@ -377,7 +377,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
             className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-[#1C1917] bg-[#F5EFE6] hover:bg-[#EAE0D0] border border-[#DFD4C3] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5 text-[#C6922B]" />
-            Resgatar Mesada (+250 SC)
+            Resgatar Mesada (+250 AM)
           </button>
         </div>
       </section>
@@ -667,7 +667,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
 
                   <div className="mt-4 pt-3 border-t border-[#EFEAE3] flex items-center justify-between gap-2">
                     <span className="font-mono-num text-sm font-semibold text-[#1C1917]">
-                      {furn.price === 0 ? 'Grátis' : `${furn.price} SC`}
+                      {furn.price === 0 ? 'Grátis' : `${furn.price} AM`}
                     </span>
 
                     {isVipLocked ? (
@@ -757,7 +757,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
 
                 <div className="mt-4 pt-3 border-t border-[#EFEAE3] flex items-center justify-between gap-2">
                   <span className="font-mono-num text-sm font-semibold text-[#1C1917]">
-                    {room.price === 0 ? 'Inclusa' : `${room.price} SC`}
+                    {room.price === 0 ? 'Inclusa' : `${room.price} AM`}
                   </span>
 
                   {isVipLocked ? (
@@ -876,7 +876,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
 
                 <div className="mt-4 pt-3 border-t border-[#EFEAE3] flex items-center justify-between gap-2">
                   <span className="font-mono-num text-sm font-semibold text-[#1C1917]">
-                    {wp.price === 0 ? 'Incluso' : `${wp.price} SC`}
+                    {wp.price === 0 ? 'Incluso' : `${wp.price} AM`}
                   </span>
 
                   {isVipLocked ? (

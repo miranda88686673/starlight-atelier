@@ -1,17 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  CheckCircle2,
+  Clock,
+  Coins,
   Globe,
-  KeyRound,
+  Layers,
   LifeBuoy,
   Lock,
+  LogIn,
   Mail,
+  MessageCircle,
+  PlusCircle,
+  RefreshCw,
   Send,
   ShieldCheck,
-  Sparkles,
   User,
   UserPlus,
 } from 'lucide-react';
-import logoBannerImg from '../assets/images/starlight_atelier_logo_1794577859274.jpg';
+import couplePortraitImg from '../assets/images/atelier_couple_portrait_1794768226559.jpg';
+import floralCrestImg from '../assets/images/atelier_floral_crest_1794768226415.jpg';
+import { useGlobalState } from '../core/state/GlobalStateManager';
 import {
   AvatarGender,
   ServerRegion,
@@ -26,7 +34,6 @@ import {
   registerAccount,
   syncAccountAndProgressFromServer,
 } from '../utils/storage';
-import { MeDollSvg } from './svg/MeDollSvg';
 
 interface LoginModalProps {
   onAuthenticated: (account: UserAccount) => void;
@@ -52,9 +59,72 @@ const SERVER_OPTIONS: Array<{
   { id: 'EN', label: 'Inglês (EN)', desc: 'Salas e chat em English' },
 ];
 
+/** Filigrana ornamental dourada reutilizável para os cantos das molduras clássicas */
+const GoldCornerFiligree: React.FC<{ className?: string }> = ({
+  className = '',
+}) => (
+  <svg
+    viewBox="0 0 48 48"
+    fill="none"
+    aria-hidden="true"
+    className={`w-8 h-8 text-[#B7965B] pointer-events-none select-none ${className}`}
+  >
+    <path
+      d="M4 34C4 18 10 8 28 5C18 8 12 15 11 25C15 19 20 15 27 14C20 18 16 23 15 31C11 27 8 28 4 34Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M8 42C8 35 12 31 17 31C20 31 22 33 21 36C20 38 17 38 16 36"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+    />
+    <path
+      d="M32 7C36 7 39 9 39 12C39 14 37 16 34 15"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+    />
+    <circle cx="8" cy="8" r="1.6" fill="currentColor" />
+  </svg>
+);
+
+/** Ramos botânicos dourados decorativos nos cantos do plano de fundo em linho */
+const BackdropBotanicalCorner: React.FC<{ className?: string }> = ({
+  className = '',
+}) => (
+  <svg
+    viewBox="0 0 360 360"
+    fill="none"
+    aria-hidden="true"
+    className={`pointer-events-none select-none text-[#9B7E4B]/55 ${className}`}
+  >
+    {/* Flor principal estilo peônia/rosa */}
+    <g stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M115 245C115 215 140 192 170 192C200 192 224 215 224 245C224 276 200 300 170 300C140 300 115 276 115 245Z" fill="#DFD0B8" fillOpacity="0.35" />
+      <path d="M138 245C138 228 152 214 170 214C188 214 202 228 202 245C202 262 188 276 170 276C152 276 138 262 138 245Z" />
+      <path d="M154 245C154 236 161 229 170 229C179 229 186 236 186 245C186 254 179 261 170 261C161 261 154 254 154 245Z" />
+      <path d="M170 245L140 205M170 245L205 210M170 245L210 265M170 245L135 275" strokeOpacity="0.6" />
+      {/* Segunda flor lateral */}
+      <circle cx="72" cy="185" r="36" fill="#DFD0B8" fillOpacity="0.28" />
+      <circle cx="72" cy="185" r="18" />
+      <path d="M72 185L48 164M72 185L98 168M72 185L94 208M72 185L50 206" strokeOpacity="0.6" />
+      {/* Folhagens e ramos delicados */}
+      <path d="M18 330C62 290 100 265 130 250" />
+      <path d="M108 190C82 145 78 96 95 45C116 86 122 135 108 190Z" fill="#DFD0B8" fillOpacity="0.22" />
+      <path d="M155 190C155 136 178 86 222 54C216 105 196 155 155 190Z" fill="#DFD0B8" fillOpacity="0.22" />
+      <path d="M210 225C255 198 302 195 344 212C302 238 258 244 210 225Z" fill="#DFD0B8" fillOpacity="0.22" />
+      <path d="M196 278C244 275 288 292 320 326C272 325 232 308 196 278Z" fill="#DFD0B8" fillOpacity="0.22" />
+      <path d="M40 240C20 200 18 158 34 118C52 154 56 196 40 240Z" fill="#DFD0B8" fillOpacity="0.2" />
+    </g>
+  </svg>
+);
+
 /**
- * Tela Inicial de Acesso (Login e Criação de Conta).
- * Persiste contas e sessão ativa no localStorage, mantendo sigilo total do acesso administrativo.
+ * Tela Inicial de Acesso (Login e Criação de Conta) fiel à referência visual editorial Starlight Atelier.
  */
 export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -67,141 +137,176 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
   const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [regAvatarGender, setRegAvatarGender] = useState<AvatarGender>('feminino');
+  const [regAvatarGender, setRegAvatarGender] =
+    useState<AvatarGender>('feminino');
   const [regServerRegion, setRegServerRegion] = useState<ServerRegion>('BR');
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Recuperação de senha
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotToken, setForgotToken] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
-  const [forgotPreviewToken, setForgotPreviewToken] = useState<string | null>(null);
-  const [forgotStep, setForgotStep] = useState<'request' | 'reset' | 'done'>('request');
+  const [forgotPreviewToken, setForgotPreviewToken] = useState<string | null>(
+    null,
+  );
+  const [forgotStep, setForgotStep] = useState<'request' | 'reset' | 'done'>(
+    'request',
+  );
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // Help & Suporte IA + Escalonamento para Moderador Humano
+  // Sistema Oficial de Tickets Salvos (Tela Inicial -> Community Manager)
+  const GUEST_TICKETS_STORAGE_KEY = 'starlight_guest_ticket_ids_v1';
+  const { supportTickets, refreshSupportTickets } = useGlobalState();
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [helpUsername, setHelpUsername] = useState('');
-  const [helpCategory, setHelpCategory] = useState<SupportTicket['category']>('login');
+  const [helpEmail, setHelpEmail] = useState('');
+  const [helpCategory, setHelpCategory] =
+    useState<SupportTicket['category']>('login');
+  const [helpSubject, setHelpSubject] = useState('');
   const [helpInput, setHelpInput] = useState('');
   const [helpLoading, setHelpLoading] = useState(false);
-  const [helpEscalatedId, setHelpEscalatedId] = useState<string | null>(null);
-  const [helpMessages, setHelpMessages] = useState<SupportChatMessage[]>([
-    {
-      id: 'help_welcome',
-      senderRole: 'ai_bot',
-      senderName: 'Suporte IA · Moderação',
-      text: 'Olá! Sou o assistente de suporte do Starlight Atelier. Posso tirar dúvidas sobre acesso, senha, StarCoins, regras ou encaminhar seu caso diretamente para um Moderador Humano.',
-      createdAt: Date.now(),
-    },
-  ]);
+  const [helpFeedback, setHelpFeedback] = useState<string | null>(null);
+  const [selectedGuestTicketId, setSelectedGuestTicketId] = useState<string | null>(null);
+  const [ticketReplyInput, setTicketReplyInput] = useState('');
+  const [savedGuestTicketIds, setSavedGuestTicketIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(GUEST_TICKETS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (showHelpModal) {
+      void refreshSupportTickets();
+    }
+  }, [refreshSupportTickets, showHelpModal]);
+
+  const myLoginTickets = useMemo(() => {
+    const typedName = (helpUsername || loginUsername).trim().toLowerCase();
+    return supportTickets.filter(
+      (t) =>
+        savedGuestTicketIds.includes(t.id) ||
+        (typedName.length >= 2 && t.requesterUsername.trim().toLowerCase() === typedName),
+    );
+  }, [helpUsername, loginUsername, savedGuestTicketIds, supportTickets]);
+
+  const activeGuestTicket = useMemo(
+    () => myLoginTickets.find((t) => t.id === selectedGuestTicketId) ?? null,
+    [myLoginTickets, selectedGuestTicketId],
+  );
 
   const isAuthorizedAdminEmailEntered =
     loginUsername.trim().toLowerCase() === ADMIN_OWNER_EMAIL;
 
   const handleOpenHelpModal = () => {
     setHelpUsername((prev) => prev || loginUsername.trim());
-    setHelpEscalatedId(null);
+    setHelpFeedback(null);
     setShowHelpModal(true);
+    void refreshSupportTickets();
   };
 
-  const handleAskHelpAi = async (promptText?: string) => {
-    const text = (promptText ?? helpInput).trim();
+  const rememberGuestTicketId = (ticketId: string) => {
+    setSavedGuestTicketIds((prev) => {
+      const next = prev.includes(ticketId) ? prev : [ticketId, ...prev].slice(0, 40);
+      try {
+        window.localStorage.setItem(GUEST_TICKETS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Silencioso
+      }
+      return next;
+    });
+  };
+
+  const handleCreateLoginTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = helpInput.trim();
     if (!text || helpLoading) return;
-    const playerMsg: SupportChatMessage = {
-      id: `pmsg_${Date.now()}`,
-      senderRole: 'player',
-      senderName: helpUsername.trim() || 'Visitante',
-      text,
-      createdAt: Date.now(),
-    };
-    const nextHistory = [...helpMessages, playerMsg];
-    setHelpMessages(nextHistory);
-    if (!promptText) setHelpInput('');
     setHelpLoading(true);
+    setHelpFeedback(null);
 
-    try {
-      const res = await fetch('/api/support/ask-ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: text,
-          username: helpUsername.trim() || loginUsername.trim() || 'Visitante',
-          history: nextHistory.map((m) => ({
-            senderRole: m.senderRole,
-            text: m.text,
-          })),
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; reply?: string };
-      const replyText =
-        data.reply ||
-        'Não consegui consultar o servidor agora. Clique em "Encaminhar para Moderador Humano" para registrar seu chamado na fila oficial.';
-      setHelpMessages((prev) => [
-        ...prev,
-        {
-          id: `aimsg_${Date.now()}`,
-          senderRole: 'ai_bot',
-          senderName: 'Suporte IA · Moderação',
-          text: replyText,
-          createdAt: Date.now(),
-        },
-      ]);
-    } catch {
-      setHelpMessages((prev) => [
-        ...prev,
-        {
-          id: `aimsg_err_${Date.now()}`,
-          senderRole: 'ai_bot',
-          senderName: 'Suporte IA · Moderação',
-          text: 'Conexão instável no momento. Você pode clicar em "Encaminhar para Moderador Humano" para enviar seu chamado assim que possível.',
-          createdAt: Date.now(),
-        },
-      ]);
-    } finally {
-      setHelpLoading(false);
-    }
-  };
-
-  const handleEscalateToModerator = async () => {
-    if (helpLoading) return;
-    setHelpLoading(true);
     try {
       const requester =
         helpUsername.trim() || loginUsername.trim() || 'Visitante_Login';
-      const lastPlayerText =
-        [...helpMessages].reverse().find((m) => m.senderRole === 'player')?.text ||
-        'Solicitação de atendimento humano pela tela de Login';
+      const firstMsg: SupportChatMessage = {
+        id: `pmsg_${Date.now()}`,
+        senderRole: 'player',
+        sender: 'user',
+        senderName: requester,
+        text,
+        createdAt: Date.now(),
+      };
       const res = await fetch('/api/support/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           requesterUsername: requester,
+          email: helpEmail.trim() || undefined,
           category: helpCategory,
-          subject: lastPlayerText.slice(0, 90),
-          messages: helpMessages,
-          escalateToHuman: true,
+          serverRegion: regServerRegion,
+          subject: (helpSubject.trim() || text).slice(0, 90),
+          messages: [firstMsg],
         }),
       });
-      const data = (await res.json()) as { ok?: boolean; ticket?: SupportTicket };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        ticket?: SupportTicket;
+        error?: string;
+      };
       if (data.ok && data.ticket) {
-        setHelpEscalatedId(data.ticket.id);
+        rememberGuestTicketId(data.ticket.id);
+        setSelectedGuestTicketId(data.ticket.id);
+        setHelpInput('');
+        setHelpSubject('');
+        setHelpFeedback(
+          `Ticket #${data.ticket.id} enviado e salvo! O Community Manager responderá diretamente aqui e a conversa ficará visível para ambos.`,
+        );
         soundEngine.playPurchase();
-        setHelpMessages((prev) => [
-          ...prev,
-          {
-            id: `sys_esc_${Date.now()}`,
-            senderRole: 'ai_bot',
-            senderName: 'Sistema de Moderação',
-            text: `Chamado #${data.ticket?.id} encaminhado com sucesso para a fila dos Moderadores Humanos! Assim que acessar ou conferir a aba Moderação, sua demanda estará registrada.`,
-            createdAt: Date.now(),
-          },
-        ]);
+        await refreshSupportTickets();
+      } else {
+        setHelpFeedback(data.error || 'Não foi possível criar o Ticket.');
       }
     } catch {
-      // Silencioso
+      setHelpFeedback('Erro de conexão ao enviar Ticket para o servidor.');
+    } finally {
+      setHelpLoading(false);
+    }
+  };
+
+  const handleSendGuestTicketReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeGuestTicket || helpLoading) return;
+    const text = ticketReplyInput.trim();
+    if (!text) return;
+    setHelpLoading(true);
+    try {
+      const requester =
+        helpUsername.trim() || activeGuestTicket.requesterUsername || 'Jogador';
+      const res = await fetch(`/api/support/tickets/${activeGuestTicket.id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          senderName: requester,
+          senderRole: 'player',
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (data.ok) {
+        setTicketReplyInput('');
+        soundEngine.playPurchase();
+        await refreshSupportTickets();
+      } else {
+        setHelpFeedback(data.error || 'Não foi possível enviar sua resposta.');
+      }
+    } catch {
+      setHelpFeedback('Falha de rede ao enviar resposta no Ticket.');
     } finally {
       setHelpLoading(false);
     }
@@ -233,7 +338,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         account?: UserAccount;
         progress?: Parameters<typeof syncAccountAndProgressFromServer>[0]['progress'];
         accounts?: UserAccount[];
-        worldState?: Parameters<typeof syncAccountAndProgressFromServer>[0]['worldState'];
+        worldState?: Parameters<
+          typeof syncAccountAndProgressFromServer
+        >[0]['worldState'];
       };
       if (data.ok && data.account) {
         syncAccountAndProgressFromServer({
@@ -252,7 +359,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         return;
       }
     } catch {
-      // Continua para fallback local apenas se servidor inacessível
+      // Fallback local apenas se servidor inacessível
     } finally {
       setAuthSubmitting(false);
     }
@@ -294,7 +401,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         account?: UserAccount;
         progress?: Parameters<typeof syncAccountAndProgressFromServer>[0]['progress'];
         accounts?: UserAccount[];
-        worldState?: Parameters<typeof syncAccountAndProgressFromServer>[0]['worldState'];
+        worldState?: Parameters<
+          typeof syncAccountAndProgressFromServer
+        >[0]['worldState'];
       };
       if (data.ok && data.account) {
         syncAccountAndProgressFromServer({
@@ -334,83 +443,114 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     onAuthenticated(fallback.account);
   };
 
-  // Pré-visualização ao vivo do avatar durante o cadastro
-  const previewOutfit =
-    regAvatarGender === 'masculino'
-      ? {
-          cabelo: 'hair_corte_executivo',
-          blusas: 'top_camisa_social_azul',
-          calcas: 'bottom_chino_areia',
-          sapatos: 'shoes_oxford_couro',
-        }
-      : regAvatarGender === 'neutro'
-        ? {
-            cabelo: 'hair_coque_atelier',
-            blusas: 'top_camisa_seda',
-            calcas: 'bottom_calca_alfaiataria',
-            sapatos: 'shoes_tenis_branco',
-          }
-        : {
-            cabelo: 'hair_ondas_mel',
-            blusas: 'top_camisa_seda',
-            calcas: 'bottom_saia_midi',
-            sapatos: 'shoes_scarpin_preto',
-          };
-
   return (
-    <div className="min-h-screen bg-[#FAF8F5] text-[#1C1917] flex flex-col justify-center px-4 py-10">
-      <div className="max-w-5xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-        {/* Coluna Esquerda: Logotipo ilustrado Starlight Atelier + prévia da MeDoll */}
-        <section className="lg:col-span-5 bg-white border border-[#E6E0D8] rounded-xl p-8 flex flex-col justify-between">
-          <div>
-            {/* Arte e Logotipo Oficial Starlight Atelier */}
-            <div className="flex items-center gap-4 pb-5 border-b border-[#EFEAE3]">
-              <div className="w-16 h-16 rounded-2xl overflow-hidden border border-[#E6D5B8] bg-[#FAF4EC] shrink-0 shadow-xs">
+    <div
+      className="min-h-screen w-full relative overflow-hidden flex items-center justify-center px-4 py-8 sm:px-6 lg:px-10 text-[#2E2520]"
+      style={{
+        backgroundColor: '#E8DFD3',
+        backgroundImage:
+          'radial-gradient(circle at 22% 24%, rgba(255,252,247,0.72) 0%, rgba(232,223,211,0.35) 48%, rgba(214,200,183,0.68) 100%), repeating-linear-gradient(0deg, rgba(130,112,92,0.03) 0px, rgba(130,112,92,0.03) 1px, transparent 1px, transparent 4px), repeating-linear-gradient(90deg, rgba(130,112,92,0.025) 0px, rgba(130,112,92,0.025) 1px, transparent 1px, transparent 4px)',
+      }}
+    >
+      {/* Ornamentos botânicos vintage nos cantos do fundo em linho */}
+      <BackdropBotanicalCorner className="fixed -bottom-10 -left-10 w-72 h-72 sm:w-96 sm:h-96 opacity-80" />
+      <BackdropBotanicalCorner className="fixed -top-10 -right-10 w-72 h-72 sm:w-96 sm:h-96 rotate-180 opacity-80" />
+      <BackdropBotanicalCorner className="fixed -bottom-16 -right-10 w-64 h-64 sm:w-80 sm:h-80 -scale-x-100 opacity-65" />
+
+      {/* Container principal com os dois cartões editoriais */}
+      <div className="relative z-10 w-full max-w-[1060px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-7 items-stretch">
+        {/* CARTÃO ESQUERDO: Apresentação / Boutique */}
+        <section className="lg:col-span-6 bg-[#FCFBF8] rounded-xl p-2.5 shadow-[0_14px_34px_rgba(61,44,31,0.13)] border border-[#D8CBB8] flex flex-col">
+          <div className="relative flex-1 border border-[#C6B18B]/80 rounded-lg px-6 py-7 sm:px-8 sm:py-8 flex flex-col justify-between bg-[#FCFBF8]">
+            {/* Cantos com filigrana dourada */}
+            <GoldCornerFiligree className="absolute top-1.5 left-1.5" />
+            <GoldCornerFiligree className="absolute top-1.5 right-1.5 -scale-x-100" />
+            <GoldCornerFiligree className="absolute bottom-1.5 left-1.5 -scale-y-100" />
+            <GoldCornerFiligree className="absolute bottom-1.5 right-1.5 rotate-180" />
+
+            {/* Cabeçalho centralizado com emblema floral + título serifado */}
+            <header className="flex items-center justify-center gap-3.5 pt-1 pb-4">
+              <div className="w-16 h-16 sm:w-[70px] sm:h-[70px] shrink-0 flex items-center justify-center">
                 <img
-                  src={logoBannerImg}
-                  alt="Emblema Starlight Atelier"
+                  src={floralCrestImg}
+                  alt="Emblema Floral Starlight Atelier"
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover object-top"
+                  className="w-full h-full object-contain mix-blend-multiply"
                 />
               </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-[#C8235D] flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-[#D4A853]" />
-                  Boutique &amp; Suíte 2D
-                </p>
-                <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#1C1917] tracking-tight leading-none mt-1">
+              <div className="text-left">
+                <h1 className="font-display text-[32px] sm:text-[38px] font-semibold text-[#3C2F28] tracking-tight leading-none">
                   Starlight Atelier
                 </h1>
+                <p className="text-xs sm:text-[13px] text-[#7A6D63] tracking-wide mt-1 text-center sm:text-left">
+                  Floral-pattern boutique
+                </p>
+              </div>
+            </header>
+
+            {/* Corpo intermediário: texto à esquerda e moldura do casal à direita */}
+            <div className="my-4 grid grid-cols-1 sm:grid-cols-12 gap-5 items-center">
+              <div className="sm:col-span-6 flex flex-col justify-center">
+                <p className="text-[13px] sm:text-sm font-medium tracking-[0.07em] uppercase text-[#6E5F53] text-center">
+                  BOUTIQUE &amp; SUÍTE 2D
+                </p>
+
+                {/* Linha ornamental com losango central */}
+                <div
+                  className="flex items-center justify-center gap-2 my-3"
+                  aria-hidden="true"
+                >
+                  <span className="h-[1px] flex-1 bg-gradient-to-r from-transparent to-[#C3AC84]" />
+                  <span className="w-1.5 h-1.5 rotate-45 bg-[#B7965B]" />
+                  <span className="h-[1px] flex-1 bg-gradient-to-l from-transparent to-[#C3AC84]" />
+                </div>
+
+                <p className="font-display text-[17px] sm:text-[18px] text-[#2D231E] leading-[1.48] tracking-[-0.005em] text-left">
+                  Crie sua boneca em camadas com traços realistas, conquiste
+                  coleções exclusivas na Starplaza, decore sua Suíte 2D e
+                  explore salas temáticas com estilistas do mundo todo.
+                </p>
+              </div>
+
+              {/* Moldura Clássica Ornamentada com Ilustração do Casal */}
+              <div className="sm:col-span-6 flex justify-center">
+                <div className="relative p-2 bg-[#F7F1E6] rounded-xl border border-[#C6AF88] shadow-[0_6px_18px_rgba(61,44,31,0.12)] w-full max-w-[235px]">
+                  <GoldCornerFiligree className="w-6 h-6 absolute -top-1 -left-1 z-10" />
+                  <GoldCornerFiligree className="w-6 h-6 absolute -top-1 -right-1 -scale-x-100 z-10" />
+                  <GoldCornerFiligree className="w-6 h-6 absolute -bottom-1 -left-1 -scale-y-100 z-10" />
+                  <GoldCornerFiligree className="w-6 h-6 absolute -bottom-1 -right-1 rotate-180 z-10" />
+                  <div className="rounded-lg overflow-hidden border border-[#B59763]/70 bg-[#2C201B] aspect-[3/4]">
+                    <img
+                      src={couplePortraitImg}
+                      alt="Casal elegante no Starlight Atelier"
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover object-top"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            <p className="text-sm text-[#57534E] mt-4 leading-relaxed">
-              Crie sua boneca em camadas com traços realistas, conquiste coleções exclusivas na Starplaza, decore sua Suíte 2D e explore salas temáticas com estilistas do mundo todo.
-            </p>
-          </div>
-
-          <div className="my-6 rounded-xl bg-gradient-to-b from-[#FAF6F0] to-[#F3ECE1] border border-[#EFEAE3] h-72 flex items-center justify-center relative overflow-hidden">
-            <div className="w-44 h-64" aria-hidden="true">
-              <MeDollSvg
-                equipped={previewOutfit}
-                skinTone="pessego"
-                avatarGender={mode === 'register' ? regAvatarGender : 'feminino'}
-              />
+            {/* Rodapé do cartão esquerdo com os dois destaques */}
+            <div className="pt-4 flex flex-wrap items-center justify-center sm:justify-between gap-2.5">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#EFECE6] border border-[#CCC3B7] text-xs font-medium text-[#2E2520] whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+                <Layers className="w-3.5 h-3.5 text-[#3C2F28] shrink-0" />
+                <span>Moda em Camadas · Servidores BR, ES &amp; EN</span>
+              </div>
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#EFECE6] border border-[#CCC3B7] text-xs font-medium text-[#2E2520] font-mono-num whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+                <Coins className="w-3.5 h-3.5 text-[#3C2F28] shrink-0" />
+                <span>1.200 AM iniciais</span>
+              </div>
             </div>
-          </div>
-
-          <div className="pt-4 border-t border-[#EFEAE3] flex items-center justify-between gap-3 text-xs text-[#6B645D]">
-            <span>Moda em Camadas · Servidores BR, ES &amp; EN</span>
-            <span className="font-mono-num text-[#C8235D] font-semibold">1.200 SC iniciais</span>
           </div>
         </section>
 
-        {/* Coluna Direita: Formulário de Entrar / Criar Nova Conta */}
-        <section className="lg:col-span-7 bg-white border border-[#E6E0D8] rounded-xl p-8 flex flex-col justify-between">
-          <div>
-            {/* Abas de alternância */}
+        {/* CARTÃO DIREITO: Fichário de Login / Criar Nova Conta */}
+        <section className="lg:col-span-6 bg-[#EAE1D5] rounded-xl p-5 sm:p-7 border border-[#D4C7B6] shadow-[0_14px_34px_rgba(61,44,31,0.13)] flex flex-col justify-between">
+          <div className="flex-1 flex flex-col">
+            {/* Abas superiores em estilo fichário conectado ao corpo */}
             <div
-              className="grid grid-cols-2 gap-1 p-1 bg-[#F5F2EC] rounded-xl mb-6"
+              className="grid grid-cols-2 items-end relative z-10 -mb-[1px]"
               role="tablist"
               aria-label="Modo de autenticação"
             >
@@ -419,10 +559,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                 role="tab"
                 aria-selected={mode === 'login'}
                 onClick={() => handleSwitchMode('login')}
-                className={`py-2.5 text-sm font-semibold rounded-lg transition-colors cursor-pointer ${
+                className={`py-3 text-sm sm:text-[15px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   mode === 'login'
-                    ? 'bg-white text-[#1C1917] shadow-xs'
-                    : 'text-[#6B645D] hover:text-[#1C1917]'
+                    ? 'bg-[#FAF8F4] text-[#3B2E28] rounded-t-xl border-t border-l border-r border-[#D6CEC2] shadow-[0_-2px_6px_rgba(61,44,31,0.04)]'
+                    : 'bg-transparent text-[#54473E] hover:text-[#2E2520] rounded-t-xl'
                 }`}
               >
                 Entrar
@@ -432,272 +572,306 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                 role="tab"
                 aria-selected={mode === 'register'}
                 onClick={() => handleSwitchMode('register')}
-                className={`py-2.5 text-sm font-semibold rounded-lg transition-colors cursor-pointer ${
+                className={`py-3 text-sm sm:text-[15px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   mode === 'register'
-                    ? 'bg-white text-[#1C1917] shadow-xs'
-                    : 'text-[#6B645D] hover:text-[#1C1917]'
+                    ? 'bg-[#FAF8F4] text-[#3B2E28] rounded-t-xl border-t border-l border-r border-[#D6CEC2] shadow-[0_-2px_6px_rgba(61,44,31,0.04)]'
+                    : 'bg-transparent text-[#54473E] hover:text-[#2E2520] rounded-t-xl'
                 }`}
               >
                 Criar Nova Conta
               </button>
             </div>
 
-            {errorMsg && (
-              <div
-                role="alert"
-                className="mb-5 px-4 py-3 rounded-lg bg-[#FEF2F2] border border-[#FECACA] text-xs font-medium text-[#B91C1C]"
-              >
-                {errorMsg}
-              </div>
-            )}
-
-            {mode === 'login' ? (
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                <div>
-                  <h2 className="font-display text-2xl font-bold text-[#1C1917]">
-                    Acessar seu Atelier
-                  </h2>
-                  <p className="text-xs text-[#6B645D] mt-0.5">
-                    Entre com seu E-mail ou Nome do Avatar para sincronizar seu guarda-roupa e Suíte em tempo real.
-                  </p>
+            {/* Corpo do fichário */}
+            <div
+              className={`bg-[#FAF8F4] border border-[#D6CEC2] shadow-[0_8px_22px_rgba(61,44,31,0.08)] px-6 sm:px-9 py-7 sm:py-8 flex-1 flex flex-col justify-center ${
+                mode === 'login'
+                  ? 'rounded-b-xl rounded-tr-xl'
+                  : 'rounded-b-xl rounded-tl-xl'
+              }`}
+            >
+              {errorMsg && (
+                <div
+                  role="alert"
+                  className="mb-4 px-4 py-2.5 rounded-lg bg-[#FEF2F2] border border-[#FECACA] text-xs font-medium text-[#B91C1C]"
+                >
+                  {errorMsg}
                 </div>
+              )}
 
-                <label className="block">
-                  <span className="text-xs font-semibold text-[#44403C]">
-                    E-mail ou Nome do Avatar
-                  </span>
-                  <div className="relative mt-1.5">
-                    <User className="w-4 h-4 text-[#78716C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      required
-                      autoComplete="username"
-                      value={loginUsername}
-                      onChange={(e) => setLoginUsername(e.target.value)}
-                      placeholder="Ex: clara_couture ou seu@email.com"
-                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                    />
+              {mode === 'login' ? (
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
+                  <div className="text-center pb-1">
+                    <h2 className="font-display text-3xl sm:text-[34px] font-semibold text-[#1E1815] leading-tight">
+                      Acessar seu Atelier
+                    </h2>
+                    <p className="text-xs sm:text-[13px] text-[#4A3F38] mt-1.5 leading-relaxed max-w-sm mx-auto">
+                      Entre com seu E-mail ou Nome do Avatar para sincronizar seu
+                      guarda-roupa e Suíte em tempo real.
+                    </p>
                   </div>
-                </label>
 
-                {isAuthorizedAdminEmailEntered && (
-                  <div className="px-3.5 py-2.5 rounded-lg bg-[#F0F9FF] border border-[#BAE6FD] flex items-center gap-2 text-xs text-[#0C4A6E]">
-                    <ShieldCheck className="w-4 h-4 text-[#0284C7] shrink-0" />
-                    <span>
-                      Identidade de Administração Geral reconhecida ({ADMIN_OWNER_EMAIL}). Informe sua senha para autenticar.
-                    </span>
+                  {/* Campo Email/Nome */}
+                  <div className="pt-1">
+                    <label htmlFor="login-identifier" className="sr-only">
+                      Email/Nome
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-[#736961] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="login-identifier"
+                        type="text"
+                        required
+                        autoComplete="username"
+                        value={loginUsername}
+                        onChange={(e) => setLoginUsername(e.target.value)}
+                        placeholder="Email/Nome"
+                        className="w-full pl-10 pr-4 py-3 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] focus:bg-[#F3F0EB] transition-colors"
+                      />
+                    </div>
                   </div>
-                )}
 
-                <label className="block">
-                  <span className="text-xs font-semibold text-[#44403C]">Senha</span>
-                  <div className="relative mt-1.5">
-                    <Lock className="w-4 h-4 text-[#78716C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="password"
-                      required
-                      autoComplete="current-password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="Sua senha"
-                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                    />
+                  {isAuthorizedAdminEmailEntered && (
+                    <div className="px-3.5 py-2 rounded-lg bg-[#F0F9FF] border border-[#BAE6FD] flex items-center gap-2 text-xs text-[#0C4A6E]">
+                      <ShieldCheck className="w-4 h-4 text-[#0284C7] shrink-0" />
+                      <span>
+                        Identidade de Administração Geral reconhecida (
+                        {ADMIN_OWNER_EMAIL}). Informe sua senha para autenticar.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Campo Senha */}
+                  <div>
+                    <label htmlFor="login-password" className="sr-only">
+                      Senha
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-[#736961] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="login-password"
+                        type="password"
+                        required
+                        autoComplete="current-password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="Senha"
+                        className="w-full pl-10 pr-4 py-3 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] focus:bg-[#F3F0EB] transition-colors"
+                      />
+                    </div>
                   </div>
-                </label>
 
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#6B645D]">Autenticação centralizada com hash seguro</span>
-                  <div className="flex flex-col items-end gap-1.5">
+                  {/* Linha: Esqueci minha senha & Help - Suporte IA */}
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
                     <button
                       type="button"
                       onClick={() => {
                         setShowForgotModal(true);
-                        setForgotEmail('');
+                        setForgotEmail(
+                          loginUsername.includes('@') ? loginUsername : '',
+                        );
                         setForgotToken('');
                         setForgotNewPassword('');
                         setForgotPreviewToken(null);
                         setForgotError(null);
                         setForgotStep('request');
                       }}
-                      className="text-[#C8235D] hover:underline font-medium cursor-pointer"
+                      className="text-xs sm:text-[13px] font-medium text-[#3C312B] hover:text-[#761334] hover:underline transition-colors cursor-pointer"
                     >
                       Esqueci minha senha
                     </button>
+
                     <button
                       type="button"
                       onClick={handleOpenHelpModal}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C1917] hover:bg-[#332E2B] text-white text-[11px] font-semibold shadow-sm transition-all cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EAE5DD] hover:bg-[#E1D9CD] border border-[#C8BFB2] text-xs sm:text-[13px] font-medium text-[#2D2521] transition-colors cursor-pointer whitespace-nowrap"
                     >
-                      <LifeBuoy className="w-3.5 h-3.5 text-[#F59EB8]" />
-                      Help · Suporte IA
+                      <span>Ticket</span>
+                      <MessageCircle className="w-3.5 h-3.5 text-[#5A4F47]" />
                     </button>
                   </div>
-                </div>
 
-                <button
-                  type="submit"
-                  disabled={authSubmitting}
-                  className="w-full mt-2 inline-flex items-center justify-center gap-2 py-3 px-4 text-sm font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
-                >
-                  <KeyRound className="w-4 h-4" />
-                  {authSubmitting ? 'Autenticando...' : 'Entrar no Jogo'}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleRegisterSubmit} className="space-y-4">
-                <div>
-                  <h2 className="font-display text-2xl font-bold text-[#1C1917]">
-                    Criar Nova Conta
-                  </h2>
-                  <p className="text-xs text-[#6B645D] mt-0.5">
-                    Você começa com 1.200 Lumes (LM) e bônus de boas-vindas para personalizar sua MeDoll.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <label className="block">
-                    <span className="text-xs font-semibold text-[#44403C]">
-                      Nome de usuário
+                  {/* Botão Principal Vinho */}
+                  <button
+                    type="submit"
+                    disabled={authSubmitting}
+                    className="w-full mt-2 inline-flex items-center justify-center gap-2 py-3.5 px-4 text-[15px] font-medium text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-60 rounded-lg shadow-[0_6px_14px_rgba(118,19,52,0.28)] transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>
+                      {authSubmitting ? 'Autenticando...' : 'Entrar no Jogo'}
                     </span>
-                    <div className="relative mt-1.5">
-                      <User className="w-4 h-4 text-[#78716C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        required
-                        value={regUsername}
-                        onChange={(e) => setRegUsername(e.target.value)}
-                        placeholder="ex: sofia_style"
-                        className="w-full pl-10 pr-4 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                      />
-                    </div>
-                  </label>
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+                  <div className="text-center pb-1">
+                    <h2 className="font-display text-2xl sm:text-[28px] font-semibold text-[#1E1815] leading-tight">
+                      Criar Nova Conta
+                    </h2>
+                    <p className="text-xs text-[#4A3F38] mt-1">
+                      Você começa com 1.200 AM iniciais para personalizar sua
+                      MeDoll e Suíte.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-medium text-[#443933]">
+                        Nome de usuário
+                      </span>
+                      <div className="relative mt-1">
+                        <User className="w-4 h-4 text-[#736961] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          required
+                          value={regUsername}
+                          onChange={(e) => setRegUsername(e.target.value)}
+                          placeholder="ex: sofia_style"
+                          className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        />
+                      </div>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-medium text-[#443933]">
+                        E-mail
+                      </span>
+                      <div className="relative mt-1">
+                        <Mail className="w-4 h-4 text-[#736961] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="email"
+                          required
+                          value={regEmail}
+                          onChange={(e) => setRegEmail(e.target.value)}
+                          placeholder="voce@exemplo.com"
+                          className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        />
+                      </div>
+                    </label>
+                  </div>
 
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#44403C]">E-mail</span>
-                    <div className="relative mt-1.5">
-                      <Mail className="w-4 h-4 text-[#78716C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <span className="text-xs font-medium text-[#443933]">
+                      Senha
+                    </span>
+                    <div className="relative mt-1">
+                      <Lock className="w-4 h-4 text-[#736961] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
-                        type="email"
+                        type="password"
                         required
-                        value={regEmail}
-                        onChange={(e) => setRegEmail(e.target.value)}
-                        placeholder="voce@exemplo.com"
-                        className="w-full pl-10 pr-4 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                        minLength={4}
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="Mínimo de 4 caracteres"
+                        className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                       />
                     </div>
                   </label>
-                </div>
 
-                <label className="block">
-                  <span className="text-xs font-semibold text-[#44403C]">Senha</span>
-                  <div className="relative mt-1.5">
-                    <Lock className="w-4 h-4 text-[#78716C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="password"
-                      required
-                      minLength={4}
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      placeholder="Mínimo de 4 caracteres"
-                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                    />
+                  <div>
+                    <span className="block text-xs font-medium text-[#443933] mb-1.5">
+                      Seleção de Gênero / Avatar inicial
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {AVATAR_OPTIONS.map((opt) => {
+                        const active = regAvatarGender === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setRegAvatarGender(opt.id)}
+                            className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                              active
+                                ? 'border-[#761334] bg-[#761334]/[0.06]'
+                                : 'border-[#CFC8BE] bg-[#EAE7E2] hover:border-[#A99E90]'
+                            }`}
+                          >
+                            <p className="text-xs font-semibold text-[#1E1815]">
+                              {opt.label}
+                            </p>
+                            <p className="text-[10px] text-[#5C5149] mt-0.5 leading-tight">
+                              {opt.desc}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </label>
 
-                <div>
-                  <span className="block text-xs font-semibold text-[#44403C] mb-2">
-                    Seleção de Gênero / Avatar inicial
-                  </span>
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {AVATAR_OPTIONS.map((opt) => {
-                      const active = regAvatarGender === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => setRegAvatarGender(opt.id)}
-                          className={`p-3 rounded-lg border text-left transition-colors cursor-pointer ${
-                            active
-                              ? 'border-[#C8235D] bg-[#C8235D]/[0.05]'
-                              : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2]'
-                          }`}
-                        >
-                          <p className="text-xs font-semibold text-[#1C1917]">
-                            {opt.label}
-                          </p>
-                          <p className="text-[11px] text-[#6B645D] mt-0.5">
-                            {opt.desc}
-                          </p>
-                        </button>
-                      );
-                    })}
+                  <div>
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-[#443933] mb-1.5">
+                      <Globe className="w-3.5 h-3.5 text-[#761334]" />
+                      Servidor de Origem (Obrigatório)
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {SERVER_OPTIONS.map((srv) => {
+                        const active = regServerRegion === srv.id;
+                        return (
+                          <button
+                            key={srv.id}
+                            type="button"
+                            onClick={() => setRegServerRegion(srv.id)}
+                            className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                              active
+                                ? 'border-[#3B2E28] bg-[#3B2E28]/[0.06]'
+                                : 'border-[#CFC8BE] bg-[#EAE7E2] hover:border-[#A99E90]'
+                            }`}
+                          >
+                            <p className="text-xs font-semibold text-[#1E1815]">
+                              {srv.label}
+                            </p>
+                            <p className="text-[10px] text-[#5C5149] mt-0.5 leading-tight">
+                              {srv.desc}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-[#44403C] mb-2">
-                    <Globe className="w-3.5 h-3.5 text-[#C8235D]" />
-                    Servidor de Origem (Obrigatório)
-                  </span>
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {SERVER_OPTIONS.map((srv) => {
-                      const active = regServerRegion === srv.id;
-                      return (
-                        <button
-                          key={srv.id}
-                          type="button"
-                          onClick={() => setRegServerRegion(srv.id)}
-                          className={`p-3 rounded-lg border text-left transition-colors cursor-pointer ${
-                            active
-                              ? 'border-[#1C1917] bg-[#1C1917]/[0.04]'
-                              : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2]'
-                          }`}
-                        >
-                          <p className="text-xs font-semibold text-[#1C1917]">
-                            {srv.label}
-                          </p>
-                          <p className="text-[11px] text-[#6B645D] mt-0.5">
-                            {srv.desc}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full mt-2 inline-flex items-center justify-center gap-2 py-3 px-4 text-sm font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg transition-colors cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Criar Conta e Começar
-                </button>
-              </form>
-            )}
+                  <button
+                    type="submit"
+                    disabled={authSubmitting}
+                    className="w-full mt-1 inline-flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-60 rounded-lg shadow-[0_6px_14px_rgba(118,19,52,0.28)] transition-colors cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>
+                      {authSubmitting
+                        ? 'Criando conta...'
+                        : 'Criar Conta e Começar'}
+                    </span>
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
 
-          <p className="text-[11px] text-[#78716C] mt-6 pt-4 border-t border-[#EFEAE3]">
-            Suas contas, looks da MeDoll e posições da Suíte são sincronizados em tempo real no servidor multiplayer centralizado do Starlight Atelier.
+          <p className="text-xs text-[#4A3F38] text-center leading-relaxed mt-5 px-2">
+            Suas contas, looks da MeDoll e posições da Suíte são sincronizados
+            em tempo real no servidor multiplayer centralizado do Starlight
+            Atelier.
           </p>
         </section>
       </div>
 
+      {/* Modal de Recuperação de Senha */}
       {showForgotModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Redefinir senha"
         >
-          <div className="bg-white border border-[#E6E0D8] rounded-xl max-w-md w-full p-6 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE3]">
-              <h3 className="font-display text-xl font-bold text-[#1C1917]">
+          <div className="bg-[#FAF8F4] border border-[#D4C7B6] rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5DDD0]">
+              <h3 className="font-display text-xl font-bold text-[#1E1815]">
                 Recuperação de Senha
               </h3>
               <button
                 type="button"
                 onClick={() => setShowForgotModal(false)}
-                className="p-1 text-[#6B645D] hover:text-[#1C1917] cursor-pointer"
+                className="p-1 text-[#6B645D] hover:text-[#1E1815] cursor-pointer"
               >
                 ✕
               </button>
@@ -714,7 +888,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                 <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 space-y-2">
                   <p className="font-semibold">Senha redefinida com segurança!</p>
                   <p>
-                    Sua nova senha foi criptografada no servidor para a conta <strong>{forgotEmail}</strong>. Você já pode acessar normalmente.
+                    Sua nova senha foi criptografada no servidor para a conta{' '}
+                    <strong>{forgotEmail}</strong>. Você já pode acessar
+                    normalmente.
                   </p>
                   <button
                     type="button"
@@ -740,50 +916,61 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           newPassword: forgotNewPassword,
                         }),
                       });
-                      const data = (await res.json()) as { ok?: boolean; error?: string };
+                      const data = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                      };
                       if (data.ok) {
                         setForgotStep('done');
                         soundEngine.playPurchase();
                       } else {
-                        setForgotError(data.error || 'Código inválido ou expirado.');
+                        setForgotError(
+                          data.error || 'Código inválido ou expirado.',
+                        );
                       }
                     } catch {
-                      setForgotError('Erro de conexão com o servidor de autenticação.');
+                      setForgotError(
+                        'Erro de conexão com o servidor de autenticação.',
+                      );
                     } finally {
                       setForgotLoading(false);
                     }
                   }}
                   className="space-y-3"
                 >
-                  <div className="p-3 rounded-lg bg-[#FAF8F5] border border-[#E6E0D8] text-xs text-[#44403C]">
+                  <div className="p-3 rounded-lg bg-[#EAE7E2] border border-[#CFC8BE] text-xs text-[#3C312B]">
                     {forgotPreviewToken ? (
                       <>
-                        Código temporário gerado para <strong>{forgotEmail}</strong> (modo despacho local):{' '}
-                        <span className="font-mono font-bold text-[#C8235D] tracking-wider">
+                        Código temporário gerado para{' '}
+                        <strong>{forgotEmail}</strong> (modo despacho local):{' '}
+                        <span className="font-mono font-bold text-[#761334] tracking-wider">
                           {forgotPreviewToken}
                         </span>
                       </>
                     ) : (
                       <>
-                        Enviamos um código temporário de 6 dígitos para <strong>{forgotEmail}</strong>.
+                        Enviamos um código temporário de 6 dígitos para{' '}
+                        <strong>{forgotEmail}</strong>.
                       </>
                     )}
                   </div>
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#44403C]">
+                    <span className="text-xs font-semibold text-[#443933]">
                       Código de recuperação
                     </span>
                     <input
                       type="text"
                       required
                       value={forgotToken}
-                      onChange={(e) => setForgotToken(e.target.value.toUpperCase())}
+                      onChange={(e) =>
+                        setForgotToken(e.target.value.toUpperCase())
+                      }
                       placeholder="Ex: A1B2C3"
-                      className="mt-1.5 w-full px-3.5 py-2 text-sm font-mono uppercase bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                      className="mt-1.5 w-full px-3.5 py-2 text-sm font-mono uppercase bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#44403C]">
+                    <span className="text-xs font-semibold text-[#443933]">
                       Nova senha
                     </span>
                     <input
@@ -793,7 +980,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                       value={forgotNewPassword}
                       onChange={(e) => setForgotNewPassword(e.target.value)}
                       placeholder="Mínimo 4 caracteres"
-                      className="mt-1.5 w-full px-3.5 py-2 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                      className="mt-1.5 w-full px-3.5 py-2 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <div className="pt-2 flex items-center justify-end gap-2">
@@ -807,7 +994,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                     <button
                       type="submit"
                       disabled={forgotLoading}
-                      className="px-5 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                      className="px-5 py-2 text-xs font-semibold text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
                     >
                       {forgotLoading ? 'Validando...' : 'Confirmar Nova Senha'}
                     </button>
@@ -837,29 +1024,36 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         soundEngine.playPurchase();
                       } else {
                         setForgotError(
-                          data.error || 'Nenhuma conta localizada para este e-mail.',
+                          data.error ||
+                            'Nenhuma conta localizada para este e-mail.',
                         );
                       }
                     } catch {
-                      setForgotError('Não foi possível contatar o servidor de recuperação.');
+                      setForgotError(
+                        'Não foi possível contatar o servidor de recuperação.',
+                      );
                     } finally {
                       setForgotLoading(false);
                     }
                   }}
                   className="space-y-3"
                 >
-                  <p className="text-xs text-[#57534E]">
-                    Informe o e-mail cadastrado na sua conta do Starlight Atelier para gerar um código temporário de redefinição de senha.
+                  <p className="text-xs text-[#4E433C]">
+                    Informe o e-mail cadastrado na sua conta do Starlight
+                    Atelier para gerar um código temporário de redefinição de
+                    senha.
                   </p>
                   <label className="block">
-                    <span className="text-xs font-semibold text-[#44403C]">Seu e-mail</span>
+                    <span className="text-xs font-semibold text-[#443933]">
+                      Seu e-mail
+                    </span>
                     <input
                       type="email"
                       required
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="ex: voce@exemplo.com"
-                      className="mt-1.5 w-full px-3.5 py-2.5 text-sm bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                      className="mt-1.5 w-full px-3.5 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <div className="pt-2 flex items-center justify-end gap-2">
@@ -873,7 +1067,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                     <button
                       type="submit"
                       disabled={forgotLoading}
-                      className="px-5 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                      className="px-5 py-2 text-xs font-semibold text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
                     >
                       {forgotLoading ? 'Enviando...' : 'Enviar Código'}
                     </button>
@@ -885,163 +1079,288 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         </div>
       )}
 
-      {/* Modal de Help / Suporte IA & Fila de Moderadores Humanos */}
+      {/* Modal Oficial de Tickets Salvos (Atendimento Community Manager) */}
       {showHelpModal && (
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Central de Ajuda e Suporte IA"
+          aria-label="Central de Tickets Starlight Atelier"
         >
-          <div className="bg-white border border-[#E6E0D8] rounded-xl max-w-lg w-full p-5 shadow-2xl flex flex-col max-h-[88vh]">
-            <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE3]">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-[#1C1917] text-white flex items-center justify-center">
-                  <LifeBuoy className="w-4 h-4 text-[#F59EB8]" />
+          <div className="bg-[#FAF8F4] border border-[#D4C7B6] rounded-xl max-w-2xl w-full p-5 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5DDD0]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#3B2E28] text-white flex items-center justify-center">
+                  <LifeBuoy className="w-4 h-4 text-[#E6C792]" />
                 </div>
                 <div>
-                  <h3 className="font-display text-lg font-bold text-[#1C1917]">
-                    Help · Suporte Oficial
+                  <h3 className="font-display text-lg font-bold text-[#1E1815]">
+                    Ticket · Atendimento Community Manager
                   </h3>
-                  <p className="text-[11px] text-[#6B645D]">
-                    Atendimento IA imediato + escalonamento para Moderador Humano
+                  <p className="text-[11px] text-[#5C5149]">
+                    Suas perguntas e as respostas da Staff ficam salvas para ambos acompanharem a qualquer momento.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(false)}
-                className="p-1 text-[#6B645D] hover:text-[#1C1917] cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3">
-              <label className="block">
-                <span className="text-[11px] font-semibold text-[#44403C]">
-                  Seu @usuário ou nome
-                </span>
-                <input
-                  type="text"
-                  value={helpUsername}
-                  onChange={(e) => setHelpUsername(e.target.value)}
-                  placeholder="ex: clara_couture"
-                  className="mt-1 w-full px-3 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[11px] font-semibold text-[#44403C]">
-                  Assunto
-                </span>
-                <select
-                  value={helpCategory}
-                  onChange={(e) =>
-                    setHelpCategory(e.target.value as SupportTicket['category'])
-                  }
-                  className="mt-1 w-full px-3 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                >
-                  <option value="login">Login / Senha</option>
-                  <option value="ban_review">Revisão de Banimento</option>
-                  <option value="economia">StarCoins & VIP</option>
-                  <option value="bug">Erro ou Sala Travada</option>
-                  <option value="geral">Dúvida Geral</option>
-                </select>
-              </label>
-            </div>
-
-            {/* Chips de perguntas rápidas */}
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {[
-                'Não consigo fazer login',
-                'Quero revisão de banimento',
-                'Como ganhar StarCoins e VIP?',
-                'Uma sala está travada',
-              ].map((chip) => (
+              <div className="flex items-center gap-2">
                 <button
-                  key={chip}
                   type="button"
-                  onClick={() => void handleAskHelpAi(chip)}
-                  className="px-2.5 py-1 text-[11px] font-medium bg-[#FAF8F5] hover:bg-[#FCE8EF] text-[#44403C] hover:text-[#9E1646] border border-[#E6E0D8] rounded-lg transition-colors cursor-pointer"
+                  onClick={() => void refreshSupportTickets()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-[#EAE5DD] hover:bg-[#DDD5C9] text-[#3C312B] rounded-lg cursor-pointer"
                 >
-                  {chip}
+                  <RefreshCw className="w-3 h-3" />
+                  Atualizar
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setShowHelpModal(false)}
+                  className="p-1 text-[#6B645D] hover:text-[#1E1815] cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            {/* Histórico de mensagens */}
-            <div className="mt-3 flex-1 min-h-[200px] max-h-[280px] overflow-y-auto space-y-2.5 p-3 rounded-xl bg-[#FAF8F5] border border-[#EFEAE3]">
-              {helpMessages.map((msg) => {
-                const isPlayer = msg.senderRole === 'player';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isPlayer ? 'items-end' : 'items-start'}`}
-                  >
-                    <span className="text-[10px] font-semibold text-[#6B645D] mb-0.5">
-                      {msg.senderName}
-                    </span>
-                    <div
-                      className={`max-w-[85%] px-3 py-2 rounded-xl text-xs leading-relaxed ${
-                        isPlayer
-                          ? 'bg-[#C8235D] text-white'
-                          : 'bg-white border border-[#E6E0D8] text-[#1C1917]'
-                      }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                );
-              })}
-              {helpLoading && (
-                <div className="text-[11px] text-[#6B645D] italic">
-                  Consultando Staff IA...
+            {helpFeedback && (
+              <div className="mt-3 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900">
+                {helpFeedback}
+              </div>
+            )}
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
+              {/* Lista de Tickets salvos */}
+              <div className="md:col-span-5 flex flex-col gap-2 overflow-y-auto pr-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedGuestTicketId(null)}
+                  className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                    !selectedGuestTicketId
+                      ? 'bg-[#761334] text-white border-[#761334]'
+                      : 'bg-white text-[#3C312B] border-[#D4C7B6] hover:border-[#761334]'
+                  }`}
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  Abrir Novo Ticket
+                </button>
+
+                <div className="text-[11px] font-semibold text-[#5C5149] uppercase tracking-wider pt-1">
+                  Tickets Salvos ({myLoginTickets.length})
                 </div>
-              )}
-            </div>
 
-            {/* Input e Escalonamento */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleAskHelpAi();
-              }}
-              className="mt-3 flex items-center gap-2"
-            >
-              <input
-                type="text"
-                value={helpInput}
-                onChange={(e) => setHelpInput(e.target.value)}
-                placeholder="Descreva sua dúvida ou solicitação..."
-                className="flex-1 px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-              />
-              <button
-                type="submit"
-                disabled={helpLoading || !helpInput.trim()}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:opacity-50 rounded-lg cursor-pointer"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Perguntar
-              </button>
-            </form>
+                {myLoginTickets.length === 0 ? (
+                  <div className="p-3 rounded-lg bg-[#F2EDE5] border border-[#DDD4C7] text-[11px] text-[#5C5149]">
+                    Nenhum Ticket encontrado neste navegador ou para o @usuário digitado. Envie sua dúvida ao lado!
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {myLoginTickets.map((tkt) => {
+                      const active = selectedGuestTicketId === tkt.id;
+                      const badge =
+                        tkt.status === 'resolved'
+                          ? { label: 'Resolvido', cls: 'bg-emerald-100 text-emerald-800' }
+                          : tkt.status === 'answered'
+                            ? { label: 'Respondido', cls: 'bg-sky-100 text-sky-800' }
+                            : { label: 'Aberto', cls: 'bg-amber-100 text-amber-800' };
+                      return (
+                        <button
+                          key={tkt.id}
+                          type="button"
+                          onClick={() => setSelectedGuestTicketId(tkt.id)}
+                          className={`w-full text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-white border-[#761334] shadow-xs'
+                              : 'bg-[#F6F2EB] border-[#DDD4C7] hover:border-[#B7965B]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-mono text-[#6B645D]">
+                              #{tkt.id.slice(-8)}
+                            </span>
+                            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                          </div>
+                          <p className="text-xs font-bold text-[#1E1815] mt-1 line-clamp-1">
+                            {tkt.subject}
+                          </p>
+                          <p className="text-[10px] text-[#5C5149] mt-0.5">
+                            @{tkt.requesterUsername} · {tkt.messages.length} msg(ns)
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
-            <div className="mt-3 pt-2.5 border-t border-[#EFEAE3] flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] text-[#6B645D]">
-                {helpEscalatedId
-                  ? `Ticket registrado: ${helpEscalatedId}`
-                  : 'Não resolveu? Envie direto para um Moderador.'}
-              </span>
-              <button
-                type="button"
-                disabled={helpLoading || Boolean(helpEscalatedId)}
-                onClick={() => void handleEscalateToModerator()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-[#34D399]" />
-                {helpEscalatedId
-                  ? 'Enviado para Moderação'
-                  : 'Encaminhar para Moderador Humano'}
-              </button>
+              {/* Formulário de Novo Ticket ou Conversa do Ticket Salvo */}
+              <div className="md:col-span-7 flex flex-col min-h-0 bg-[#F2EDE5] border border-[#DDD4C7] rounded-xl p-3.5">
+                {activeGuestTicket ? (
+                  <>
+                    <div className="pb-2 border-b border-[#DDD4C7] flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-bold text-[#1E1815]">
+                          {activeGuestTicket.subject}
+                        </p>
+                        <p className="text-[10px] text-[#5C5149]">
+                          Ticket #{activeGuestTicket.id} · @{activeGuestTicket.requesterUsername}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded bg-white border border-[#D4C7B6] text-[#3C312B]">
+                        {activeGuestTicket.status === 'resolved' ? (
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        ) : (
+                          <Clock className="w-3 h-3 text-amber-600" />
+                        )}
+                        {activeGuestTicket.status === 'resolved'
+                          ? 'Resolvido'
+                          : activeGuestTicket.status === 'answered'
+                            ? 'Respondido pelo CM'
+                            : 'Aguardando Community Manager'}
+                      </span>
+                    </div>
+
+                    <div className="flex-1 min-h-[190px] max-h-[260px] overflow-y-auto space-y-2 py-3">
+                      {activeGuestTicket.messages.map((msg) => {
+                        const isPlayer = msg.senderRole === 'player';
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`flex flex-col ${isPlayer ? 'items-end' : 'items-start'}`}
+                          >
+                            <span className="text-[10px] font-semibold text-[#5C5149] mb-0.5">
+                              {msg.senderName} ·{' '}
+                              {new Date(msg.createdAt).toLocaleTimeString('pt-BR', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            <div
+                              className={`max-w-[85%] px-3 py-2 rounded-xl text-xs leading-relaxed ${
+                                isPlayer
+                                  ? 'bg-[#761334] text-white'
+                                  : 'bg-white border border-[#D4C7B6] text-[#1E1815]'
+                              }`}
+                            >
+                              {msg.text}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <form
+                      onSubmit={(e) => void handleSendGuestTicketReply(e)}
+                      className="pt-2 border-t border-[#DDD4C7] flex items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        value={ticketReplyInput}
+                        onChange={(e) => setTicketReplyInput(e.target.value)}
+                        placeholder="Responder ao Community Manager..."
+                        className="flex-1 px-3 py-2 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={helpLoading || !ticketReplyInput.trim()}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-50 rounded-lg cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Enviar
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <form
+                    onSubmit={(e) => void handleCreateLoginTicket(e)}
+                    className="space-y-2.5 flex-1 flex flex-col"
+                  >
+                    <p className="text-xs font-bold text-[#1E1815]">
+                      Enviar pergunta ao Community Manager
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-[#443933]">
+                          Seu @usuário ou nome
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          value={helpUsername}
+                          onChange={(e) => setHelpUsername(e.target.value)}
+                          placeholder="ex: clara_couture"
+                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-[#443933]">
+                          Categoria
+                        </span>
+                        <select
+                          value={helpCategory}
+                          onChange={(e) =>
+                            setHelpCategory(e.target.value as SupportTicket['category'])
+                          }
+                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        >
+                          <option value="login">Login / Senha</option>
+                          <option value="economia">Moedas AM &amp; VIP (Loja Premium)</option>
+                          <option value="ban_review">Revisão de Conta</option>
+                          <option value="bug">Erro Técnico</option>
+                          <option value="geral">Dúvida Geral</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-[#443933]">
+                          Assunto do Ticket
+                        </span>
+                        <input
+                          type="text"
+                          value={helpSubject}
+                          onChange={(e) => setHelpSubject(e.target.value)}
+                          placeholder="Resumo rápido..."
+                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-[#443933]">
+                          E-mail de contato (opcional)
+                        </span>
+                        <input
+                          type="email"
+                          value={helpEmail}
+                          onChange={(e) => setHelpEmail(e.target.value)}
+                          placeholder="voce@exemplo.com"
+                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        />
+                      </label>
+                    </div>
+                    <label className="block flex-1 flex flex-col">
+                      <span className="text-[11px] font-semibold text-[#443933]">
+                        Sua mensagem
+                      </span>
+                      <textarea
+                        rows={4}
+                        required
+                        value={helpInput}
+                        onChange={(e) => setHelpInput(e.target.value)}
+                        placeholder="Descreva sua dúvida ou solicitação. O Ticket ficará salvo para você e o Community Manager..."
+                        className="mt-1 w-full flex-1 px-3 py-2 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] resize-none"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={helpLoading || !helpInput.trim()}
+                      className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 text-xs font-semibold text-white bg-[#761334] hover:bg-[#5E0E28] disabled:opacity-50 rounded-lg cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      {helpLoading ? 'Salvando Ticket...' : 'Enviar Ticket Salvo'}
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
           </div>
         </div>

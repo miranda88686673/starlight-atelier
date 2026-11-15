@@ -12,6 +12,8 @@ import type {
   DesignPattern,
   ItemGenderStyle,
   PlayerProgressState,
+  PremiumOrder,
+  PremiumPixConfig,
   PrivateMessage,
   RoomDef,
   RoomDjQueuedTrack,
@@ -124,6 +126,7 @@ export interface DjMediaSyncPayload {
 /** Documento raiz persistido no banco centralizado do servidor */
 export interface ServerDatabaseDocument {
   version: number;
+  catalogSchemaVersion?: number;
   updatedAt: number;
   accounts: UserAccount[];
   worldState: WorldModerationState | null;
@@ -135,6 +138,8 @@ export interface ServerDatabaseDocument {
   presences: Record<string, PresenceHeartbeatRecord>;
   support_tickets: SupportTicket[];
   ban_reviews: BanReviewRequest[];
+  premium_orders?: PremiumOrder[];
+  premium_pix_config?: PremiumPixConfig;
   room_health: Record<string, RoomHealthMetric>;
   password_reset_tokens?: PasswordResetTokenRecord[];
 }
@@ -152,6 +157,8 @@ export interface StateSyncPatchPayload {
   roomsSnapshot?: SharedRoomsSnapshot;
   support_tickets?: SupportTicket[];
   ban_reviews?: BanReviewRequest[];
+  premium_orders?: PremiumOrder[];
+  premium_pix_config?: PremiumPixConfig;
   djTrackUpdate?: {
     roomId: RoomId;
     track: RoomDjTrack | null;

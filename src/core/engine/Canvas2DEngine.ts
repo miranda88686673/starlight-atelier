@@ -104,63 +104,227 @@ export class Canvas2DEngine {
     });
   }
 
-  /** Desenha a silhueta base anatômica ancorada ao rig */
+  /** Desenha a silhueta base anatômica ancorada ao rig (idêntica à folha de referência Masculino / Feminino) */
   private drawBaseMannequin(ctx: CanvasRenderingContext2D): void {
     const palette = SKIN_PALETTES[this.options.skinTone];
     const isMasc = this.options.avatarGender === 'masculino';
+    const layers = this.layerManager.getSortedLayers();
+    const hasHair = layers.some((l) => l.category === 'cabelo');
+    const hasTopOrDress = layers.some((l) => l.category === 'blusas' || l.category === 'vestidos');
+    const hasBottomOrDress = layers.some((l) => l.category === 'calcas' || l.category === 'vestidos');
+    const isFullMalhaBase = !hasTopOrDress && !hasBottomOrDress;
+
+    const ink = '#2B231F';
+    const limbFill = isFullMalhaBase ? '#8E9484' : palette.base;
 
     ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
     if (this.options.showShadow) {
       ctx.fillStyle = 'rgba(28, 25, 23, 0.14)';
       ctx.beginPath();
-      ctx.ellipse(110, 396, 46, 10, 0, 0, Math.PI * 2);
+      ctx.ellipse(110, 396, 46, 9, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Cabeça e pescoço
+    const shoulderHalf = isMasc ? 34 : 24;
+    const waistHalf = isMasc ? 22 : 17;
+    const hipHalf = isMasc ? 23 : 26.5;
+
+    // 1. Braços (esquerdo e direito) com pose anatômica diferenciada
+    const drawArm = (side: -1 | 1) => {
+      const shX = 110 + side * (shoulderHalf - 2);
+      const shY = 134;
+      const elbowX = 110 + side * (isMasc ? shoulderHalf + 5 : shoulderHalf + 11);
+      const elbowY = 182;
+      const wristX = 110 + side * (isMasc ? shoulderHalf + 8 : shoulderHalf + 21);
+      const wristY = 228;
+      const topW = isMasc ? 11 : 8;
+      const wristW = isMasc ? 5.5 : 4.2;
+
+      ctx.fillStyle = limbFill;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(shX - side * (topW * 0.45), shY);
+      ctx.quadraticCurveTo(elbowX - side * (topW * 0.55), elbowY, wristX - side * (wristW * 0.5), wristY);
+      ctx.lineTo(wristX + side * (wristW * 0.5), wristY);
+      ctx.quadraticCurveTo(elbowX + side * (topW * 0.65), elbowY, shX + side * (topW * 0.55), shY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Mão articulada em pele com 5 dedos
+      ctx.fillStyle = palette.base;
+      ctx.beginPath();
+      ctx.ellipse(wristX + side * 2, wristY + 11, isMasc ? 5.5 : 5, 10, side * (isMasc ? -0.05 : -0.18), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+    drawArm(-1);
+    drawArm(1);
+
+    // 2. Pernas segmentadas (coxa, joelho, panturrilha, tornozelo) + Pés descalços
+    const drawLeg = (side: -1 | 1) => {
+      const hipX = 110 + side * (isMasc ? 13 : 14);
+      const kneeX = 110 + side * (isMasc ? 12.5 : 12);
+      const ankleX = 110 + side * (isMasc ? 12 : 11);
+      const thighW = isMasc ? 10 : 10.5;
+      const kneeW = isMasc ? 7.5 : 7;
+      const ankleW = isMasc ? 5.2 : 4.5;
+
+      ctx.fillStyle = limbFill;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(hipX - thighW, 236);
+      ctx.quadraticCurveTo(kneeX - kneeW - 1, 305, ankleX - ankleW, 374);
+      ctx.lineTo(ankleX + ankleW, 374);
+      ctx.quadraticCurveTo(kneeX + kneeW + 1, 305, hipX + thighW, 236);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Contorno sutil do joelho
+      ctx.strokeStyle = isFullMalhaBase ? '#53584B' : palette.shadow;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(kneeX - 4.5, 304);
+      ctx.quadraticCurveTo(kneeX, 300, kneeX + 4.5, 304);
+      ctx.stroke();
+
+      // Pé descalço em pele com detalhe dos dedos
+      ctx.fillStyle = palette.base;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.35;
+      ctx.beginPath();
+      ctx.moveTo(ankleX - ankleW, 373);
+      ctx.lineTo(ankleX + ankleW, 373);
+      ctx.lineTo(ankleX + side * 4 + ankleW + 2, 392);
+      ctx.quadraticCurveTo(ankleX + side * 2, 396, ankleX - ankleW - 2, 392);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    };
+    drawLeg(-1);
+    drawLeg(1);
+
+    // 3. Pescoço e Tronco anatômico
     ctx.fillStyle = palette.base;
-    ctx.strokeStyle = palette.shadow;
-    ctx.lineWidth = 1.5;
-
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.roundRect(102, 105, 16, 22, 6);
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.ellipse(110, 74, isMasc ? 23 : 21, 26, 0, 0, Math.PI * 2);
+    ctx.roundRect(isMasc ? 101 : 103, 102, isMasc ? 18 : 14, 28, 5);
     ctx.fill();
     ctx.stroke();
 
-    // Tronco e quadris
-    const shoulderHalf = isMasc ? 32 : 25;
-    const waistHalf = isMasc ? 23 : 18;
-    const hipHalf = isMasc ? 24 : 26;
-
+    ctx.fillStyle = isFullMalhaBase ? '#8E9484' : palette.base;
     ctx.beginPath();
     ctx.moveTo(110 - shoulderHalf, 130);
     ctx.lineTo(110 + shoulderHalf, 130);
-    ctx.quadraticCurveTo(110 + waistHalf + 4, 175, 110 + waistHalf, 195);
-    ctx.quadraticCurveTo(110 + hipHalf, 220, 110 + hipHalf - 2, 240);
+    ctx.quadraticCurveTo(110 + waistHalf + 4, 174, 110 + waistHalf, 196);
+    ctx.quadraticCurveTo(110 + hipHalf + 1, 222, 110 + hipHalf - 2, 240);
     ctx.lineTo(110 - hipHalf + 2, 240);
-    ctx.quadraticCurveTo(110 - hipHalf, 220, 110 - waistHalf, 195);
-    ctx.quadraticCurveTo(110 - waistHalf - 4, 175, 110 - shoulderHalf, 130);
+    ctx.quadraticCurveTo(110 - hipHalf - 1, 222, 110 - waistHalf, 196);
+    ctx.quadraticCurveTo(110 - waistHalf - 4, 174, 110 - shoulderHalf, 130);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Pernas
+    // Contornos musculares/peitorais na malha base ou pele
+    ctx.strokeStyle = isFullMalhaBase ? '#53584B' : palette.shadow;
+    ctx.lineWidth = 1.1;
+    if (isMasc) {
+      ctx.beginPath();
+      ctx.moveTo(86, 154);
+      ctx.quadraticCurveTo(98, 162, 109, 155);
+      ctx.moveTo(134, 154);
+      ctx.quadraticCurveTo(122, 162, 111, 155);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(91, 156);
+      ctx.quadraticCurveTo(100, 163, 109, 157);
+      ctx.moveTo(129, 156);
+      ctx.quadraticCurveTo(120, 163, 111, 157);
+      ctx.stroke();
+    }
+
+    // 4. Cabeça esculpida (mandíbula quadrada masculina vs oval feminina)
+    ctx.fillStyle = palette.base;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.roundRect(110 - hipHalf + 4, 236, 17, 148, 8);
-    ctx.roundRect(110 + hipHalf - 21, 236, 17, 148, 8);
+    if (isMasc) {
+      ctx.moveTo(88, 68);
+      ctx.quadraticCurveTo(88, 46, 110, 46);
+      ctx.quadraticCurveTo(132, 46, 132, 68);
+      ctx.quadraticCurveTo(132, 90, 121, 99);
+      ctx.lineTo(110, 102);
+      ctx.lineTo(99, 99);
+      ctx.quadraticCurveTo(88, 90, 88, 68);
+    } else {
+      ctx.ellipse(110, 74, 20.5, 26, 0, 0, Math.PI * 2);
+    }
     ctx.fill();
     ctx.stroke();
 
-    // Braços
+    // Olhos, sobrancelhas e lábios
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.roundRect(110 - shoulderHalf - 11, 132, 11, 104, 5);
-    ctx.roundRect(110 + shoulderHalf, 132, 11, 104, 5);
+    ctx.ellipse(102, 72, 4.2, 2.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(118, 72, 4.2, 2.8, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+
+    ctx.fillStyle = '#2A221E';
+    ctx.beginPath();
+    ctx.arc(102, 72, 2.3, 0, Math.PI * 2);
+    ctx.arc(118, 72, 2.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2A1D17';
+    ctx.lineWidth = isMasc ? 2.1 : 1.3;
+    ctx.beginPath();
+    ctx.moveTo(97, 66);
+    ctx.quadraticCurveTo(102, 63.5, 107, 66);
+    ctx.moveTo(113, 66);
+    ctx.quadraticCurveTo(118, 63.5, 123, 66);
+    ctx.stroke();
+
+    ctx.strokeStyle = isMasc ? palette.shadow : '#C95A73';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(104.5, 87);
+    ctx.quadraticCurveTo(110, 90, 115.5, 87);
+    ctx.stroke();
+
+    // 5. Cabelo Base Padrão (quando nenhum cabelo da loja está equipado)
+    if (!hasHair) {
+      ctx.fillStyle = '#332119';
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      if (isMasc) {
+        ctx.moveTo(88, 66);
+        ctx.quadraticCurveTo(86, 43, 110, 41);
+        ctx.quadraticCurveTo(134, 43, 132, 66);
+        ctx.quadraticCurveTo(128, 54, 110, 56);
+        ctx.quadraticCurveTo(93, 54, 88, 66);
+      } else {
+        ctx.moveTo(88, 76);
+        ctx.quadraticCurveTo(86, 44, 110, 44);
+        ctx.quadraticCurveTo(134, 44, 132, 76);
+        ctx.quadraticCurveTo(127, 56, 110, 56);
+        ctx.quadraticCurveTo(93, 56, 88, 76);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
 
     ctx.restore();
   }

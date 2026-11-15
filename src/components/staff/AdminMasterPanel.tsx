@@ -2,11 +2,9 @@ import React, { useMemo, useState } from 'react';
 import {
   Activity,
   Ban,
-  Bot,
   Crown,
   KeyRound,
   Megaphone,
-  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -18,29 +16,19 @@ import {
 } from 'lucide-react';
 import {
   FURNITURE_CATALOG,
-  GLOBAL_ROOMS,
   INITIAL_CLOTHING_CATALOG,
 } from '../../data/catalog';
 import type {
-  AiMaintenanceLogEntry,
-  BotAiSpecialty,
   ClothingItem,
   FurnitureDef,
   MockUser,
-  ServerRegion,
   StaffRoleTier,
   UserAccount,
 } from '../../types/game';
 import type { StaffAuditLogEntry } from '../../core/schemas/dbSchema';
 import {
-  BOT_SPECIALTY_META,
-  type AdminBotOrderInput,
-  type AdminBotOrderResult,
-} from '../../utils/aiBots';
-import {
   loadAccounts,
   normalizeUsername,
-  SERVER_REGION_META,
 } from '../../utils/storage';
 import {
   ALL_STAFF_ROLE_TIERS,
@@ -69,10 +57,9 @@ interface AdminMasterPanelProps {
     roleTier: StaffRoleTier | null,
     staffRoleTitle?: string,
   ) => void;
-  onCreateStaffBot: (
+  onCreateStaffBot?: (
     input: StaffBotEditorPayload,
   ) => { ok: true } | { ok: false; error: string };
-  onExecuteAdminBotOrder?: (input: AdminBotOrderInput) => AdminBotOrderResult;
   onDeleteCatalogItem: (itemId: string) => void;
   onRestoreAllItems: () => void;
   onResetAllDemoData: () => void;
@@ -95,8 +82,6 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
   onToggleUserVip,
   onAssignStaffRole,
   onAssignAccountStaffRole,
-  onCreateStaffBot,
-  onExecuteAdminBotOrder,
   onDeleteCatalogItem,
   onRestoreAllItems,
   onResetAllDemoData,
@@ -107,36 +92,16 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
   const [wordDraft, setWordDraft] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Contratação RH (Jogador Real por ID vs Bot Autônomo + Especialidade IA)
-  const [hireMode, setHireMode] = useState<'human' | 'bot'>('human');
+  // Contratação RH (Exclusivo para Jogadores Reais)
   const [humanTargetInput, setHumanTargetInput] = useState('');
   const [humanRoleTier, setHumanRoleTier] = useState<StaffRoleTier>('mod_br');
   const [humanCustomTitle, setHumanCustomTitle] = useState('');
-
-  const [botUsername, setBotUsername] = useState('');
-  const [botDisplayName, setBotDisplayName] = useState('');
-  const [botPassword, setBotPassword] = useState('botstar123');
-  const [botServer, setBotServer] = useState<ServerRegion>('BR');
-  const [botRoleTier, setBotRoleTier] = useState<StaffRoleTier>('mod_br');
-  const [botSpecialty, setBotSpecialty] = useState<BotAiSpecialty>('moderation');
-
-  // Ordem direta a bots
-  const [selectedBotId, setSelectedBotId] = useState('');
-  const [botAction, setBotAction] = useState<AdminBotOrderInput['action']>('maintenance_scan');
-  const [botRoomId, setBotRoomId] = useState('central_staff');
-  const [botSpeech, setBotSpeech] = useState('');
 
   const [catalogSearch, setCatalogSearch] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
 
   const accounts = useMemo(() => loadAccounts(), [staffAuditLogs, users]);
-  const botAccounts = useMemo(() => accounts.filter((a) => a.isBot), [accounts]);
   const humanAccounts = useMemo(() => accounts.filter((a) => !a.isBot), [accounts]);
-
-  const effectiveSelectedBotId =
-    selectedBotId && botAccounts.some((b) => b.id === selectedBotId)
-      ? selectedBotId
-      : botAccounts[0]?.id ?? '';
 
   const allCatalogEntries = useMemo(() => {
     const clothes = [...customClothingCatalog, ...INITIAL_CLOTHING_CATALOG].map((c) => ({
@@ -199,58 +164,6 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
     setFeedback(`Conta ou ID "${raw}" não encontrada. Verifique a lista de contas reais abaixo.`);
   };
 
-  const handleHireBot = (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = onCreateStaffBot({
-      username: botUsername,
-      displayName: botDisplayName || botUsername,
-      password: botPassword || 'botstar123',
-      avatarGender: 'feminino',
-      skinTone: 'pessego',
-      presenceStatus: 'online',
-      equipped: {
-        cabelo: 'hair_ondas_mel',
-        blusas: 'top_blazer_tweed',
-        calcas: 'bottom_calca_alfaiataria',
-        sapatos: 'shoes_scarpin_preto',
-      },
-      avatarDisplayMode: 'medoll',
-      serverRegion: botServer,
-      staffRoleTier: botRoleTier,
-      staffRoleTitle: STAFF_ROLE_BADGE_META[botRoleTier].label,
-      bio: BOT_SPECIALTY_META[botSpecialty].description,
-      isVip: botRoleTier === 'designer_global' || botRoleTier === 'admin',
-      botAiSpecialty: botSpecialty,
-      botActive: true,
-      botRoamRooms: true,
-    });
-    if (res.ok) {
-      setFeedback(
-        `Bot autônomo "${botDisplayName || botUsername}" (${BOT_SPECIALTY_META[botSpecialty].shortLabel}) contratado com mesa própria!`,
-      );
-      setBotUsername('');
-      setBotDisplayName('');
-    } else {
-      setFeedback(res.error);
-    }
-  };
-
-  const handleSendBotOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!onExecuteAdminBotOrder || !effectiveSelectedBotId) return;
-    const res = onExecuteAdminBotOrder({
-      botAccountId: effectiveSelectedBotId,
-      action: botAction,
-      targetRoomId: botRoomId,
-      speechText: botSpeech,
-      issuedByEmail: currentUser.email,
-    });
-    setFeedback(res.message);
-    if (res.ok && botAction === 'speak_room') {
-      setBotSpeech('');
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Banner Chave Mestre */}
@@ -269,16 +182,16 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
               </span>
             </div>
             <p className="text-xs text-[#D6D3D1] mt-0.5">
-              Controle irrestrito de RH (Jogadores Reais por ID & Bots IA), acesso total às 4 Mesas de Trabalho e auditoria protegida em tempo real.
+              Controle irrestrito de RH (Jogadores Reais por ID), acesso total às Mesas da Staff e auditoria protegida em tempo real.
             </p>
           </div>
         </div>
         <div className="text-right text-xs">
           <p className="text-[#FDE68A] font-semibold">
-            {accounts.length} contas · {botAccounts.length} bots ativos
+            {humanAccounts.length} conta(s) humana(s) ativa(s)
           </p>
           <p className="text-[11px] text-[#A8A29E]">
-            Mesa física: Central da Staff → Mesa do Administrador
+            Bots e jogadores fantasmas bloqueados no servidor
           </p>
         </div>
       </div>
@@ -296,262 +209,82 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
         </div>
       )}
 
-      {/* 1. Interface de Contratação RH (Jogador Real por ID vs Bot Autônomo IA) */}
+      {/* 1. Interface de Contratação RH (Exclusivo para Jogadores Reais) */}
       <section className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#EFEAE3]">
           <div>
             <h4 className="font-display text-lg font-bold text-[#1C1917] flex items-center gap-2">
               <UserPlus className="w-4 h-4 text-[#C8235D]" />
-              RH & Recrutamento de Staff
+              RH &amp; Promoção de Staff Humana
             </h4>
             <p className="text-xs text-[#6B645D]">
-              Contrate um jogador real pelo ID/@usuário ou crie um Bot autônomo escolhendo sua especialidade de IA.
+              Contrate ou promova jogadores reais pelo ID, @usuário ou e-mail para cargos oficiais da Staff.
             </p>
-          </div>
-          <div className="inline-flex rounded-lg border border-[#E6E0D8] p-0.5 bg-[#FAF8F5]">
-            <button
-              type="button"
-              onClick={() => setHireMode('human')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
-                hireMode === 'human'
-                  ? 'bg-[#1C1917] text-white'
-                  : 'text-[#57534E] hover:text-[#1C1917]'
-              }`}
-            >
-              Jogador Real (por ID)
-            </button>
-            <button
-              type="button"
-              onClick={() => setHireMode('bot')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
-                hireMode === 'bot'
-                  ? 'bg-[#C8235D] text-white'
-                  : 'text-[#57534E] hover:text-[#1C1917]'
-              }`}
-            >
-              Bot Autônomo (IA)
-            </button>
           </div>
         </div>
 
-        {hireMode === 'human' ? (
-          <form onSubmit={handleHireHuman} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-            <label className="block md:col-span-2">
-              <span className="text-xs font-semibold text-[#44403C]">
-                ID da Conta, @usuário ou E-mail do Jogador Real
-              </span>
-              <input
-                type="text"
-                required
-                list="real-player-ids"
-                value={humanTargetInput}
-                onChange={(e) => setHumanTargetInput(e.target.value)}
-                placeholder="Ex: acc_174... ou clara_couture"
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-              />
-              <datalist id="real-player-ids">
-                {humanAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.username} ({a.email})
-                  </option>
-                ))}
-              </datalist>
-            </label>
+        <form onSubmit={handleHireHuman} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <label className="block md:col-span-2">
+            <span className="text-xs font-semibold text-[#44403C]">
+              ID da Conta, @usuário ou E-mail do Jogador Real
+            </span>
+            <input
+              type="text"
+              required
+              list="real-player-ids"
+              value={humanTargetInput}
+              onChange={(e) => setHumanTargetInput(e.target.value)}
+              placeholder="Ex: acc_174... ou clara_couture"
+              className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+            />
+            <datalist id="real-player-ids">
+              {humanAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.username} ({a.email})
+                </option>
+              ))}
+            </datalist>
+          </label>
 
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Cargo na Staff</span>
-              <select
-                value={humanRoleTier}
-                onChange={(e) => setHumanRoleTier(e.target.value as StaffRoleTier)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                {ALL_STAFF_ROLE_TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {STAFF_ROLE_BADGE_META[tier].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button
-              type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg transition-colors cursor-pointer"
+          <label className="block">
+            <span className="text-xs font-semibold text-[#44403C]">Cargo na Staff</span>
+            <select
+              value={humanRoleTier}
+              onChange={(e) => setHumanRoleTier(e.target.value as StaffRoleTier)}
+              className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
             >
-              Contratar / Promover
-            </button>
+              {ALL_STAFF_ROLE_TIERS.map((tier) => (
+                <option key={tier} value={tier}>
+                  {STAFF_ROLE_BADGE_META[tier].label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <label className="block md:col-span-4">
-              <span className="text-[11px] text-[#6B645D]">
-                Título exibido na mesa (opcional)
-              </span>
-              <input
-                type="text"
-                value={humanCustomTitle}
-                onChange={(e) => setHumanCustomTitle(e.target.value)}
-                placeholder="Ex: Moderadora Sênior · Turno Noite"
-                className="mt-1 w-full px-3 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              />
-            </label>
-          </form>
-        ) : (
-          <form onSubmit={handleHireBot} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-end">
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">@usuario do Bot</span>
-              <input
-                type="text"
-                required
-                value={botUsername}
-                onChange={(e) => setBotUsername(e.target.value)}
-                placeholder="ex: sentinel_nova_br"
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Nome de Exibição</span>
-              <input
-                type="text"
-                value={botDisplayName}
-                onChange={(e) => setBotDisplayName(e.target.value)}
-                placeholder="ex: Nova Sentinela"
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Especialidade da IA</span>
-              <select
-                value={botSpecialty}
-                onChange={(e) => setBotSpecialty(e.target.value as BotAiSpecialty)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                {(['maintenance', 'moderation', 'hybrid', 'designer'] as BotAiSpecialty[]).map(
-                  (spec) => (
-                    <option key={spec} value={spec}>
-                      {BOT_SPECIALTY_META[spec].label}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Cargo / Mesa</span>
-              <select
-                value={botRoleTier}
-                onChange={(e) => setBotRoleTier(e.target.value as StaffRoleTier)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                {ALL_STAFF_ROLE_TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {STAFF_ROLE_BADGE_META[tier].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Servidor</span>
-              <select
-                value={botServer}
-                onChange={(e) => setBotServer(e.target.value as ServerRegion)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                {(['BR', 'ES', 'EN'] as ServerRegion[]).map((srv) => (
-                  <option key={srv} value={srv}>
-                    {SERVER_REGION_META[srv].flagEmoji} {SERVER_REGION_META[srv].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-[#44403C]">Senha interna</span>
-              <input
-                type="password"
-                value={botPassword}
-                onChange={(e) => setBotPassword(e.target.value)}
-                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              />
-            </label>
-            <div className="sm:col-span-2 lg:col-span-3 flex justify-end">
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] rounded-lg cursor-pointer"
-              >
-                <Bot className="w-3.5 h-3.5" />
-                Contratar Bot Autônomo (Sem conflito humano)
-              </button>
-            </div>
-          </form>
-        )}
+          <button
+            type="submit"
+            className="px-4 py-2 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg transition-colors cursor-pointer"
+          >
+            Contratar / Promover
+          </button>
+
+          <label className="block md:col-span-4">
+            <span className="text-[11px] text-[#6B645D]">
+              Título exibido na mesa (opcional)
+            </span>
+            <input
+              type="text"
+              value={humanCustomTitle}
+              onChange={(e) => setHumanCustomTitle(e.target.value)}
+              placeholder="Ex: Community Manager · Atendimento & Loja Premium"
+              className="mt-1 w-full px-3 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
+            />
+          </label>
+        </form>
       </section>
 
-      {/* 2. Ordens Diretas aos Bots + Aviso Global & Filtro de Palavras */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {onExecuteAdminBotOrder && botAccounts.length > 0 && (
-          <form
-            onSubmit={handleSendBotOrder}
-            className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-3"
-          >
-            <h4 className="font-display text-base font-bold text-[#1C1917] flex items-center gap-2">
-              <Play className="w-4 h-4 text-[#C8235D]" />
-              Comando Imediato a Bots da Staff
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <select
-                value={effectiveSelectedBotId}
-                onChange={(e) => setSelectedBotId(e.target.value)}
-                className="px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                {botAccounts.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.displayName} (@{b.username})
-                  </option>
-                ))}
-              </select>
-              <select
-                value={botAction}
-                onChange={(e) =>
-                  setBotAction(e.target.value as AdminBotOrderInput['action'])
-                }
-                className="px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-              >
-                <option value="maintenance_scan">Executar Varredura DevOps</option>
-                <option value="wardrobe_audit">Auditar Guarda-Roupa Global</option>
-                <option value="designer_drop">Forçar Drop Starplaza</option>
-                <option value="move_room">Mover para Sala</option>
-                <option value="speak_room">Falar na Sala</option>
-              </select>
-            </div>
-            {(botAction === 'move_room' || botAction === 'speak_room') && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <select
-                  value={botRoomId}
-                  onChange={(e) => setBotRoomId(e.target.value)}
-                  className="px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-                >
-                  {GLOBAL_ROOMS.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                {botAction === 'speak_room' && (
-                  <input
-                    type="text"
-                    value={botSpeech}
-                    onChange={(e) => setBotSpeech(e.target.value)}
-                    placeholder="Mensagem do bot na sala..."
-                    className="px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
-                  />
-                )}
-              </div>
-            )}
-            <button
-              type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg cursor-pointer"
-            >
-              Executar Ordem
-            </button>
-          </form>
-        )}
-
+      {/* 2. Aviso Global & Filtro de Palavras */}
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-4">
           <div>
             <h4 className="font-display text-base font-bold text-[#1C1917] flex items-center gap-2">

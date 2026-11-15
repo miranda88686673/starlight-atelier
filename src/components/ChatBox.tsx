@@ -134,7 +134,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
                 modCapability === 'admin'
                   ? 'Comandos disponíveis: /aviso, /evento, /ban usuario, /limpar'
                   : modCapability === 'cm'
-                    ? 'Gerente da Comunidade: /evento texto, /aviso texto'
+                    ? 'Community Manager: Tickets e Loja Premium no painel'
                     : 'Moderador regional: comando disponível /ban usuario'
               }
               className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#C8235D] whitespace-nowrap"
@@ -144,7 +144,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
                 (modCapability === 'admin'
                   ? 'Administrador Geral'
                   : modCapability === 'cm'
-                    ? 'Gerente da Comunidade'
+                    ? 'Community Manager'
                     : 'Moderador')}
             </span>
           )}
@@ -288,11 +288,9 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
                 ? 'Chat bloqueado temporariamente (mute ativo)...'
                 : modCapability === 'admin'
                   ? 'Escreva ou use /aviso, /evento, /ban, /limpar...'
-                  : modCapability === 'cm'
-                    ? 'Escreva ou use /evento texto ou /aviso texto...'
-                    : modCapability === 'ban_only'
-                      ? 'Escreva ou use /ban usuario...'
-                      : 'Escreva aqui ou use /report usuario motivo...'
+                  : modCapability === 'ban_only'
+                    ? 'Escreva ou use /ban usuario...'
+                    : 'Escreva aqui ou use /report usuario motivo...'
             }
             className="flex-1 px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
           />
@@ -315,9 +313,8 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
           </p>
         ) : modCapability === 'cm' ? (
           <p className="text-[10px] text-[#78716C]">
-            Comandos Gerente da Comunidade: <span className="font-mono-num">/evento texto</span> ·{' '}
-            <span className="font-mono-num">/aviso texto</span> ·{' '}
-            <span className="font-mono-num">/report usuario motivo</span>
+            Atendimento Community Manager disponível na aba Moderação · Use{' '}
+            <span className="font-mono-num">/report usuario motivo</span> se necessário.
           </p>
         ) : modCapability === 'ban_only' ? (
           <p className="text-[10px] text-[#78716C]">

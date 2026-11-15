@@ -1,12 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Bot,
   Camera,
   CheckCircle2,
   Layers,
-  Loader2,
   Palette,
-  Play,
   Sparkles,
   Upload,
 } from 'lucide-react';
@@ -87,10 +84,6 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
   // Manequim de Teste ao vivo
   const [mannequinGender, setMannequinGender] = useState<AvatarGender>('feminino');
   const [mannequinSkin, setMannequinSkin] = useState<SkinToneId>('porcelana');
-
-  // Cron Bot Designer
-  const [cronBusy, setCronBusy] = useState(false);
-  const [forceCronOverride, setForceCronOverride] = useState(false);
 
   // Clonagem por Foto IA
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -252,42 +245,6 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
     setLayerScale(1);
   };
 
-  const handleRunBotDesignerCron = async () => {
-    setCronBusy(true);
-    try {
-      const res = await fetch('/api/designer/cron-run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-actor-id': currentUser.id,
-          'x-staff-role': role,
-          'x-actor-email': currentUser.email,
-        },
-        body: JSON.stringify({ force: forceCronOverride }),
-      });
-      const data = (await res.json()) as {
-        ok?: boolean;
-        yieldedToHuman?: boolean;
-        reason?: string;
-        item?: ClothingItem;
-        error?: string;
-      };
-      if (data.yieldedToHuman) {
-        setFeedback(`Trava de Prioridade Humana: ${data.reason}`);
-      } else if (data.ok && data.item) {
-        setFeedback(
-          `Cron Bot Designer concluído! Nova peça "${data.item.name}" injetada na Starplaza e anunciada em Notícias.`,
-        );
-      } else {
-        setFeedback(data.reason || data.error || 'Falha no pipeline Cron.');
-      }
-    } catch {
-      setFeedback('Erro ao executar pipeline Cron do Bot Designer.');
-    } finally {
-      setCronBusy(false);
-    }
-  };
-
   const handlePublishFurniture = (e: React.FormEvent) => {
     e.preventDefault();
     if (!onCreateCustomFurniture || !furnName.trim()) return;
@@ -349,29 +306,9 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
               </span>
             </div>
             <p className="text-xs text-purple-100 mt-0.5">
-              Upload de PNG transparente com calibração X/Y/Escala no manequim ao vivo, Cron do Bot Designer com trava humana e estúdio de móveis/visão IA.
+              Upload de PNG transparente com calibração X/Y/Escala no manequim ao vivo e estúdio de móveis e papéis de parede 2D.
             </p>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 text-[11px] text-purple-100 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={forceCronOverride}
-              onChange={(e) => setForceCronOverride(e.target.checked)}
-              className="rounded"
-            />
-            Ignorar trava humana
-          </label>
-          <button
-            type="button"
-            disabled={cronBusy}
-            onClick={() => void handleRunBotDesignerCron()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-[#9333EA] hover:bg-[#7E22CE] text-white rounded-lg cursor-pointer"
-          >
-            {cronBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-            Executar Cron Bot Designer
-          </button>
         </div>
       </div>
 
@@ -553,7 +490,7 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
               />
             </label>
             <label className="block">
-              <span className="text-[11px] font-semibold text-[#44403C]">Preço (SC)</span>
+              <span className="text-[11px] font-semibold text-[#44403C]">Preço (AM)</span>
               <input
                 type="number"
                 min={50}
@@ -757,7 +694,7 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
         <div className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-4">
           <form onSubmit={handlePublishWallpaper} className="space-y-2.5">
             <h4 className="font-display text-base font-bold text-[#1C1917]">
-              Papéis de Parede & Cron Autônomo
+              Papéis de Parede 2D
             </h4>
             <div className="flex gap-2">
               <input
@@ -788,15 +725,9 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
             </div>
           </form>
 
-          <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#EFEAE3] text-xs space-y-1">
-            <p className="font-bold text-[#1C1917] flex items-center gap-1.5">
-              <Bot className="w-4 h-4 text-[#7C3AED]" />
-              Regra Anti-Conflito do Pipeline Cron
-            </p>
-            <p className="text-[11px] text-[#57534E]">
-              O Bot Designer Global roda automaticamente a cada 30 min no servidor, mas cede prioridade automaticamente sempre que um Designer humano estiver online ou tiver publicado nos últimos 10 minutos.
-            </p>
-          </div>
+          <p className="text-[11px] text-[#57534E]">
+            Todas as criações publicadas nesta bancada entram ao vivo na Starplaza sem necessidade de reinício do servidor.
+          </p>
         </div>
       </div>
     </div>

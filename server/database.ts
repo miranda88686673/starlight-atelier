@@ -16,15 +16,16 @@ import type {
   StateSyncPatchPayload,
 } from '../src/core/schemas/dbSchema.ts';
 import type {
-  AiMaintenanceLogEntry,
   BanReviewRequest,
-  ClothingItem,
   NewsPost,
   PlayerProgressState,
+  PremiumOrder,
+  PremiumPixConfig,
   RoomHealthMetric,
   ServerRegion,
   SupportTicket,
   UserAccount,
+  WorldModerationState,
 } from '../src/types/game.ts';
 import {
   buildInitialPlayerProgressServer,
@@ -48,6 +49,107 @@ function resolveDbFilePath(): string {
 
 const DB_FILE_PATH = resolveDbFilePath();
 export const PRESENCE_AWAY_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutos
+export const DEFAULT_LOJA_PREMIUM_PIX_KEY = '7198826894';
+
+function isBotOrSeededStaffId(id?: string): boolean {
+  if (!id) return false;
+  if (id === 'bot_designer_global') return true;
+  if (id.startsWith('acc_bot_')) return true;
+  if (id.startsWith('acc_staff_') && !id.startsWith('acc_staff_human_')) return true;
+  return false;
+}
+
+function isPhantomOrBotUserId(id?: string): boolean {
+  if (!id) return false;
+  return id.startsWith('usr_') || isBotOrSeededStaffId(id);
+}
+
+function migrateAccountTitleAndStripBot(acc: UserAccount): UserAccount {
+  let nextTitle = acc.staffRoleTitle;
+  if (
+    acc.staffRoleTier === 'cm_br' ||
+    acc.staffRoleTier === 'cm_es' ||
+    acc.staffRoleTier === 'cm_en'
+  ) {
+    const region =
+      acc.staffRoleTier === 'cm_es'
+        ? 'ES'
+        : acc.staffRoleTier === 'cm_en'
+          ? 'EN'
+          : 'BR';
+    if (!nextTitle || nextTitle.startsWith('Gerente da Comunidade')) {
+      nextTitle = `Community Manager (${region})`;
+    }
+  }
+  return {
+    ...acc,
+    isBot: false,
+    staffRoleTitle: nextTitle,
+  };
+}
+
+const SERVER_CATALOG_SCHEMA_VERSION = 3;
+
+function sanitizeWorldStateNoBots(
+  worldState: WorldModerationState | null | undefined,
+): WorldModerationState | null {
+  if (!worldState) return null;
+  const cleanedUsers = Array.isArray(worldState.users)
+    ? worldState.users.filter((u) => !isPhantomOrBotUserId(u.id))
+    : [];
+  const filteredCustomClothes = Array.isArray(worldState.customClothingCatalog)
+    ? worldState.customClothingCatalog.filter((c) => Boolean(c?.threeSpec))
+    : [];
+  return {
+    ...worldState,
+    catalogSchemaVersion: SERVER_CATALOG_SCHEMA_VERSION,
+    users: cleanedUsers,
+    customClothingCatalog: filteredCustomClothes,
+  };
+}
+
+function sanitizePlayerProgressV3Server(
+  accountId: string,
+  progress: PlayerProgressState,
+  gender: UserAccount['avatarGender'],
+): PlayerProgressState {
+  if (progress.catalogSchemaVersion === SERVER_CATALOG_SCHEMA_VERSION) {
+    return progress;
+  }
+  const base = buildInitialPlayerProgressServer(accountId, gender);
+  return {
+    ...progress,
+    catalogSchemaVersion: SERVER_CATALOG_SCHEMA_VERSION,
+    ownedItemIds: base.ownedItemIds,
+    equipped: base.equipped,
+  };
+}
+
+function sanitizeRoomsSnapshotNoBots(
+  snapshot: ServerDatabaseDocument['roomsSnapshot'],
+): ServerDatabaseDocument['roomsSnapshot'] {
+  if (!snapshot) return null;
+  const customRoomIds = new Set(
+    (snapshot.customRooms ?? []).map((r) => r.id),
+  );
+  const nextPresences: NonNullable<ServerDatabaseDocument['roomsSnapshot']>['presences'] = {};
+  for (const [cid, pres] of Object.entries(snapshot.presences ?? {})) {
+    if (!pres) continue;
+    if (
+      pres.isBot ||
+      cid.startsWith('bot_live_') ||
+      cid.startsWith('npc_')
+    ) {
+      continue;
+    }
+    const validRoom = pres.roomId === 'lounge_party' || customRoomIds.has(pres.roomId);
+    nextPresences[cid] = validRoom ? pres : { ...pres, roomId: 'lounge_party' };
+  }
+  return {
+    ...snapshot,
+    presences: nextPresences,
+  };
+}
 
 function createEmptyDb(): ServerDatabaseDocument {
   return {
@@ -63,6 +165,10 @@ function createEmptyDb(): ServerDatabaseDocument {
     presences: {},
     support_tickets: [],
     ban_reviews: [],
+    premium_orders: [],
+    premium_pix_config: {
+      pixKey: DEFAULT_LOJA_PREMIUM_PIX_KEY,
+    },
     room_health: {},
     password_reset_tokens: [],
   };
@@ -78,7 +184,11 @@ class StarlightServerDatabase {
 
   private hydrateSeededAccounts(existing: UserAccount[]): UserAccount[] {
     const seeded = createSeededServerAccounts();
-    const list = existing.map((acc) => {
+    const cleaned = existing.filter(
+      (acc) => !acc.isBot && !isBotOrSeededStaffId(acc.id),
+    );
+    const list = cleaned.map((rawAcc) => {
+      const acc = migrateAccountTitleAndStripBot(rawAcc);
       if (!acc.password_hash && acc.password) {
         return {
           ...acc,
@@ -129,19 +239,40 @@ class StarlightServerDatabase {
       }
 
       const rawAccounts = Array.isArray(parsed.accounts) ? parsed.accounts : base.accounts;
+      const hydratedAccounts = this.hydrateSeededAccounts(rawAccounts);
+      const hydratedWorldState = sanitizeWorldStateNoBots(parsed.worldState ?? null);
+      const hydratedRooms = sanitizeRoomsSnapshotNoBots(parsed.roomsSnapshot ?? null);
+      const hydratedPixConfig: PremiumPixConfig =
+        parsed.premium_pix_config &&
+        typeof parsed.premium_pix_config.pixKey === 'string' &&
+        parsed.premium_pix_config.pixKey.trim()
+          ? parsed.premium_pix_config
+          : { pixKey: DEFAULT_LOJA_PREMIUM_PIX_KEY };
+
+      const rawPlayersById =
+        parsed.playersById && typeof parsed.playersById === 'object'
+          ? parsed.playersById
+          : {};
+      const migratedPlayersById: Record<string, PlayerProgressState> = {};
+      const accGenderMap = new Map(hydratedAccounts.map((a) => [a.id, a.avatarGender]));
+      for (const [pid, pState] of Object.entries(rawPlayersById)) {
+        if (!pState) continue;
+        migratedPlayersById[pid] = sanitizePlayerProgressV3Server(
+          pid,
+          pState,
+          accGenderMap.get(pid) ?? pState.avatarGender ?? 'feminino',
+        );
+      }
 
       return {
         version: typeof parsed.version === 'number' ? parsed.version : 1,
         updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
-        accounts: this.hydrateSeededAccounts(rawAccounts),
-        worldState: parsed.worldState ?? null,
-        playersById:
-          parsed.playersById && typeof parsed.playersById === 'object'
-            ? parsed.playersById
-            : {},
+        accounts: hydratedAccounts,
+        worldState: hydratedWorldState,
+        playersById: migratedPlayersById,
         aiLogs: Array.isArray(parsed.aiLogs) ? parsed.aiLogs : [],
         dms: Array.isArray(parsed.dms) ? parsed.dms : [],
-        roomsSnapshot: parsed.roomsSnapshot ?? null,
+        roomsSnapshot: hydratedRooms,
         staff_audit_logs: Array.isArray(parsed.staff_audit_logs)
           ? parsed.staff_audit_logs
           : [],
@@ -150,6 +281,8 @@ class StarlightServerDatabase {
           ? parsed.support_tickets
           : [],
         ban_reviews: Array.isArray(parsed.ban_reviews) ? parsed.ban_reviews : [],
+        premium_orders: Array.isArray(parsed.premium_orders) ? parsed.premium_orders : [],
+        premium_pix_config: hydratedPixConfig,
         room_health:
           parsed.room_health && typeof parsed.room_health === 'object'
             ? parsed.room_health
@@ -467,31 +600,39 @@ class StarlightServerDatabase {
     const now = Date.now();
 
     if (Array.isArray(patch.accounts) && patch.accounts.length > 0) {
-      // Preserva hashes existentes no servidor quando clientes enviam DTOs sanitizados
+      // Preserva hashes existentes no servidor e bloqueia contas bot/seed antigas
       const prevById = new Map(this.doc.accounts.map((a) => [a.id, a]));
-      this.doc.accounts = patch.accounts.map((incoming) => {
-        const prev = prevById.get(incoming.id);
-        const nextHash =
-          prev?.password_hash ??
-          (incoming.password ? hashPassword(incoming.password) : undefined);
-        return {
-          ...incoming,
-          password: '',
-          password_hash: nextHash,
-        };
-      });
+      this.doc.accounts = patch.accounts
+        .filter((incoming) => !incoming.isBot && !isBotOrSeededStaffId(incoming.id))
+        .map((rawIncoming) => {
+          const incoming = migrateAccountTitleAndStripBot(rawIncoming);
+          const prev = prevById.get(incoming.id);
+          const nextHash =
+            prev?.password_hash ??
+            (incoming.password ? hashPassword(incoming.password) : undefined);
+          return {
+            ...incoming,
+            password: '',
+            password_hash: nextHash,
+          };
+        });
       changed = true;
     }
 
     if (patch.worldState) {
-      this.doc.worldState = patch.worldState;
+      this.doc.worldState = sanitizeWorldStateNoBots(patch.worldState);
       changed = true;
     }
 
     if (patch.playerPatch && patch.playerPatch.accountId) {
+      const targetAcc = this.doc.accounts.find((a) => a.id === patch.playerPatch!.accountId);
       this.doc.playersById = {
         ...this.doc.playersById,
-        [patch.playerPatch.accountId]: patch.playerPatch.progress,
+        [patch.playerPatch.accountId]: sanitizePlayerProgressV3Server(
+          patch.playerPatch.accountId,
+          patch.playerPatch.progress,
+          targetAcc?.avatarGender ?? patch.playerPatch.progress.avatarGender ?? 'feminino',
+        ),
       };
       changed = true;
     }
@@ -507,7 +648,7 @@ class StarlightServerDatabase {
     }
 
     if (patch.roomsSnapshot) {
-      this.doc.roomsSnapshot = patch.roomsSnapshot;
+      this.doc.roomsSnapshot = sanitizeRoomsSnapshotNoBots(patch.roomsSnapshot);
       changed = true;
     }
 
@@ -518,6 +659,16 @@ class StarlightServerDatabase {
 
     if (Array.isArray(patch.ban_reviews)) {
       this.doc.ban_reviews = patch.ban_reviews.slice(0, 200);
+      changed = true;
+    }
+
+    if (Array.isArray(patch.premium_orders)) {
+      this.doc.premium_orders = patch.premium_orders.slice(0, 300);
+      changed = true;
+    }
+
+    if (patch.premium_pix_config?.pixKey) {
+      this.doc.premium_pix_config = patch.premium_pix_config;
       changed = true;
     }
 
@@ -622,7 +773,7 @@ class StarlightServerDatabase {
   } {
     const now = Date.now();
     const targetRoomId = params.roomId;
-    const fallbackRoomId = 'lounge_principal';
+    const fallbackRoomId = 'lounge_party';
     let evacuatedCount = 0;
 
     if (this.doc.roomsSnapshot) {
@@ -759,36 +910,212 @@ class StarlightServerDatabase {
     return post;
   }
 
-  /** Injeta peça gerada pelo Bot Designer Cron no catálogo da Starplaza com Zero-Downtime */
-  injectDesignerItemZeroDowntime(params: {
-    item: ClothingItem;
-    logEntry: AiMaintenanceLogEntry;
-    newsPost?: NewsPost;
-  }): { ok: boolean; reason?: string } {
-    if (!this.doc.worldState) {
-      return { ok: false, reason: 'WorldState ainda não inicializado no servidor.' };
+  getPremiumPixConfig(): PremiumPixConfig {
+    if (
+      this.doc.premium_pix_config &&
+      typeof this.doc.premium_pix_config.pixKey === 'string' &&
+      this.doc.premium_pix_config.pixKey.trim()
+    ) {
+      return this.doc.premium_pix_config;
     }
+    return { pixKey: DEFAULT_LOJA_PREMIUM_PIX_KEY };
+  }
 
-    const existing = this.doc.worldState.customClothingCatalog ?? [];
-    if (existing.some((c) => c.id === params.item.id || c.name === params.item.name)) {
-      return { ok: false, reason: 'Peça duplicada ignorada pelo pipeline.' };
-    }
-
-    const nextPosts = params.newsPost
-      ? [params.newsPost, ...(this.doc.worldState.newsPosts ?? [])].slice(0, 40)
-      : this.doc.worldState.newsPosts;
-
-    this.doc.worldState = {
-      ...this.doc.worldState,
-      customClothingCatalog: [params.item, ...existing].slice(0, 120),
-      newsPosts: nextPosts,
-      lastDesignerCreationAt: Date.now(),
+  updatePremiumPixConfig(pixKey: string, updatedBy: string): PremiumPixConfig {
+    const cleaned = pixKey.trim().slice(0, 140) || DEFAULT_LOJA_PREMIUM_PIX_KEY;
+    const config: PremiumPixConfig = {
+      pixKey: cleaned,
+      updatedBy,
+      updatedAt: Date.now(),
     };
-    this.doc.aiLogs = [params.logEntry, ...this.doc.aiLogs].slice(0, 120);
+    this.doc.premium_pix_config = config;
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
     this.scheduleSave();
-    return { ok: true };
+    return config;
+  }
+
+  getPremiumOrders(): PremiumOrder[] {
+    return this.doc.premium_orders ?? [];
+  }
+
+  upsertPremiumOrder(order: PremiumOrder): PremiumOrder[] {
+    const current = this.doc.premium_orders ?? [];
+    const idx = current.findIndex((o) => o.id === order.id);
+    let next: PremiumOrder[];
+    if (idx >= 0) {
+      next = [...current];
+      next[idx] = order;
+    } else {
+      next = [order, ...current].slice(0, 300);
+    }
+    this.doc.premium_orders = next;
+    this.doc.version += 1;
+    this.doc.updatedAt = Date.now();
+    this.scheduleSave();
+    return next;
+  }
+
+  decidePremiumOrder(params: {
+    orderId: string;
+    decision: 'credit' | 'reject';
+    actorId: string;
+    actorUsername: string;
+    actorRole: 'admin' | 'cm';
+    note?: string;
+  }):
+    | {
+        ok: true;
+        order: PremiumOrder;
+        orders: PremiumOrder[];
+        updatedAccount?: UserAccount;
+        updatedProgress?: PlayerProgressState;
+        auditEntry: StaffAuditLogEntry;
+      }
+    | { ok: false; error: string } {
+    const current = this.doc.premium_orders ?? [];
+    const idx = current.findIndex((o) => o.id === params.orderId);
+    if (idx < 0) {
+      return { ok: false, error: 'Pedido da Loja Premium não encontrado.' };
+    }
+    const existing = current[idx];
+    if (existing.status !== 'pending') {
+      return {
+        ok: false,
+        error: `Este pedido já foi finalizado anteriormente como "${existing.status}".`,
+      };
+    }
+
+    const now = Date.now();
+    let updatedAccount: UserAccount | undefined;
+    let updatedProgress: PlayerProgressState | undefined;
+
+    if (params.decision === 'credit') {
+      const targetAcc =
+        this.doc.accounts.find((a) => a.id === existing.requesterAccountId) ??
+        this.doc.accounts.find(
+          (a) =>
+            normalizeUsernameServer(a.username) ===
+            normalizeUsernameServer(existing.requesterUsername),
+        );
+
+      const targetAccId = targetAcc?.id ?? existing.requesterAccountId;
+      const totalAm = Math.max(
+        0,
+        Math.round((existing.amAmount || 0) + (existing.bonusAmAmount || 0)),
+      );
+
+      if (targetAcc) {
+        updatedAccount =
+          existing.orderType === 'vip'
+            ? { ...targetAcc, isVip: true }
+            : targetAcc;
+        this.doc.accounts = this.doc.accounts.map((a) =>
+          a.id === targetAcc.id ? updatedAccount! : a,
+        );
+      }
+
+      const prevProgress =
+        this.doc.playersById[targetAccId] ??
+        buildInitialPlayerProgressServer(
+          targetAccId,
+          targetAcc?.avatarGender ?? 'feminino',
+          targetAcc?.serverRegion ?? 'BR',
+        );
+
+      updatedProgress = {
+        ...prevProgress,
+        starcoins: Math.max(0, prevProgress.starcoins + totalAm),
+      };
+      this.doc.playersById = {
+        ...this.doc.playersById,
+        [targetAccId]: updatedProgress,
+      };
+
+      if (this.doc.worldState) {
+        this.doc.worldState = {
+          ...this.doc.worldState,
+          users: this.doc.worldState.users.map((u) =>
+            u.id === targetAccId ||
+            normalizeUsernameServer(u.username) ===
+              normalizeUsernameServer(existing.requesterUsername)
+              ? {
+                  ...u,
+                  starcoins: updatedProgress!.starcoins,
+                  isVip: existing.orderType === 'vip' ? true : u.isVip,
+                }
+              : u,
+          ),
+        };
+      }
+    }
+
+    const decisionNote = params.note?.trim().slice(0, 300);
+    const nextMessages = [...existing.messages];
+    if (decisionNote) {
+      nextMessages.push({
+        id: `pmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
+        senderRole: params.actorRole,
+        senderName: params.actorUsername,
+        text: decisionNote,
+        createdAt: now,
+      });
+    } else if (params.decision === 'credit') {
+      nextMessages.push({
+        id: `pmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
+        senderRole: params.actorRole,
+        senderName: params.actorUsername,
+        text:
+          existing.orderType === 'vip'
+            ? `Pagamento PIX confirmado! Status VIP${existing.bonusAmAmount ? ` + ${existing.bonusAmAmount} AM de bônus` : ''} creditado diretamente na sua conta.`
+            : `Pagamento PIX confirmado! ${existing.amAmount + (existing.bonusAmAmount ?? 0)} AM creditados diretamente na sua conta.`,
+        createdAt: now,
+      });
+    }
+
+    const updatedOrder: PremiumOrder = {
+      ...existing,
+      status: params.decision === 'credit' ? 'credited' : 'rejected',
+      creditedByUsername: params.actorUsername,
+      creditedAt: now,
+      decisionNote,
+      messages: nextMessages,
+      updatedAt: now,
+    };
+
+    const nextOrders = [...current];
+    nextOrders[idx] = updatedOrder;
+    this.doc.premium_orders = nextOrders;
+
+    const auditEntry: StaffAuditLogEntry = {
+      id: `audit_prem_${now}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: now,
+      actor_id: params.actorId,
+      actor_username: params.actorUsername,
+      role: params.actorRole,
+      action_type:
+        params.decision === 'credit'
+          ? 'LOJA_PREMIUM_CREDIT'
+          : 'LOJA_PREMIUM_REJECT',
+      target_id: existing.requesterUsername,
+      details:
+        params.decision === 'credit'
+          ? `Pedido ${existing.packTitle} aprovado e creditado em @${existing.requesterUsername}.`
+          : `Pedido ${existing.packTitle} recusado (${decisionNote || 'comprovante inválido'}).`,
+    };
+    this.doc.staff_audit_logs = [auditEntry, ...this.doc.staff_audit_logs].slice(0, 400);
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.scheduleSave();
+
+    return {
+      ok: true,
+      order: updatedOrder,
+      orders: nextOrders,
+      updatedAccount: updatedAccount ? sanitizeAccountForClient(updatedAccount) : undefined,
+      updatedProgress,
+      auditEntry,
+    };
   }
 
   /** Atualiza Heartbeat e calcula ciclo de vida (online < 3min, away > 3min, offline) */

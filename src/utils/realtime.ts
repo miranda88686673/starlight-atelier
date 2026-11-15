@@ -6,7 +6,6 @@ import {
   RoomDjTrack,
   RoomId,
 } from '../types/game';
-import { loadAccounts } from './storage';
 import {
   emitDjMediaSyncToServer,
   emitStatePatchToServer,
@@ -82,33 +81,13 @@ function createInitialRoomsSnapshot(): SharedRoomsSnapshot {
   const presences: Record<string, RoomAvatarPresence> = {};
 
   const messagesByRoom: Record<RoomId, RoomChatMessage[]> = {
-    lounge_principal: [
+    lounge_party: [
       {
-        id: 'msg_init_lounge',
-        roomId: 'lounge_principal',
-        senderUsername: 'Sistema',
+        id: 'msg_init_lounge_party',
+        roomId: 'lounge_party',
+        senderUsername: 'Starlight Atelier',
         senderRole: 'system',
-        text: 'Bem-vinda ao Lounge Principal! Clique no piso para caminhar ou use o chat ao lado.',
-        createdAt: Date.now() - 60_000,
-      },
-    ],
-    cafe_starlight: [
-      {
-        id: 'msg_init_cafe',
-        roomId: 'cafe_starlight',
-        senderUsername: 'Sistema',
-        senderRole: 'system',
-        text: 'Você entrou no Café Starlight. Aproveite o encontro!',
-        createdAt: Date.now() - 60_000,
-      },
-    ],
-    festa_cobertura: [
-      {
-        id: 'msg_init_party',
-        roomId: 'festa_cobertura',
-        senderUsername: 'Sistema',
-        senderRole: 'system',
-        text: 'Terraço aberto! Convide amigas em outras abas do navegador para conversar ao vivo.',
+        text: 'Bem-vinda à Lounge Party Oficial! Clique no piso 3D para caminhar, nos sofás para sentar ou na Cabine DJ para tocar músicas.',
         createdAt: Date.now() - 60_000,
       },
     ],
@@ -133,40 +112,36 @@ export function readRoomsSnapshot(): SharedRoomsSnapshot {
     const parsed = JSON.parse(raw) as Partial<SharedRoomsSnapshot>;
     const fallback = createInitialRoomsSnapshot();
 
-    const accounts = loadAccounts();
-    const activeRoamingBotsById = new Set(
-      accounts
-        .filter((a) => a.isBot && a.botActive !== false && a.botRoamRooms !== false)
-        .map((a) => `bot_live_${a.id}`),
-    );
+    const customRooms = Array.isArray(parsed.customRooms) ? parsed.customRooms : [];
+    const validRoomIds = new Set<string>(['lounge_party', ...customRooms.map((r) => r.id)]);
 
     const cleanedPresences: Record<string, RoomAvatarPresence> = {};
     const sourcePresences = parsed.presences ?? {};
 
     Object.values(sourcePresences).forEach((entry) => {
       if (!entry || !entry.clientId) return;
-      // Expurga imediatamente qualquer figurante estático legado (npc_*)
-      if (entry.clientId.startsWith('npc_')) return;
-
-      if (entry.isBot) {
-        if (
-          entry.clientId.startsWith('bot_live_') &&
-          !activeRoamingBotsById.has(entry.clientId)
-        ) {
-          return;
-        }
-        cleanedPresences[entry.clientId] = { ...entry, lastSeen: now };
-      } else if (now - entry.lastSeen < PRESENCE_TTL_MS) {
-        cleanedPresences[entry.clientId] = entry;
+      if (
+        entry.isBot ||
+        entry.clientId.startsWith('npc_') ||
+        entry.clientId.startsWith('bot_live_')
+      ) {
+        return;
+      }
+      if (now - entry.lastSeen < PRESENCE_TTL_MS) {
+        cleanedPresences[entry.clientId] = validRoomIds.has(entry.roomId)
+          ? entry
+          : { ...entry, roomId: 'lounge_party' };
       }
     });
 
     const messagesByRoom: Record<RoomId, RoomChatMessage[]> = {
       ...fallback.messagesByRoom,
-      ...(parsed.messagesByRoom ?? {}),
     };
-
-    const customRooms = Array.isArray(parsed.customRooms) ? parsed.customRooms : [];
+    for (const [rid, msgs] of Object.entries(parsed.messagesByRoom ?? {})) {
+      if (validRoomIds.has(rid) && Array.isArray(msgs)) {
+        messagesByRoom[rid] = msgs;
+      }
+    }
     const kicks = Array.isArray(parsed.kicks)
       ? parsed.kicks.filter((k) => now - k.at < 30_000)
       : [];
@@ -345,7 +320,7 @@ export function deleteCustomRoom(
     if (nextPresences[cid].roomId === roomId) {
       nextPresences[cid] = {
         ...nextPresences[cid],
-        roomId: 'lounge_principal',
+        roomId: 'lounge_party',
         x: 50,
         y: 72,
       };
@@ -418,7 +393,7 @@ export function kickAvatarFromRoom(
   if (nextPresences[targetClientId]) {
     nextPresences[targetClientId] = {
       ...nextPresences[targetClientId],
-      roomId: 'lounge_principal',
+      roomId: 'lounge_party',
       x: 50,
       y: 74,
     };

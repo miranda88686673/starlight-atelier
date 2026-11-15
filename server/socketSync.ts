@@ -35,12 +35,7 @@ interface InternalRoomStats {
 }
 
 const DEFAULT_CORE_ROOMS: Array<{ id: string; name: string }> = [
-  { id: 'lounge_principal', name: 'Lounge Principal' },
-  { id: 'central_staff', name: 'Central da Staff · Mesas de Trabalho' },
-  { id: 'cafe_atelier', name: 'Café Atelier Paris' },
-  { id: 'passarela_vip', name: 'Passarela VIP Diamante' },
-  { id: 'club_starlight', name: 'Boate Neon Starlight' },
-  { id: 'cobertura_sunset', name: 'Cobertura Sunset Terrace' },
+  { id: 'lounge_party', name: 'Lounge Party' },
 ];
 
 const roomTelemetryMap = new Map<string, InternalRoomStats>();

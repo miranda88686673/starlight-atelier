@@ -1497,7 +1497,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                                 {furn.isVipOnly && <VipBadge compact />}
                               </div>
                               <p className="text-[11px] font-mono-num text-[#6B645D]">
-                                {furn.price} SC · {furn.category}
+                                {furn.price} AM · {furn.category}
                               </p>
                             </div>
                           </div>

@@ -107,7 +107,7 @@ export const STAFF_ROLE_BADGE_META: Record<
     Icon: Shield,
   },
   cm_br: {
-    label: 'Gerente da Comunidade (BR)',
+    label: 'Community Manager (BR)',
     defaultTitle: DEFAULT_STAFF_ROLE_TITLES.cm_br,
     tierMaterial: 'Dourado',
     server: 'BR',
@@ -116,7 +116,7 @@ export const STAFF_ROLE_BADGE_META: Record<
     Icon: Star,
   },
   cm_es: {
-    label: 'Gerente da Comunidade (ES)',
+    label: 'Community Manager (ES)',
     defaultTitle: DEFAULT_STAFF_ROLE_TITLES.cm_es,
     tierMaterial: 'Dourado',
     server: 'ES',
@@ -125,7 +125,7 @@ export const STAFF_ROLE_BADGE_META: Record<
     Icon: Star,
   },
   cm_en: {
-    label: 'Gerente da Comunidade (EN)',
+    label: 'Community Manager (EN)',
     defaultTitle: DEFAULT_STAFF_ROLE_TITLES.cm_en,
     tierMaterial: 'Dourado',
     server: 'EN',
@@ -575,7 +575,7 @@ export const StaffDirectory: React.FC<StaffDirectoryProps> = ({
               Equipe de Moderação e Staff
             </h2>
             <p className="text-xs text-[#57534E] mt-0.5 max-w-2xl">
-              Hierarquia oficial com insígnias Diamante, Dourado e Prata. Moderadores atuam na disciplina do servidor designado; Gerentes da Comunidade unem eventos sociais e manutenção técnica; o Designer Global cria modas e salas.
+              Hierarquia oficial com insígnias Diamante, Dourado e Prata. Moderadores atuam na disciplina do servidor designado; Community Managers respondem Tickets e validam pedidos PIX na Loja Premium; o Designer Global cria modas e salas.
             </p>
           </div>
         </div>

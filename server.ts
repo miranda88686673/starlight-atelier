@@ -11,14 +11,17 @@ import type {
   StateSyncPatchPayload,
 } from './src/core/schemas/dbSchema.ts';
 import type {
-  AiMaintenanceLogEntry,
   BanReviewRequest,
-  ClothingItem,
-  NewsPost,
+  PremiumOrder,
+  PremiumOrderMessage,
+  ServerRegion,
   SupportChatMessage,
   SupportTicket,
 } from './src/types/game.ts';
-import { serverDb } from './server/database.ts';
+import {
+  DEFAULT_LOJA_PREMIUM_PIX_KEY,
+  serverDb,
+} from './server/database.ts';
 import { sendRecoveryEmailIfConfigured } from './server/auth.ts';
 import {
   requireStaffRole,
@@ -351,14 +354,14 @@ async function startServer() {
     },
   );
 
-      // ── DEVOPS / COMMUNITY MANAGER: SAÚDE DE SALAS, KILL-SWITCH & AUTO PATCH ──
+      // ── ADMIN: SAÚDE DE SALAS, KILL-SWITCH & AUTO PATCH ──
       app.get('/api/rooms/health', (_req: Request, res: Response) => {
         res.json({ ok: true, metrics: computeAllRoomHealthMetrics() });
       });
 
       app.post(
         '/api/rooms/simulate-spike',
-        requireStaffRole(['admin', 'cm']),
+        requireStaffRole(['admin']),
         (req: Request, res: Response) => {
           const { roomId, active } = (req.body ?? {}) as {
             roomId?: string;
@@ -376,7 +379,7 @@ async function startServer() {
 
       app.post(
         '/api/rooms/terminate',
-        requireStaffRole(['admin', 'cm']),
+        requireStaffRole(['admin']),
         (req: Request, res: Response) => {
           const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
             .staffContext;
@@ -386,11 +389,11 @@ async function startServer() {
             actorUsername?: string;
           };
           const roomId = (body.roomId || '').trim();
-          if (!roomId || roomId === 'lounge_principal') {
+          if (!roomId || roomId === 'lounge_party') {
             res.status(400).json({
               ok: false,
               error:
-                'Informe uma sala válida diferente do Lounge Principal (zona segura de evacuação).',
+                'Informe uma sala válida diferente da Lounge Party Oficial (zona segura de evacuação).',
             });
             return;
           }
@@ -402,15 +405,15 @@ async function startServer() {
             body.actorUsername ||
             actorAccount?.displayName ||
             actorAccount?.username ||
-            'Engenheiro DevOps';
+            'Administrador Geral';
           const reason =
             (body.reason || '').trim() || 'Instabilidade de WebSocket / dessincronização';
 
           const result = serverDb.terminateRoomInstance({
             roomId,
-            actorId: staffCtx?.actorId || 'system_devops',
+            actorId: staffCtx?.actorId || 'system_admin',
             actorUsername,
-            actorRole: staffCtx?.role === 'admin' ? 'admin' : 'cm',
+            actorRole: 'admin',
             reason,
           });
 
@@ -419,7 +422,7 @@ async function startServer() {
 
           io.emit('room:terminated', {
             roomId,
-            fallbackRoomId: 'lounge_principal',
+            fallbackRoomId: 'lounge_party',
             evacuatedCount: result.evacuatedCount,
             reason,
             terminatedBy: actorUsername,
@@ -448,7 +451,7 @@ async function startServer() {
 
       app.post(
         '/api/rooms/auto-patch',
-        requireStaffRole(['admin', 'cm']),
+        requireStaffRole(['admin']),
         (req: Request, res: Response) => {
           const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
             .staffContext;
@@ -526,88 +529,13 @@ async function startServer() {
         },
       );
 
-      // ── SUPORTE IA (BOTÃO HELP NA TELA DE LOGIN) & FILA DE MODERADORES ──
-      app.post('/api/support/ask-ai', async (req: Request, res: Response) => {
-        const body = (req.body ?? {}) as {
-          question?: string;
-          username?: string;
-          history?: Array<{ senderRole: string; text: string }>;
-        };
-        const question = (body.question || '').trim();
-        if (!question) {
-          res.status(400).json({ ok: false, error: 'Escreva sua dúvida antes de enviar.' });
-          return;
-        }
-
-        const buildDeterministicReply = (q: string): string => {
-          const lower = q.toLowerCase();
-          if (lower.includes('ban') || lower.includes('suspens') || lower.includes('mut')) {
-            return (
-              'Olá! Sou o Assistente IA de Moderação do Starlight Atelier. Se sua conta recebeu banimento ou silenciamento e você acredita que houve equívoco, clique em "Encaminhar para Moderador Humano" aqui abaixo informando seu @usuário e o motivo. Nossa equipe de Moderadores analisa revisões diretamente na aba Moderação.'
-            );
-          }
-          if (lower.includes('senha') || lower.includes('login') || lower.includes('conta') || lower.includes('entrar')) {
-            return (
-              'Para recuperar acesso à sua conta no Starlight Atelier: 1) Use o botão "Redefinir senha" logo acima desta janela informando seu usuário ou e-mail cadastrado; 2) Se não lembrar o e-mail de cadastro, encaminhe um chamado para um Moderador Humano clicando no botão abaixo com seu ID ou @usuário.'
-            );
-          }
-          if (lower.includes('starcoin') || lower.includes('sc') || lower.includes('vip') || lower.includes('compr')) {
-            return (
-              'No Starlight Atelier, você ganha StarCoins (SC) diariamente no Bônus Diário, completando missões de estilo, participando de Desfiles e interagindo nas salas sociais. Itens exclusivos VIP exigem passe VIP Royale ativo, que pode ser concedido em eventos oficiais ou pela administração.'
-            );
-          }
-          if (lower.includes('sala') || lower.includes('lag') || lower.includes('trav') || lower.includes('bug')) {
-            return (
-              'Se alguma sala estiver travando ou com erro de sincronização, tente voltar ao Lounge Principal pelo Lobby. Caso o erro persista em uma sala específica, abra um chamado para a Staff para que o Community Manager / DevOps execute a estabilização em tempo real.'
-            );
-          }
-          return (
-            'Olá! Bem-vindo ao Suporte Inteligente do Starlight Atelier. Posso orientar sobre: recuperação de senha, revisão de banimentos, StarCoins (SC) & VIP, uso da Starplaza/Suíte e problemas em salas. Se precisar de atendimento personalizado ou revisão de conta, clique em "Encaminhar para Moderador Humano" logo abaixo!'
-          );
-        };
-
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-          res.json({ ok: true, reply: buildDeterministicReply(question), usedAiModel: false });
-          return;
-        }
-
-        try {
-          const ai = new GoogleGenAI({
-            apiKey,
-            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-          });
-          const historyContext = (body.history || [])
-            .slice(-6)
-            .map((h) => `${h.senderRole === 'player' ? 'Jogador' : 'Staff IA'}: ${h.text}`)
-            .join('\n');
-
-          const response = await ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents:
-              `Contexto recente da conversa:\n${historyContext || '(início do atendimento)'}\n\n` +
-              `Jogador (${body.username || 'Visitante na tela de login'}): ${question}`,
-            config: {
-              systemInstruction:
-                'Você é o Bot de Suporte Oficial da Moderação do jogo social 2D Starlight Atelier. Responda em português do Brasil com tom educado, formal, claro e objetivo (máximo 4 frases). ' +
-                'Conhecimentos oficiais do jogo: ' +
-                '- Economia: moeda StarCoins (SC), bônus diário, desfiles e missões; passes VIP Royale liberam peças de luxo. ' +
-                '- Login e Senha: existe o botão "Redefinir senha" na tela de login para usuários já cadastrados. ' +
-                '- Banimentos e Mutes: jogadores punidos podem pedir revisão pelo botão "Encaminhar para Moderador Humano" no chat de Help. ' +
-                '- Lojas e Criação: Starplaza vende roupas e móveis 2D; apenas Global Designers e Admin publicam no catálogo oficial; jogadores mobiliam suas Suítes e criam salas VIP. ' +
-                '- NUNCA invente comandos falsos, nunca peça a senha do jogador e, caso não seja possível resolver apenas com orientação (ex: desbanimento, bug crítico, recuperação sem e-mail), oriente clicar em "Encaminhar para Moderador Humano".',
-            },
-          });
-
-          const text = (response.text || '').trim();
-          res.json({
-            ok: true,
-            reply: text || buildDeterministicReply(question),
-            usedAiModel: Boolean(text),
-          });
-        } catch {
-          res.json({ ok: true, reply: buildDeterministicReply(question), usedAiModel: false });
-        }
+      // ── SISTEMA OFICIAL DE TICKETS SALVOS (TELA INICIAL & IN-GAME -> COMMUNITY MANAGER) ──
+      app.post('/api/support/ask-ai', (_req: Request, res: Response) => {
+        res.status(410).json({
+          ok: false,
+          error:
+            'O suporte automático por IA foi desativado. Utilize o sistema oficial de Tickets respondido pelo Community Manager.',
+        });
       });
 
       app.get('/api/support/tickets', (_req: Request, res: Response) => {
@@ -618,22 +546,27 @@ async function startServer() {
         const body = (req.body ?? {}) as {
           requesterAccountId?: string;
           requesterUsername?: string;
+          email?: string;
           category?: SupportTicket['category'];
+          serverRegion?: ServerRegion;
           subject?: string;
           messages?: SupportChatMessage[];
-          escalateToHuman?: boolean;
         };
-        const requesterUsername = (body.requesterUsername || 'Visitante').trim().slice(0, 48);
-        const subject = (body.subject || 'Solicitação de Ajuda no Login').trim().slice(0, 120);
+        const requesterUsername = (body.requesterUsername || 'Visitante')
+          .trim()
+          .slice(0, 48);
+        const subject = (body.subject || 'Novo Ticket de Suporte').trim().slice(0, 120);
         const now = Date.now();
         const ticket: SupportTicket = {
           id: `tkt_${now}_${Math.random().toString(36).slice(2, 6)}`,
           requesterAccountId: body.requesterAccountId,
           requesterUsername,
+          email: body.email?.trim().slice(0, 120),
           category: body.category || 'geral',
+          serverRegion: body.serverRegion || 'BR',
           subject,
-          status: body.escalateToHuman === false ? 'ai_handling' : 'queued_human',
-          messages: Array.isArray(body.messages) ? body.messages.slice(-30) : [],
+          status: 'open',
+          messages: Array.isArray(body.messages) ? body.messages.slice(-50) : [],
           createdAt: now,
           updatedAt: now,
         };
@@ -643,39 +576,130 @@ async function startServer() {
         res.json({ ok: true, ticket, tickets });
       });
 
+      app.post('/api/support/tickets/:id/reply', (req: Request, res: Response) => {
+        const ticketId = req.params.id;
+        const existing = serverDb.getSupportTickets().find((t) => t.id === ticketId);
+        if (!existing) {
+          res.status(404).json({ ok: false, error: 'Ticket não encontrado.' });
+          return;
+        }
+        const body = (req.body ?? {}) as {
+          text?: string;
+          senderName?: string;
+          senderRole?: SupportChatMessage['senderRole'];
+          actorId?: string;
+        };
+        const text = (body.text || '').trim().slice(0, 800);
+        if (!text) {
+          res.status(400).json({ ok: false, error: 'Escreva uma mensagem antes de enviar.' });
+          return;
+        }
+
+        const actorId =
+          body.actorId || (req.headers['x-actor-id'] as string | undefined);
+        const claimedRole =
+          (req.headers['x-staff-role'] as string | undefined) || body.senderRole;
+        const actorEmail = req.headers['x-actor-email'] as string | undefined;
+        const staffRole = actorId
+          ? resolveActorRoleFromServer(actorId, claimedRole, actorEmail)
+          : null;
+
+        const isStaffReply = staffRole === 'cm' || staffRole === 'admin';
+        const resolvedSenderRole: SupportChatMessage['senderRole'] = isStaffReply
+          ? staffRole === 'admin'
+            ? 'admin'
+            : 'cm'
+          : 'player';
+
+        const senderName = (
+          body.senderName ||
+          (isStaffReply ? 'Community Manager' : existing.requesterUsername)
+        )
+          .trim()
+          .slice(0, 48);
+
+        const now = Date.now();
+        const nextMessage: SupportChatMessage = {
+          id: `tmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
+          senderRole: resolvedSenderRole,
+          sender: isStaffReply ? 'staff' : 'user',
+          senderName,
+          text,
+          createdAt: now,
+        };
+
+        const updated: SupportTicket = {
+          ...existing,
+          status:
+            existing.status === 'resolved'
+              ? isStaffReply
+                ? 'resolved'
+                : 'open'
+              : isStaffReply
+                ? 'answered'
+                : 'open',
+          assignedCmUsername: isStaffReply ? senderName : existing.assignedCmUsername,
+          messages: [...existing.messages, nextMessage].slice(-80),
+          updatedAt: now,
+        };
+
+        const tickets = serverDb.upsertSupportTicket(updated);
+        if (isStaffReply) {
+          const auditEntry: StaffAuditLogEntry = {
+            id: `audit_tkt_${now}_${Math.random().toString(36).slice(2, 5)}`,
+            timestamp: now,
+            actor_id: actorId || 'system_cm',
+            actor_username: senderName,
+            role: staffRole === 'admin' ? 'admin' : 'cm',
+            action_type: 'TICKET_REPLY',
+            target_id: existing.requesterUsername,
+            details: `Resposta registrada no Ticket ${existing.id}.`,
+          };
+          const logs = serverDb.appendStaffAuditLog(auditEntry);
+          io.emit('audit:updated', { logs: logs.slice(0, 100), latest: auditEntry });
+        }
+        io.emit('support:ticket_updated', { tickets, latest: updated });
+        res.json({ ok: true, ticket: updated, tickets });
+      });
+
       app.patch(
         '/api/support/tickets/:id',
-        requireStaffRole(['admin', 'moderator', 'cm']),
+        requireStaffRole(['admin', 'cm']),
         (req: Request, res: Response) => {
           const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
             .staffContext;
           const ticketId = req.params.id;
           const existing = serverDb.getSupportTickets().find((t) => t.id === ticketId);
           if (!existing) {
-            res.status(404).json({ ok: false, error: 'Chamado não encontrado.' });
+            res.status(404).json({ ok: false, error: 'Ticket não encontrado.' });
             return;
           }
           const body = (req.body ?? {}) as {
             replyText?: string;
             status?: SupportTicket['status'];
+            cmUsername?: string;
             moderatorUsername?: string;
           };
           const now = Date.now();
-          const modName = body.moderatorUsername || 'Moderador';
+          const cmName =
+            body.cmUsername || body.moderatorUsername || 'Community Manager';
+          const senderRole: SupportChatMessage['senderRole'] =
+            staffCtx?.role === 'admin' ? 'admin' : 'cm';
           const nextMessages = [...existing.messages];
           if (body.replyText && body.replyText.trim()) {
             nextMessages.push({
               id: `tmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
-              senderRole: 'moderator',
-              senderName: modName,
-              text: body.replyText.trim().slice(0, 600),
+              senderRole,
+              sender: 'staff',
+              senderName: cmName,
+              text: body.replyText.trim().slice(0, 800),
               createdAt: now,
             });
           }
           const updated: SupportTicket = {
             ...existing,
-            status: body.status || (body.replyText ? 'resolved' : existing.status),
-            assignedModeratorUsername: modName,
+            status: body.status || (body.replyText ? 'answered' : existing.status),
+            assignedCmUsername: cmName,
             messages: nextMessages,
             updatedAt: now,
           };
@@ -683,9 +707,9 @@ async function startServer() {
           const auditEntry: StaffAuditLogEntry = {
             id: `audit_tkt_${now}`,
             timestamp: now,
-            actor_id: staffCtx?.actorId || 'system_mod',
-            actor_username: modName,
-            role: staffCtx?.role === 'admin' ? 'admin' : 'moderator',
+            actor_id: staffCtx?.actorId || 'system_cm',
+            actor_username: cmName,
+            role: staffCtx?.role === 'admin' ? 'admin' : 'cm',
             action_type: 'SUPPORT_TICKET_RESPONSE',
             target_id: existing.requesterUsername,
             details: `Ticket ${existing.id} atualizado para "${updated.status}".`,
@@ -694,6 +718,255 @@ async function startServer() {
           io.emit('support:ticket_updated', { tickets, latest: updated });
           io.emit('audit:updated', { logs: logs.slice(0, 100), latest: auditEntry });
           res.json({ ok: true, ticket: updated, tickets });
+        },
+      );
+
+      // ── LOJA PREMIUM (AM & VIP · PIX + COMPROVANTE + CRÉDITO PELO COMMUNITY MANAGER) ──
+      app.get('/api/premium-pix-config', (_req: Request, res: Response) => {
+        res.json({ ok: true, config: serverDb.getPremiumPixConfig() });
+      });
+
+      app.put(
+        '/api/premium-pix-config',
+        requireStaffRole(['admin', 'cm']),
+        (req: Request, res: Response) => {
+          const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
+            .staffContext;
+          const body = (req.body ?? {}) as { pixKey?: string; actorUsername?: string };
+          const pixKey = (body.pixKey || '').trim();
+          if (!pixKey) {
+            res.status(400).json({ ok: false, error: 'Informe uma chave PIX válida.' });
+            return;
+          }
+          const actorAccount = staffCtx?.actorId
+            ? serverDb.findAccountById(staffCtx.actorId)
+            : undefined;
+          const actorUsername =
+            body.actorUsername ||
+            actorAccount?.displayName ||
+            actorAccount?.username ||
+            'Community Manager';
+
+          const config = serverDb.updatePremiumPixConfig(pixKey, actorUsername);
+          const auditEntry: StaffAuditLogEntry = {
+            id: `audit_pix_${Date.now()}`,
+            timestamp: Date.now(),
+            actor_id: staffCtx?.actorId || 'system_cm',
+            actor_username: actorUsername,
+            role: staffCtx?.role === 'admin' ? 'admin' : 'cm',
+            action_type: 'LOJA_PREMIUM_PIX_UPDATE',
+            target_id: 'premium_pix_config',
+            details: `Chave PIX da Loja Premium atualizada para "${config.pixKey}".`,
+          };
+          const logs = serverDb.appendStaffAuditLog(auditEntry);
+          io.emit('premium:pix_updated', { config });
+          io.emit('audit:updated', { logs: logs.slice(0, 100), latest: auditEntry });
+          res.json({ ok: true, config });
+        },
+      );
+
+      app.get('/api/premium-orders', (_req: Request, res: Response) => {
+        res.json({ ok: true, orders: serverDb.getPremiumOrders() });
+      });
+
+      app.post('/api/premium-orders', (req: Request, res: Response) => {
+        const body = (req.body ?? {}) as {
+          requesterAccountId?: string;
+          requesterUsername?: string;
+          requesterDisplayName?: string;
+          packId?: string;
+          packTitle?: string;
+          priceLabel?: string;
+          orderType?: PremiumOrder['orderType'];
+          amAmount?: number;
+          bonusAmAmount?: number;
+          receiptImageUrl?: string;
+          initialMessage?: string;
+        };
+
+        if (!body.requesterAccountId || !body.requesterUsername || !body.packId) {
+          res.status(400).json({
+            ok: false,
+            error: 'Dados da conta e pacote são obrigatórios para registrar o pedido.',
+          });
+          return;
+        }
+
+        const now = Date.now();
+        const currentPix = serverDb.getPremiumPixConfig().pixKey || DEFAULT_LOJA_PREMIUM_PIX_KEY;
+        const msgText = (body.initialMessage || '').trim();
+        const messages: PremiumOrderMessage[] = [];
+        if (msgText || body.receiptImageUrl) {
+          messages.push({
+            id: `pmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
+            senderRole: 'player',
+            senderName: body.requesterDisplayName || body.requesterUsername,
+            text:
+              msgText ||
+              `Comprovante PIX anexado para o pacote "${body.packTitle || body.packId}".`,
+            attachmentImageUrl: body.receiptImageUrl,
+            createdAt: now,
+          });
+        }
+
+        const order: PremiumOrder = {
+          id: `prem_${now}_${Math.random().toString(36).slice(2, 6)}`,
+          requesterAccountId: body.requesterAccountId,
+          requesterUsername: body.requesterUsername.trim(),
+          requesterDisplayName: body.requesterDisplayName?.trim(),
+          packId: body.packId,
+          packTitle: (body.packTitle || 'Pacote Loja Premium').slice(0, 90),
+          priceLabel: (body.priceLabel || 'PIX').slice(0, 40),
+          orderType: body.orderType === 'vip' ? 'vip' : 'am_pack',
+          amAmount: Math.max(0, Math.round(Number(body.amAmount || 0))),
+          bonusAmAmount: Math.max(0, Math.round(Number(body.bonusAmAmount || 0))),
+          pixKeyUsed: currentPix,
+          receiptImageUrl: body.receiptImageUrl,
+          messages,
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        const orders = serverDb.upsertPremiumOrder(order);
+        io.emit('premium:orders_updated', { orders, latest: order });
+        res.json({ ok: true, order, orders });
+      });
+
+      app.post('/api/premium-orders/:id/message', (req: Request, res: Response) => {
+        const orderId = req.params.id;
+        const existing = serverDb.getPremiumOrders().find((o) => o.id === orderId);
+        if (!existing) {
+          res.status(404).json({ ok: false, error: 'Pedido não encontrado.' });
+          return;
+        }
+        const body = (req.body ?? {}) as {
+          text?: string;
+          attachmentImageUrl?: string;
+          senderName?: string;
+          actorId?: string;
+        };
+        const text = (body.text || '').trim().slice(0, 800);
+        if (!text && !body.attachmentImageUrl) {
+          res.status(400).json({ ok: false, error: 'Informe uma mensagem ou anexe o comprovante.' });
+          return;
+        }
+
+        const actorId =
+          body.actorId || (req.headers['x-actor-id'] as string | undefined);
+        const claimedRole = req.headers['x-staff-role'] as string | undefined;
+        const actorEmail = req.headers['x-actor-email'] as string | undefined;
+        const staffRole = actorId
+          ? resolveActorRoleFromServer(actorId, claimedRole, actorEmail)
+          : null;
+
+        const isStaff = staffRole === 'cm' || staffRole === 'admin';
+        const senderRole: PremiumOrderMessage['senderRole'] = isStaff
+          ? staffRole === 'admin'
+            ? 'admin'
+            : 'cm'
+          : 'player';
+        const senderName = (
+          body.senderName ||
+          (isStaff ? 'Community Manager' : existing.requesterDisplayName || existing.requesterUsername)
+        )
+          .trim()
+          .slice(0, 48);
+
+        const now = Date.now();
+        const nextMsg: PremiumOrderMessage = {
+          id: `pmsg_${now}_${Math.random().toString(36).slice(2, 5)}`,
+          senderRole,
+          senderName,
+          text: text || 'Comprovante atualizado.',
+          attachmentImageUrl: body.attachmentImageUrl,
+          createdAt: now,
+        };
+
+        const updated: PremiumOrder = {
+          ...existing,
+          receiptImageUrl: body.attachmentImageUrl || existing.receiptImageUrl,
+          messages: [...existing.messages, nextMsg].slice(-60),
+          updatedAt: now,
+        };
+        const orders = serverDb.upsertPremiumOrder(updated);
+        io.emit('premium:orders_updated', { orders, latest: updated });
+        res.json({ ok: true, order: updated, orders });
+      });
+
+      app.post(
+        '/api/premium-orders/:id/decide',
+        requireStaffRole(['admin', 'cm']),
+        (req: Request, res: Response) => {
+          const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
+            .staffContext;
+          const body = (req.body ?? {}) as {
+            decision?: 'credit' | 'reject';
+            note?: string;
+            actorUsername?: string;
+          };
+          const decision = body.decision === 'reject' ? 'reject' : 'credit';
+          const actorAccount = staffCtx?.actorId
+            ? serverDb.findAccountById(staffCtx.actorId)
+            : undefined;
+          const actorUsername =
+            body.actorUsername ||
+            actorAccount?.displayName ||
+            actorAccount?.username ||
+            'Community Manager';
+
+          const result = serverDb.decidePremiumOrder({
+            orderId: req.params.id,
+            decision,
+            actorId: staffCtx?.actorId || 'system_cm',
+            actorUsername,
+            actorRole: staffCtx?.role === 'admin' ? 'admin' : 'cm',
+            note: body.note,
+          });
+
+          if (!result.ok) {
+            res.status(400).json(result);
+            return;
+          }
+
+          const snap = serverDb.getPublicSnapshot();
+          io.emit('premium:orders_updated', {
+            orders: result.orders,
+            latest: result.order,
+          });
+
+          if (decision === 'credit') {
+            const creditPayload: StateSyncPatchPayload & { version?: number } = {
+              accounts: snap.accounts,
+              worldState: snap.worldState ?? undefined,
+              ...(result.updatedProgress
+                ? {
+                    playerPatch: {
+                      accountId:
+                        result.updatedAccount?.id ?? result.order.requesterAccountId,
+                      progress: result.updatedProgress,
+                    },
+                  }
+                : {}),
+              updatedAt: snap.updatedAt,
+              version: snap.version,
+            };
+            io.emit('state:updated', creditPayload);
+            io.emit('state_update', creditPayload);
+          }
+
+          io.emit('audit:updated', {
+            logs: serverDb.getStaffAuditLogs(100),
+            latest: result.auditEntry,
+          });
+
+          res.json({
+            ok: true,
+            order: result.order,
+            orders: result.orders,
+            account: result.updatedAccount,
+            progress: result.updatedProgress,
+          });
         },
       );
 
@@ -726,7 +999,7 @@ async function startServer() {
 
       app.patch(
         '/api/ban-reviews/:id',
-        requireStaffRole(['admin', 'moderator', 'cm']),
+        requireStaffRole(['admin', 'moderator']),
         (req: Request, res: Response) => {
           const staffCtx = (req as Request & { staffContext?: StaffGuardContext })
             .staffContext;
@@ -789,218 +1062,13 @@ async function startServer() {
         },
       );
 
-      // ── PIPELINE CRON DO BOT DESIGNER GLOBAL (ZERO CONFLITO COM HUMANO) ──
-      const GLOBAL_BOT_CONCEPTS: Array<{
-        name: string;
-        brand: string;
-        category: ClothingItem['category'];
-        templateId: string;
-        gender: ClothingItem['gender'];
-        swatchColor: string;
-        secondaryColor: string;
-        accentColor: string;
-        pattern: ClothingItem['pattern'];
-        price: number;
-        vip: boolean;
-        collection: string;
-        description: string;
-      }> = [
-        {
-          name: 'Blazer Tóquio Néon 2026',
-          brand: 'Studio Shibuya AI',
-          category: 'blusas',
-          templateId: 'top_blazer_tweed',
-          gender: 'unissex',
-          swatchColor: '#1E1B24',
-          secondaryColor: '#00E5FF',
-          accentColor: '#FF2A85',
-          pattern: 'neon',
-          price: 420,
-          vip: false,
-          collection: 'Tóquio Runway Cron',
-          description: 'Corte arquitetônico inspirado nas semanas de moda asiáticas.',
-        },
-        {
-          name: 'Vestido Cetim Parisienne',
-          brand: 'Maison Lumière AI',
-          category: 'vestidos',
-          templateId: 'dress_cetim_champagne',
-          gender: 'feminino',
-          swatchColor: '#D4AF37',
-          secondaryColor: '#FFF4D8',
-          accentColor: '#C8235D',
-          pattern: 'sequin',
-          price: 680,
-          vip: true,
-          collection: 'Paris Haute Couture',
-          description: 'Caimento fluido com brilho dourado editorial para passarela VIP.',
-        },
-        {
-          name: 'Calça Cargo Seul Street',
-          brand: 'Urban District AI',
-          category: 'calcas',
-          templateId: 'bottom_cargo_urbana',
-          gender: 'unissex',
-          swatchColor: '#2E3A34',
-          secondaryColor: '#1B221F',
-          accentColor: '#E8A838',
-          pattern: 'denim',
-          price: 310,
-          vip: false,
-          collection: 'Seoul Street Drop',
-          description: 'Modelagem utilitária moderna com bolsos estruturados.',
-        },
-        {
-          name: 'Sobretudo Milão Cashmere',
-          brand: 'Ateliê Milano AI',
-          category: 'blusas',
-          templateId: 'top_sobretudo_caramelo',
-          gender: 'unissex',
-          swatchColor: '#9E6236',
-          secondaryColor: '#5B3418',
-          accentColor: '#E5C78E',
-          pattern: 'plaid',
-          price: 520,
-          vip: false,
-          collection: 'Milão Outono',
-          description: 'Peça de alfaiataria italiana com textura xadrez clássica.',
-        },
-      ];
-
-      const runBotDesignerCronCycle = (force = false) => {
-        const snap = serverDb.getSnapshot();
-        const now = Date.now();
-
-        // Trava de prioridade humana: se existe Designer Global humano online ou criação humana recente (< 10 min), o Bot cede prioridade
-        const humanDesignerOnline = snap.accounts.some((acc) => {
-          if (acc.isBot) return false;
-          const role = resolveActorRoleFromServer(acc.id, undefined, acc.email);
-          if (role !== 'designer') return false;
-          const pres = snap.presences[acc.id];
-          return pres && pres.status === 'online';
+      // Endpoint legado do Bot Designer Cron desativado permanentemente
+      app.post('/api/designer/cron-run', (_req: Request, res: Response) => {
+        res.status(410).json({
+          ok: false,
+          error: 'Geração automática de itens por Bot Designer foi desativada.',
         });
-
-        const recentHumanLock =
-          !force &&
-          snap.worldState?.lastDesignerCreationAt &&
-          now - snap.worldState.lastDesignerCreationAt < 10 * 60_000;
-
-        if (!force && (humanDesignerOnline || recentHumanLock)) {
-          return {
-            ok: true,
-            yieldedToHuman: true,
-            reason:
-              'Bot Designer cedeu prioridade porque há um Designer Global humano ativo recentemente.',
-          };
-        }
-
-        const existingIds = new Set(
-          (snap.worldState?.customClothingCatalog ?? []).map((i) => i.id),
-        );
-        const template =
-          GLOBAL_BOT_CONCEPTS[Math.floor(Math.random() * GLOBAL_BOT_CONCEPTS.length)];
-        const suffix = Math.random().toString(36).slice(2, 6);
-        const newId = `cron_bot_${now}_${suffix}`;
-        if (existingIds.has(newId)) {
-          return { ok: false, reason: 'Colisão de ID no ciclo.' };
-        }
-
-        const newItem: ClothingItem = {
-          id: newId,
-          name: `${template.name} #${suffix.toUpperCase()}`,
-          brand: template.brand,
-          category: template.category,
-          price: template.price,
-          zIndex:
-            template.category === 'vestidos'
-              ? 42
-              : template.category === 'calcas'
-                ? 30
-                : template.category === 'sapatos'
-                  ? 20
-                  : 40,
-          isVipOnly: template.vip,
-          vip: template.vip,
-          swatchColor: template.swatchColor,
-          secondaryColor: template.secondaryColor,
-          accentColor: template.accentColor,
-          pattern: template.pattern,
-          collectionTag: template.collection,
-          collection: template.collection,
-          gender: template.gender,
-          templateId: template.templateId,
-          description: template.description,
-          badge: 'Bot Designer IA',
-          customCreatedAt: now,
-          createdBy: 'Bot Designer Global (Cron)',
-        };
-
-        const logEntry: AiMaintenanceLogEntry = {
-          id: `ailog_cron_${now}`,
-          timestamp: now,
-          botId: 'bot_designer_global',
-          botName: 'Bot Designer Global · Cron',
-          botUsername: 'bot_designer_global',
-          serverRegion: 'BR',
-          category: 'design',
-          issueDetected: `Pesquisa e produção automática (${template.collection})`,
-          actionTaken: `Lançamento Zero-Downtime na Starplaza: "${newItem.name}" (${newItem.price} SC).`,
-          status: 'created',
-        };
-
-        const newsPost: NewsPost = {
-          id: `news_cron_${now}_${suffix}`,
-          title: `Novo Drop Automático · ${newItem.name}`,
-          summary: `O Bot Designer Global lançou "${newItem.name}" na Starplaza por ${newItem.price} SC (${template.collection}).`,
-          body: `Coleção ${template.collection}: "${newItem.name}" da grife ${newItem.brand} já está disponível com atualização Zero-Downtime no provador da Starplaza. ${newItem.description}`,
-          imageUrl: '/news/atelier-fashion.png',
-          imageCaption: `${newItem.brand} · Lançamento Bot Designer Global`,
-          category: template.vip ? 'Coleção VIP' : 'Lançamentos',
-          serverRegion: 'BR',
-          authorAccountId: 'bot_designer_global',
-          authorUsername: 'Bot Designer Global',
-          authorDisplayName: 'Bot Designer Global',
-          authorRoleTier: 'designer_global',
-          createdAt: now,
-        };
-
-        const injected = serverDb.injectDesignerItemZeroDowntime({
-          item: newItem,
-          logEntry,
-          newsPost,
-        });
-
-        if (!injected.ok) {
-          return { ok: false, reason: injected.reason };
-        }
-
-        const updatedSnap = serverDb.getPublicSnapshot();
-        const cronPayload = {
-          worldState: updatedSnap.worldState,
-          aiLogs: updatedSnap.aiLogs,
-          updatedAt: updatedSnap.updatedAt,
-          version: updatedSnap.version,
-        };
-        io.emit('state:updated', cronPayload);
-        io.emit('state_update', cronPayload);
-
-        return { ok: true, yieldedToHuman: false, item: newItem, newsPost };
-      };
-
-      const designerCronTimer = setInterval(() => {
-        runBotDesignerCronCycle(false);
-      }, 30 * 60_000);
-      designerCronTimer.unref();
-
-      app.post(
-        '/api/designer/cron-run',
-        requireStaffRole(['admin', 'designer', 'cm']),
-        (req: Request, res: Response) => {
-          const force = Boolean((req.body ?? {})?.force);
-          const result = runBotDesignerCronCycle(force);
-          res.json(result);
-        },
-      );
+      });
 
       app.post('/api/designer/analyze-photo', async (req: Request, res: Response) => {
         try {
@@ -1099,7 +1167,7 @@ async function startServer() {
             {
               text:
                 `Analise esta fotografia com precisão de diretor criativo de moda e design de interiores do jogo 2D Starlight Atelier. ${targetInstruction} ${hintInstruction} ` +
-                'Extraia a paleta de cores reais predominantes em hexadecimal (#RRGGBB), o padrão de textura, o corte/silhueta mais fiel, nome comercial elegante em português do Brasil, descrição curta de ateliê e preço justo em StarCoins (entre 140 e 1200 SC).',
+                'Extraia a paleta de cores reais predominantes em hexadecimal (#RRGGBB), o padrão de textura, o corte/silhueta mais fiel, nome comercial elegante em português do Brasil, descrição curta de ateliê e preço justo em moedas AM (entre 140 e 1200 AM).',
             },
           ],
         },

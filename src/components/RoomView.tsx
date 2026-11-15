@@ -64,13 +64,11 @@ import {
   evaluateMessageWithSentinelBot,
   getSentinelAiBotForServer,
   handleRoomReportWithModBot,
-  maybeGetCommunityManagerReply,
 } from '../utils/aiBots';
 import { soundEngine } from '../utils/sound';
 import {
   SERVER_REGION_META,
   getAccountByIdOrUsername,
-  getCommunityManagerServer,
   getFullRoomCatalog,
   getFullWallpaperCatalog,
   getModeratorServer,
@@ -233,11 +231,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   const isPrimaryAdmin = isPrimaryAdminAccount(currentUser);
   const modServer = getModeratorServer(currentUser);
-  const cmServer = getCommunityManagerServer(currentUser);
   const initialServer: ServerRegion =
     currentUser.serverRegion ??
     modServer ??
-    cmServer ??
     inferServerRegionFromCountry(playerState.countryCode) ??
     'BR';
 
@@ -386,22 +382,16 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   const hasRoomModJurisdiction =
     isPrimaryAdmin || (modServer !== null && modServer === activeRoomServer);
-  const hasRoomCmJurisdiction =
-    isPrimaryAdmin || (cmServer !== null && cmServer === activeRoomServer);
   const chatModCapability: ChatModCapability = isPrimaryAdmin
     ? 'admin'
     : hasRoomModJurisdiction
       ? 'ban_only'
-      : hasRoomCmJurisdiction
-        ? 'cm'
-        : 'none';
+      : 'none';
   const chatModLabel = isPrimaryAdmin
     ? 'Administrador Geral'
     : hasRoomModJurisdiction
       ? `Moderador (${activeRoomServer})`
-      : hasRoomCmJurisdiction
-        ? `Gerente da Comunidade (${activeRoomServer})`
-        : undefined;
+      : undefined;
 
   const filteredLobbyRooms = useMemo(() => {
     return allRooms.filter((room) => {
@@ -1260,30 +1250,6 @@ export const RoomView: React.FC<RoomViewProps> = ({
       channelRef.current,
     );
 
-    // Gerente da Comunidade responde dúvidas de jogadores na sala
-    const cmReply = maybeGetCommunityManagerReply({
-      text,
-      roomServer: activeRoomServer,
-      senderUsername: currentUser.username,
-    });
-    if (cmReply) {
-      nextSnap = appendRoomMessage(
-        activeRoomId,
-        {
-          id: `msg_cm_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-          roomId: activeRoomId,
-          senderUsername: cmReply.bot.username,
-          senderRole: 'admin',
-          senderStaffTier: cmReply.bot.staffRoleTier,
-          senderIsVip: Boolean(cmReply.bot.isVip),
-          text: cmReply.replyText,
-          createdAt: Date.now() + 1,
-        },
-        null,
-        channelRef.current,
-      );
-    }
-
     setSnapshot(nextSnap);
     return { blocked: false };
   };
@@ -1408,16 +1374,13 @@ export const RoomView: React.FC<RoomViewProps> = ({
       if (chatModCapability === 'admin') {
         return 'Comandos Administrador Geral: /aviso <texto>, /evento <texto>, /ban usuario [motivo], /limpar, /report usuario motivo';
       }
-      if (chatModCapability === 'cm') {
-        return `Comandos Gerente da Comunidade (${activeRoomServer}): /evento <texto>, /aviso <texto>, /report usuario motivo`;
-      }
       if (chatModCapability === 'ban_only') {
         return `Comandos Moderador (${activeRoomServer}): /ban usuario [motivo], /report usuario motivo`;
       }
       return 'Comando disponível: /report usuario [motivo]';
     }
 
-    if (!hasRoomModJurisdiction && !hasRoomCmJurisdiction) {
+    if (!hasRoomModJurisdiction) {
       return `Sem permissão de moderação neste servidor (${activeRoomServer}). Use /report usuario motivo.`;
     }
 
@@ -1432,8 +1395,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
     }
 
     if (cmd === '/aviso' || cmd === '/evento') {
-      if (chatModCapability !== 'admin' && chatModCapability !== 'cm') {
-        return 'Permissão restrita: apenas Administrador Geral e Gerente da Comunidade podem publicar avisos e eventos.';
+      if (chatModCapability !== 'admin') {
+        return 'Permissão restrita: apenas o Administrador Geral pode publicar avisos e eventos.';
       }
       const noticeText = parts.slice(1).join(' ').trim();
       if (!noticeText) {
@@ -1832,7 +1795,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
                             </p>
                             <p className="text-[10px] font-mono-num text-[#6B645D]">
                               {r.isVipOnly ? 'VIP · ' : ''}
-                              {r.price} SC
+                              {r.price} AM
                             </p>
                           </div>
                           <Lock className="w-3.5 h-3.5 text-[#78716C] shrink-0" />
@@ -2066,7 +2029,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
             </div>
           </div>
 
-          {/* Aviso de Eventos do Servidor Regional (Gerente da Comunidade / Admin) */}
+          {/* Aviso de Eventos do Servidor Regional (Admin) */}
           {serverNotices?.[activeRoomServer] && (
             <div className="mt-3 px-3.5 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D] flex items-center gap-2 text-xs text-[#78350F]">
               <Megaphone className="w-3.5 h-3.5 shrink-0 text-[#D97706]" />
@@ -2244,8 +2207,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
                       id: 'cm_control_desk',
                       tab: 'cm' as const,
                       requiredRole: 'cm' as const,
-                      title: 'Sala de Controle CM',
-                      subtitle: 'Saúde & Kill-Switch',
+                      title: 'Central Community Manager',
+                      subtitle: 'Tickets & Loja Premium',
                       x: '37%',
                       y: '62%',
                       accent: '#0284C7',
@@ -2769,7 +2732,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
           roomName={activeRoom.name}
           currentTrack={currentRoomDjTrack}
           currentUser={currentUser.username}
-          isHostOrStaff={canModerateRoomLocally || hasRoomModJurisdiction || hasRoomCmJurisdiction}
+          isHostOrStaff={canModerateRoomLocally || hasRoomModJurisdiction}
           volume={djVolume}
           isMuted={isDjAudioMuted}
           onChangeVolume={(vol) => {

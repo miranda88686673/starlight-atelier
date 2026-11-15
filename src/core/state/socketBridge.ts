@@ -13,6 +13,8 @@ import type {
 } from '../schemas/dbSchema';
 import type {
   BanReviewRequest,
+  PremiumOrder,
+  PremiumPixConfig,
   RoomDjTrack,
   RoomHealthMetric,
   RoomId,
@@ -37,6 +39,8 @@ export type RemoteSyncListener = {
   onRoomTerminated?: (notice: RoomTerminatedNotice) => void;
   onSupportTicketUpdated?: (tickets: SupportTicket[]) => void;
   onBanReviewUpdated?: (reviews: BanReviewRequest[]) => void;
+  onPremiumOrdersUpdated?: (orders: PremiumOrder[]) => void;
+  onPremiumPixUpdated?: (config: PremiumPixConfig) => void;
 };
 
 let activeSocket: Socket | null = null;
@@ -112,6 +116,14 @@ export function notifyRemoteSupportTickets(tickets: SupportTicket[]): void {
 
 export function notifyRemoteBanReviews(reviews: BanReviewRequest[]): void {
   listeners.forEach((l) => l.onBanReviewUpdated?.(reviews));
+}
+
+export function notifyRemotePremiumOrders(orders: PremiumOrder[]): void {
+  listeners.forEach((l) => l.onPremiumOrdersUpdated?.(orders));
+}
+
+export function notifyRemotePremiumPix(config: PremiumPixConfig): void {
+  listeners.forEach((l) => l.onPremiumPixUpdated?.(config));
 }
 
 export function emitRoomTelemetryPing(roomId: RoomId, latencyMs = 28): void {

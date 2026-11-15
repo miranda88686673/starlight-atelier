@@ -23,11 +23,7 @@ import {
 import { useGlobalState } from '../core/state/GlobalStateManager';
 import {
   AI_LOGS_KEY,
-  AutonomousLifeTickResult,
-  MaintenanceScanResult,
   loadAiLogs,
-  runAiMaintenanceScan,
-  runBotAutonomousLifeTick,
 } from '../utils/aiBots';
 import { createRealtimeChannel } from '../utils/realtime';
 import { soundEngine } from '../utils/sound';
@@ -226,53 +222,6 @@ export const GameRealtimeProvider: React.FC<{ children: React.ReactNode }> = ({
       unsubscribeSocket();
       window.removeEventListener('storage', onStorage);
       channel?.close();
-    };
-  }, [currentUser?.id, currentUser?.avatarGender]);
-
-  // Monitoramento automático + ciclos de criação do Designer Global (2h / 7d VIP / auditoria)
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const applyRepairSync = (res: MaintenanceScanResult) => {
-      if (res.repairedCount > 0) {
-        setAiLogs(res.logs);
-      }
-      if (res.worldChanged) {
-        setWorldState(loadWorldState());
-      }
-      if (res.playerIdsRepaired.includes(currentUser.id)) {
-        setPlayerState(
-          loadPlayerProgress(currentUser.id, currentUser.avatarGender),
-        );
-      }
-    };
-
-    const applyLifeSync = (life: AutonomousLifeTickResult) => {
-      if (life.worldUpdated) {
-        setWorldState(loadWorldState());
-      }
-      if (life.logsUpdated) {
-        setAiLogs(loadAiLogs());
-      }
-    };
-
-    const initialTimer = window.setTimeout(() => {
-      applyRepairSync(runAiMaintenanceScan({ logHealthyCheck: false }));
-      applyLifeSync(runBotAutonomousLifeTick());
-    }, 1800);
-
-    const repairInterval = window.setInterval(() => {
-      applyRepairSync(runAiMaintenanceScan({ logHealthyCheck: false }));
-    }, 25_000);
-
-    const lifeInterval = window.setInterval(() => {
-      applyLifeSync(runBotAutonomousLifeTick());
-    }, 14_000);
-
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(repairInterval);
-      window.clearInterval(lifeInterval);
     };
   }, [currentUser?.id, currentUser?.avatarGender]);
 

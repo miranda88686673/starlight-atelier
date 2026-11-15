@@ -50,18 +50,9 @@ import {
   UserAccount,
 } from './types/game';
 import {
-  AdminBotOrderInput,
-  AdminBotOrderResult,
-  AutonomousLifeTickResult,
-  MaintenanceScanResult,
   appendAiLog,
-  clearAiLogs,
   evaluateMessageWithSentinelBot,
-  executeAdminBotOrder,
   loadAiLogs,
-  runAiMaintenanceScan,
-  runBotAutonomousLifeTick,
-  simulateSystemFaultAndRepair,
 } from './utils/aiBots';
 import {
   appendRoomMessage,
@@ -92,7 +83,6 @@ import {
   removeStaffMember,
   resetAccountAndWorld,
   resolvePublicProfileSummary,
-  toggleBotRoamRooms,
   toggleUserVipStatus,
   unequipIncompatibleClothes,
   updateAccountIdentity,
@@ -110,15 +100,12 @@ export default function App() {
     setPlayerState,
     worldState,
     setWorldState,
-    aiLogs,
     setAiLogs,
     fullClothingCatalog,
     fullFurnitureCatalog,
     fullRoomCatalog,
     fullWallpaperCatalog,
     accountIsVip,
-    buyStarcoinsPackage,
-    activateVipPlan,
     publishNewsPost,
   } = useGameRealtime();
 
@@ -146,7 +133,7 @@ export default function App() {
       { id: 'starplaza', label: 'Starplaza' },
       { id: 'salas', label: 'Salas' },
       { id: 'noticias', label: 'Notícias' },
-      { id: 'vip_loja', label: 'VIP & SC' },
+      { id: 'vip_loja', label: 'Loja Premium' },
       { id: 'modtools', label: 'Moderação' },
     ],
     [],
@@ -485,7 +472,7 @@ export default function App() {
       resolveCoreStaffRole(currentUser) ?? 'designer',
       'CREATE_CATALOG_CLOTHING',
       item.id,
-      `Publicou roupa "${item.name}" (${item.category}, ${item.price} SC${item.isVipOnly ? ', VIP' : ''})`,
+      `Publicou roupa "${item.name}" (${item.category}, ${item.price} AM${item.isVipOnly ? ', VIP' : ''})`,
       currentUser.username,
     );
   };
@@ -499,7 +486,7 @@ export default function App() {
       resolveCoreStaffRole(currentUser) ?? 'designer',
       'CREATE_CATALOG_FURNITURE',
       furn.id,
-      `Publicou móvel "${furn.name}" (${furn.category}, ${furn.price} SC)`,
+      `Publicou móvel "${furn.name}" (${furn.category}, ${furn.price} AM)`,
       currentUser.username,
     );
   };
@@ -513,7 +500,7 @@ export default function App() {
       resolveCoreStaffRole(currentUser) ?? 'designer',
       'CREATE_ROOM_TEMPLATE',
       roomTpl.id,
-      `Publicou modelo de sala "${roomTpl.name}" (${roomTpl.price} SC)`,
+      `Publicou modelo de sala "${roomTpl.name}" (${roomTpl.price} AM)`,
       currentUser.username,
     );
   };
@@ -527,7 +514,7 @@ export default function App() {
       resolveCoreStaffRole(currentUser) ?? 'designer',
       'CREATE_WALLPAPER',
       wp.id,
-      `Publicou papel de parede "${wp.name}" (${wp.price} SC)`,
+      `Publicou papel de parede "${wp.name}" (${wp.price} AM)`,
       currentUser.username,
     );
   };
@@ -638,19 +625,6 @@ export default function App() {
     const res = removeStaffMember(accountId);
     if (res.removed) {
       setWorldState(res.world);
-    }
-  };
-
-  const handleToggleBotRoam = (accountId: string) => {
-    if (!isPrimaryAdminAccount(currentUser)) return;
-    soundEngine.playEquip();
-    const updated = toggleBotRoamRooms(accountId);
-    if (updated) {
-      // Dispara ciclo imediato caso tenha sido ligado para aparecer rapidamente na sala
-      if (updated.botRoamRooms !== false) {
-        runBotAutonomousLifeTick();
-      }
-      setWorldState(loadWorldState());
     }
   };
 
@@ -856,67 +830,6 @@ export default function App() {
     return { ok: true };
   };
 
-  // --- Handlers da IA Autônoma (Manutenção, Sentinela Progressiva & Designer) ---
-  const applyMaintenanceResultToState = (res: MaintenanceScanResult): MaintenanceScanResult => {
-    setAiLogs(res.logs);
-    if (res.worldChanged) {
-      setWorldState(loadWorldState());
-    }
-    if (currentUser && res.playerIdsRepaired.includes(currentUser.id)) {
-      setPlayerState(loadPlayerProgress(currentUser.id, currentUser.avatarGender));
-    }
-    return res;
-  };
-
-  const handleRunAiDiagnostics = (): MaintenanceScanResult => {
-    soundEngine.playEquip();
-    const res = runAiMaintenanceScan({
-      logHealthyCheck: true,
-      triggeredBy: 'Diagnóstico Manual',
-    });
-    return applyMaintenanceResultToState(res);
-  };
-
-  const handleSimulateFaultAndRepair = (): MaintenanceScanResult => {
-    soundEngine.playModAction();
-    const res = simulateSystemFaultAndRepair(currentUser?.id);
-    return applyMaintenanceResultToState(res);
-  };
-
-  const handleRunBotLifeTick = (options?: {
-    forceDesignerCreation?: boolean;
-    forceWeeklyVip?: boolean;
-    forceWardrobeAudit?: boolean;
-  }): AutonomousLifeTickResult => {
-    soundEngine.playEquip();
-    const res = runBotAutonomousLifeTick(options);
-    if (res.worldUpdated) setWorldState(loadWorldState());
-    if (res.logsUpdated) setAiLogs(loadAiLogs());
-    return res;
-  };
-
-  const handleExecuteAdminBotOrder = (
-    input: AdminBotOrderInput,
-  ): AdminBotOrderResult => {
-    if (!isPrimaryAdminAccount(currentUser)) {
-      return {
-        ok: false,
-        message: 'Acesso restrito ao Administrador Geral autorizado.',
-        worldUpdated: false,
-        logsUpdated: false,
-      };
-    }
-    const res = executeAdminBotOrder(input);
-    if (res.ok) {
-      soundEngine.playPurchase();
-    } else {
-      soundEngine.playModAction();
-    }
-    if (res.worldUpdated) setWorldState(loadWorldState());
-    if (res.logsUpdated) setAiLogs(loadAiLogs());
-    return res;
-  };
-
   const handleSentinelModerationAction = (params: {
     bot: UserAccount;
     action: 'warning' | 'mute' | 'ban';
@@ -1029,7 +942,7 @@ export default function App() {
         ? 'salon_es'
         : input.server === 'EN'
           ? 'lounge_en'
-          : 'lounge_principal';
+          : 'lounge_party';
 
     const roomSnapshot = readRoomsSnapshot();
     const recentMsgs = roomSnapshot.messagesByRoom[serverMainRoomId] ?? [];
@@ -1095,11 +1008,6 @@ export default function App() {
     setAiLogs(loadAiLogs());
   };
 
-  const handleClearAiLogs = () => {
-    soundEngine.playModAction();
-    setAiLogs(clearAiLogs());
-  };
-
   const handleUploadProfilePhoto = (targetUid: string, dataUrl: string) => {
     if (!currentUser) return;
     const isOwner = currentUser.id === targetUid;
@@ -1112,7 +1020,8 @@ export default function App() {
       return;
     }
     soundEngine.playPurchase();
-    socket.emit('user:update_profile_pic', {
+    const socket = getActiveSyncSocket();
+    socket?.emit('user:update_profile_pic', {
       actorId: currentUser.id,
       targetUid,
       profilePic: dataUrl,
@@ -1139,7 +1048,8 @@ export default function App() {
       return;
     }
     soundEngine.playEquip();
-    socket.emit('user:update_profile_pic', {
+    const socket = getActiveSyncSocket();
+    socket?.emit('user:update_profile_pic', {
       actorId: currentUser.id,
       targetUid,
       profilePic: '',
@@ -1381,7 +1291,7 @@ export default function App() {
             <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1C1917]">
               <Coins className="w-4 h-4 text-[#C6922B]" />
               <span className="font-mono-num">
-                {playerState.starcoins.toLocaleString('pt-BR')} SC
+                {playerState.starcoins.toLocaleString('pt-BR')} AM
               </span>
             </div>
 
@@ -1390,7 +1300,7 @@ export default function App() {
               onClick={handleClaimAllowance}
               className="text-xs font-semibold text-[#C8235D] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
             >
-              +250 SC
+              +250 AM
             </button>
 
             <button
@@ -1554,11 +1464,10 @@ export default function App() {
 
         {activeTab === 'vip_loja' && (
           <VipCoinsStoreView
+            currentUser={currentUser}
             starcoins={playerState.starcoins}
             isAccountVip={accountIsVip}
             legendaryCatalog={fullClothingCatalog}
-            onBuyStarcoinsPack={(amount) => buyStarcoinsPackage(amount)}
-            onActivateVipPlan={(bonus) => activateVipPlan(bonus)}
             onGoToStarplaza={() => setActiveTab('starplaza')}
           />
         )}
@@ -1574,7 +1483,6 @@ export default function App() {
               playerState,
             }}
             globalNotice={worldState.globalNotice}
-            serverNotices={worldState.serverNotices}
             users={worldState.users}
             deletedItemIds={worldState.deletedItemIds}
             bannedWords={worldState.bannedWords}
@@ -1582,19 +1490,17 @@ export default function App() {
             customClothingCatalog={worldState.customClothingCatalog}
             customFurnitureCatalog={worldState.customFurnitureCatalog}
             onUpdateNotice={handleUpdateNotice}
-            onUpdateServerNotice={handleUpdateServerNotice}
             onToggleBanUser={handleToggleBanUser}
             onToggleUserVip={handleToggleUserVip}
             onAssignStaffRole={handleAssignStaffRole}
             onAssignAccountStaffRole={handleAssignAccountStaffRole}
-            onCreateStaffBot={handleCreateStaffBot}
-            onUpdateStaffProfile={handleUpdateStaffProfile}
-            onRemoveStaffMember={handleRemoveStaffMember}
-            onToggleBotRoam={handleToggleBotRoam}
             onCreateCustomClothing={handleCreateCustomClothing}
             onCreateCustomFurniture={handleCreateCustomFurniture}
             onCreateCustomRoomTemplate={handleCreateCustomRoomTemplate}
             onCreateCustomWallpaper={handleCreateCustomWallpaper}
+            onCreateStaffBot={handleCreateStaffBot}
+            onUpdateStaffProfile={handleUpdateStaffProfile}
+            onRemoveStaffMember={handleRemoveStaffMember}
             onDeleteCatalogItem={handleDeleteCatalogItem}
             onRestoreAllItems={handleRestoreAllItems}
             onResetAllDemoData={handleResetAllDemoData}
@@ -1604,13 +1510,7 @@ export default function App() {
             onOpenPublicProfile={handleOpenPublicProfile}
             onUploadProfilePhoto={handleUploadProfilePhoto}
             onRemoveProfilePhoto={handleRemoveProfilePhoto}
-            aiLogs={aiLogs}
-            onRunAiDiagnostics={handleRunAiDiagnostics}
-            onSimulateFaultAndRepair={handleSimulateFaultAndRepair}
-            onRunBotLifeTick={handleRunBotLifeTick}
-            onExecuteAdminBotOrder={handleExecuteAdminBotOrder}
             onSimulateSentinelChatTest={handleSimulateSentinelChatTest}
-            onClearAiLogs={handleClearAiLogs}
           />
         )}
       </main>

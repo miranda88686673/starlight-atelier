@@ -1,22 +1,20 @@
 import {
   ACCOUNT_COUNTRIES,
-  AMBIENT_ROOM_AVATARS,
+  CATALOG_SCHEMA_VERSION,
   DEFAULT_BANNED_WORDS,
-  DEFAULT_MOCK_USERS,
-  DEFAULT_STAFF_MEMBERS,
   DEFAULT_SUITE_ITEMS,
   FURNITURE_CATALOG,
   INITIAL_CLOTHING_CATALOG,
   INITIAL_NEWS_POSTS,
   PURCHASABLE_ROOMS_CATALOG,
   PURCHASABLE_WALLPAPERS_CATALOG,
+  STARTER_IDS_BY_GENDER,
 } from '../data/catalog';
 import type { AccountCountryOption } from '../types/game';
 import { emitStatePatchToServer } from '../core/state/socketBridge';
 import {
   AvatarDisplayMode,
   AvatarGender,
-  BotAiSpecialty,
   ClothingItem,
   EquippedOutfit,
   FurnitureDef,
@@ -117,9 +115,9 @@ export const DEFAULT_STAFF_ROLE_TITLES: Record<StaffRoleTier, string> = {
   mod_br: 'Moderador (BR)',
   mod_es: 'Moderador (ES)',
   mod_en: 'Moderador (EN)',
-  cm_br: 'Gerente da Comunidade (BR)',
-  cm_es: 'Gerente da Comunidade (ES)',
-  cm_en: 'Gerente da Comunidade (EN)',
+  cm_br: 'Community Manager (BR)',
+  cm_es: 'Community Manager (ES)',
+  cm_en: 'Community Manager (EN)',
   designer_global: 'Designer Global',
 };
 
@@ -178,7 +176,7 @@ export function getModeratorServer(account?: UserAccount | null): ServerRegion |
   return null;
 }
 
-/** Retorna o servidor regional gerido pelo Gerente da Comunidade (BR, ES, EN), ou null */
+/** Retorna o servidor regional do Community Manager (BR, ES, EN), ou null */
 export function getCommunityManagerServer(account?: UserAccount | null): ServerRegion | null {
   if (!account || isPrimaryAdminAccount(account)) return null;
   if (account.staffRoleTier === 'cm_br') return 'BR';
@@ -198,15 +196,12 @@ export function canBanInServer(
   return modServer !== null && modServer === targetServer;
 }
 
-/** Verifica se a conta pode enviar avisos comunitários / eventos no servidor informado */
+/** Verifica se a conta pode enviar avisos comunitários / eventos no servidor informado (apenas Admin Geral) */
 export function canManageCommunityInServer(
   account?: UserAccount | null,
-  targetServer: ServerRegion = 'BR',
+  _targetServer: ServerRegion = 'BR',
 ): boolean {
-  if (!account) return false;
-  if (isPrimaryAdminAccount(account)) return true;
-  const cmServer = getCommunityManagerServer(account);
-  return cmServer !== null && cmServer === targetServer;
+  return isPrimaryAdminAccount(account);
 }
 
 /** Infere o servidor regional principal a partir do país configurado no perfil */
@@ -498,37 +493,27 @@ export function createDefaultPlayerState(
   avatarGender: AvatarGender = 'feminino',
   seedForIp: string = 'guest_session',
 ): PlayerProgressState {
-  const starterIds = INITIAL_CLOTHING_CATALOG.filter((item) => item.starter).map(
-    (item) => item.id,
-  );
-
-  // Look inicial adaptado ao estilo de avatar selecionado no cadastro
+  const genderStarter = STARTER_IDS_BY_GENDER[avatarGender] ?? STARTER_IDS_BY_GENDER.feminino;
   const defaultEquippedByGender: Record<AvatarGender, EquippedOutfit> = {
     feminino: {
-      cabelo: 'hair_ondas_mel',
-      blusas: 'top_camisa_seda',
-      calcas: 'bottom_saia_midi',
-      sapatos: 'shoes_scarpin_preto',
+      cabelo: STARTER_IDS_BY_GENDER.feminino.cabelo,
+      blusas: STARTER_IDS_BY_GENDER.feminino.blusas,
+      calcas: STARTER_IDS_BY_GENDER.feminino.calcas,
+      sapatos: STARTER_IDS_BY_GENDER.feminino.sapatos,
     },
     masculino: {
-      cabelo: 'hair_corte_executivo',
-      blusas: 'top_camisa_social_azul',
-      calcas: 'bottom_chino_areia',
-      sapatos: 'shoes_oxford_couro',
+      cabelo: STARTER_IDS_BY_GENDER.masculino.cabelo,
+      blusas: STARTER_IDS_BY_GENDER.masculino.blusas,
+      calcas: STARTER_IDS_BY_GENDER.masculino.calcas,
+      sapatos: STARTER_IDS_BY_GENDER.masculino.sapatos,
     },
     neutro: {
-      cabelo: 'hair_coque_atelier',
-      blusas: 'top_camisa_seda',
-      calcas: 'bottom_calca_alfaiataria',
-      sapatos: 'shoes_tenis_branco',
+      cabelo: STARTER_IDS_BY_GENDER.neutro.cabelo,
+      blusas: STARTER_IDS_BY_GENDER.neutro.blusas,
+      calcas: STARTER_IDS_BY_GENDER.neutro.calcas,
+      sapatos: STARTER_IDS_BY_GENDER.neutro.sapatos,
     },
   };
-
-  // Garante que o cabelo inicial do look neutro esteja liberado no guarda-roupa
-  const initialOwned =
-    avatarGender === 'neutro'
-      ? Array.from(new Set([...starterIds, 'hair_coque_atelier']))
-      : starterIds;
 
   const defaultCountry = getCountryMeta('BR');
 
@@ -539,8 +524,9 @@ export function createDefaultPlayerState(
   );
 
   return {
+    catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
     starcoins: 1200,
-    ownedItemIds: initialOwned,
+    ownedItemIds: [...genderStarter.owned],
     ownedFurnitureIds: starterFurnitureIds,
     ownedRoomTemplateIds: starterRoomIds,
     ownedWallpaperIds: starterWallpaperIds,
@@ -548,7 +534,7 @@ export function createDefaultPlayerState(
     skinTone: 'pessego',
     avatarGender,
     avatarDisplayMode: 'medoll',
-    bio: 'Explorando estilos na Starplaza e decorando minha Suíte no Starlight Atelier.',
+    bio: 'Explorando estilos 3D na Starplaza e decorando minha Suíte no Starlight Atelier.',
     presenceStatus: 'online',
     countryCode: defaultCountry.code,
     timezone: defaultCountry.timezone,
@@ -571,7 +557,7 @@ export function createDefaultPlayerState(
   };
 }
 
-/** Contas iniciais pré-cadastradas (Administrador Geral e bots iniciais da Staff por servidor) */
+/** Contas iniciais pré-cadastradas (Apenas Administrador Geral) */
 function createSeededAccounts(): UserAccount[] {
   return [
     {
@@ -587,125 +573,6 @@ function createSeededAccounts(): UserAccount[] {
       isVip: true,
       isPrimaryOwner: true,
       createdAt: '01/01/2025',
-    },
-    {
-      id: 'acc_staff_bella',
-      username: 'bella_mod',
-      displayName: 'Bella',
-      email: 'bella@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'mod_br',
-      staffRoleTitle: 'Moderador (BR)',
-      serverRegion: 'BR',
-      isBot: true,
-      botAiSpecialty: 'moderation',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '05/01/2025',
-    },
-    {
-      id: 'acc_staff_kaio',
-      username: 'kaio_dev',
-      displayName: 'Kaio',
-      email: 'kaio@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'mod_en',
-      staffRoleTitle: 'Moderador (EN)',
-      serverRegion: 'EN',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '10/01/2025',
-    },
-    {
-      id: 'acc_staff_mari',
-      username: 'mari_estilo',
-      displayName: 'Mari',
-      email: 'mari@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'mod_es',
-      staffRoleTitle: 'Moderador (ES)',
-      serverRegion: 'ES',
-      isBot: true,
-      botAiSpecialty: 'moderation',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '15/01/2025',
-    },
-    {
-      id: 'acc_staff_lucas',
-      username: 'lucas_eventos',
-      displayName: 'Lucas',
-      email: 'lucas@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'cm_br',
-      staffRoleTitle: 'Gerente da Comunidade (BR)',
-      serverRegion: 'BR',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '18/01/2025',
-    },
-    {
-      id: 'acc_staff_celine',
-      username: 'celine_atelier',
-      displayName: 'Celine',
-      email: 'celine@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'designer_global',
-      staffRoleTitle: 'Designer Global',
-      isVip: true,
-      isBot: true,
-      botAiSpecialty: 'designer',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '20/01/2025',
-    },
-    {
-      id: 'acc_staff_sofia_cm',
-      username: 'sofia_comunidad',
-      displayName: 'Sofía',
-      email: 'sofia@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'cm_es',
-      staffRoleTitle: 'Gerente da Comunidade (ES)',
-      serverRegion: 'ES',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '22/01/2025',
-    },
-    {
-      id: 'acc_staff_alex_cm',
-      username: 'alex_community',
-      displayName: 'Alex',
-      email: 'alex@starlightatelier.com',
-      password: 'staff123',
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'cm_en',
-      staffRoleTitle: 'Gerente da Comunidade (EN)',
-      serverRegion: 'EN',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '24/01/2025',
     },
   ];
 }
@@ -749,43 +616,6 @@ function clearRemovedStaffId(accountId: string): void {
   }
 }
 
-/** Garante que cada membro inicial da Staff tenha sua MeDoll e bio persistidas como conta real */
-function ensureSeededStaffProgress(accounts: UserAccount[]): void {
-  if (typeof window === 'undefined') return;
-  for (const staff of DEFAULT_STAFF_MEMBERS) {
-    const account = accounts.find(
-      (a) =>
-        (staff.accountId && a.id === staff.accountId) ||
-        normalizeUsername(a.username) === normalizeUsername(staff.username),
-    );
-    if (!account) continue;
-
-    const storageKey = `${PLAYER_PREFIX}${account.id}`;
-    try {
-      if (!window.localStorage.getItem(storageKey)) {
-        const base = createDefaultPlayerState(staff.avatarGender, account.id);
-        const equippedIds = Object.values(staff.equipped).filter(
-          (v): v is string => Boolean(v),
-        );
-        const seededProgress: PlayerProgressState = {
-          ...base,
-          starcoins: staff.roleTier === 'admin' ? 4500 : 2200,
-          ownedItemIds: Array.from(new Set([...base.ownedItemIds, ...equippedIds])),
-          equipped: { ...staff.equipped },
-          skinTone: staff.skinTone,
-          avatarGender: staff.avatarGender,
-          avatarDisplayMode: 'medoll',
-          bio: staff.bio,
-          presenceStatus: staff.status === 'ausente' ? 'ausente' : 'online',
-        };
-        window.localStorage.setItem(storageKey, JSON.stringify(seededProgress));
-      }
-    } catch {
-      // Silencioso em modo restrito
-    }
-  }
-}
-
 /** Estado compartilhado padrão da sala e moderação */
 export function createDefaultWorldState(): WorldModerationState {
   const seededAccounts = createSeededAccounts();
@@ -805,14 +635,15 @@ export function createDefaultWorldState(): WorldModerationState {
   }));
 
   return {
+    catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
     globalNotice:
-      'Bem-vinda ao Starlight Atelier! Nova coleção Boutique VIP disponível na Starplaza.',
+      'Bem-vinda ao Starlight Atelier 3D! 400 novas peças Three.js (Livres AM, VIP & Lendárias) e Lounge Party Oficial.',
     serverNotices: {
-      BR: 'Evento da Semana BR: Desfile Editorial na Festa na Cobertura hoje às 20h!',
-      ES: 'Evento ES: Encuentro de looks vintage en el Salón Principal ES.',
-      EN: 'EN Community Event: Rooftop Fashion Meetup open all day!',
+      BR: 'Encontro Oficial no Lounge Party! Explore o novo catálogo 3D na Starplaza.',
+      ES: '¡Encuentro oficial en Lounge Party! Explora las 400 nuevas prendas 3D.',
+      EN: 'Official Meetup at Lounge Party! Explore the new Three.js 3D collections.',
     },
-    users: [...seededStaffUsers, ...DEFAULT_MOCK_USERS],
+    users: [...seededStaffUsers],
     deletedItemIds: [],
     customClothingCatalog: [],
     customFurnitureCatalog: [],
@@ -841,12 +672,23 @@ const LEGACY_ROLE_TITLES = new Set([
   'Moderador do Servidor em Inglês',
   'Moderador (EN) — Servidor em Inglês',
   'Engenheiro & Mod do Servidor Inglês',
+  'Gerente da Comunidade (BR)',
+  'Gerente da Comunidade (ES)',
+  'Gerente da Comunidade (EN)',
   'Gerente da Comunidade (BR) — Servidor Brasileiro',
   'Gerente da Comunidade (ES) — Servidor Espanhol',
   'Gerente da Comunidade (EN) — Servidor em Inglês',
 ]);
 
-/** Carrega todas as contas cadastradas no localStorage (Fonte Única de Verdade) */
+function isBotOrLegacySeedId(id?: string): boolean {
+  if (!id) return false;
+  if (id === 'bot_designer_global') return true;
+  if (id.startsWith('acc_bot_')) return true;
+  if (id.startsWith('acc_staff_') && !id.startsWith('acc_staff_human_')) return true;
+  return false;
+}
+
+/** Carrega todas as contas reais cadastradas no localStorage (expurga bots e seeds) */
 export function loadAccounts(): UserAccount[] {
   const seeded = createSeededAccounts();
   const removedIds = getRemovedStaffIds();
@@ -855,18 +697,24 @@ export function loadAccounts(): UserAccount[] {
     const raw = window.localStorage.getItem(ACCOUNTS_KEY);
     if (!raw) {
       window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(seeded));
-      ensureSeededStaffProgress(seeded);
       return seeded;
     }
     const parsed = JSON.parse(raw) as Array<Partial<UserAccount>>;
     if (!Array.isArray(parsed) || parsed.length === 0) {
       window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(seeded));
-      ensureSeededStaffProgress(seeded);
       return seeded;
     }
 
     let changed = false;
-    const merged: UserAccount[] = parsed.map((rawAcc) => {
+    const filteredRaw = parsed.filter((rawAcc) => {
+      if (rawAcc.isBot || isBotOrLegacySeedId(rawAcc.id)) {
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+
+    const merged: UserAccount[] = filteredRaw.map((rawAcc) => {
       const seedMatch = seeded.find(
         (s) =>
           s.id === rawAcc.id ||
@@ -905,25 +753,6 @@ export function loadAccounts(): UserAccount[] {
             ? DEFAULT_STAFF_ROLE_TITLES[staffRoleTier]
             : undefined;
 
-      const isBot =
-        typeof rawAcc.isBot === 'boolean'
-          ? rawAcc.isBot
-          : Boolean(seedMatch?.isBot);
-      const botAiSpecialty: BotAiSpecialty | undefined = isBot
-        ? rawAcc.botAiSpecialty ??
-          seedMatch?.botAiSpecialty ??
-          (staffRoleTier === 'designer_global' ? 'designer' : 'hybrid')
-        : rawAcc.botAiSpecialty;
-      const botActive = isBot
-        ? typeof rawAcc.botActive === 'boolean'
-          ? rawAcc.botActive
-          : true
-        : rawAcc.botActive;
-      const botRoamRooms = isBot
-        ? typeof rawAcc.botRoamRooms === 'boolean'
-          ? rawAcc.botRoamRooms
-          : true
-        : rawAcc.botRoamRooms;
       const isVip =
         typeof rawAcc.isVip === 'boolean'
           ? rawAcc.isVip
@@ -940,9 +769,6 @@ export function loadAccounts(): UserAccount[] {
         rawAcc.staffRoleTier !== staffRoleTier ||
         rawAcc.staffRoleTitle !== staffRoleTitle ||
         rawAcc.serverRegion !== serverRegion ||
-        rawAcc.botAiSpecialty !== botAiSpecialty ||
-        rawAcc.botActive !== botActive ||
-        rawAcc.botRoamRooms !== botRoamRooms ||
         rawAcc.isVip !== isVip
       ) {
         changed = true;
@@ -954,22 +780,21 @@ export function loadAccounts(): UserAccount[] {
         displayName,
         email: resolvedEmail,
         password: rawAcc.password ?? '',
+        password_hash: rawAcc.password_hash,
+        profilePic: rawAcc.profilePic,
         avatarGender: rawAcc.avatarGender ?? 'feminino',
         role: isPrimaryOwner || staffRoleTier ? 'admin' : rawAcc.role ?? 'player',
         staffRoleTier,
         staffRoleTitle,
         serverRegion,
         isVip,
-        isBot,
-        botAiSpecialty,
-        botActive,
-        botRoamRooms,
+        isBot: false,
         isPrimaryOwner,
         createdAt: rawAcc.createdAt ?? new Date().toLocaleDateString('pt-BR'),
       };
     });
 
-    // Garante que apenas contas iniciais NÃO removidas pelo Admin sejam inseridas
+    // Garante apenas que a conta Admin Fundadora exista
     for (const seedAcc of seeded) {
       if (!seedAcc.isPrimaryOwner && removedIds.includes(seedAcc.id)) {
         continue;
@@ -989,10 +814,8 @@ export function loadAccounts(): UserAccount[] {
     if (changed) {
       window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(merged));
     }
-    ensureSeededStaffProgress(merged);
     return merged;
   } catch {
-    ensureSeededStaffProgress(seeded);
     return seeded;
   }
 }
@@ -1007,7 +830,7 @@ function saveAccounts(accounts: UserAccount[]): void {
   emitStatePatchToServer({ accounts });
 }
 
-/** Carrega estado compartilhado de moderação sincronizado com as contas reais */
+/** Carrega estado compartilhado de moderação sincronizado com as contas reais (sem fantasmas nem bots) */
 export function loadWorldState(): WorldModerationState {
   const accounts = loadAccounts();
   const removedIds = getRemovedStaffIds();
@@ -1018,7 +841,12 @@ export function loadWorldState(): WorldModerationState {
     const parsed = JSON.parse(raw) as Partial<WorldModerationState>;
 
     const baseUsers = Array.isArray(parsed.users)
-      ? parsed.users.filter((u) => !removedIds.includes(u.id))
+      ? parsed.users.filter(
+          (u) =>
+            !removedIds.includes(u.id) &&
+            !u.id.startsWith('usr_') &&
+            !isBotOrLegacySeedId(u.id),
+        )
       : [...fallback.users];
 
     const existingUsers: MockUser[] = baseUsers.map((u) => {
@@ -1072,19 +900,22 @@ export function loadWorldState(): WorldModerationState {
       }
     }
 
+    const isV3World = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
+    const filteredCustomClothes = Array.isArray(parsed.customClothingCatalog)
+      ? parsed.customClothingCatalog.filter((c) => Boolean(c?.threeSpec))
+      : [];
+
     return {
+      catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
       globalNotice:
-        typeof parsed.globalNotice === 'string'
+        typeof parsed.globalNotice === 'string' && isV3World
           ? parsed.globalNotice
           : fallback.globalNotice,
-      serverNotices: parsed.serverNotices ?? fallback.serverNotices,
+      serverNotices: isV3World ? (parsed.serverNotices ?? fallback.serverNotices) : fallback.serverNotices,
       users: existingUsers,
-      deletedItemIds: Array.isArray(parsed.deletedItemIds)
-        ? parsed.deletedItemIds
-        : [],
-      customClothingCatalog: Array.isArray(parsed.customClothingCatalog)
-        ? parsed.customClothingCatalog
-        : [],
+      deletedItemIds:
+        isV3World && Array.isArray(parsed.deletedItemIds) ? parsed.deletedItemIds : [],
+      customClothingCatalog: filteredCustomClothes,
       customFurnitureCatalog: Array.isArray(parsed.customFurnitureCatalog)
         ? parsed.customFurnitureCatalog
         : [],
@@ -1289,7 +1120,7 @@ export function updateAccountIdentity(
   if (shouldChargeFee && !hasChanged) {
     return {
       ok: false,
-      error: `Nenhuma alteração detectada. Modifique o nome para aplicar a taxa de ${NAME_CHANGE_FEE_SC} SC.`,
+      error: `Nenhuma alteração detectada. Modifique o nome para aplicar a taxa de ${NAME_CHANGE_FEE_SC} AM.`,
     };
   }
 
@@ -1311,7 +1142,7 @@ export function updateAccountIdentity(
   if (feeToDeduct > 0 && currentProgress.starcoins < feeToDeduct) {
     return {
       ok: false,
-      error: `Saldo insuficiente! Alterar o nome do avatar exige ${NAME_CHANGE_FEE_SC} SC (seu saldo: ${currentProgress.starcoins} SC).`,
+      error: `Saldo insuficiente! Alterar o nome do avatar exige ${NAME_CHANGE_FEE_SC} AM (seu saldo: ${currentProgress.starcoins} AM).`,
     };
   }
 
@@ -1436,7 +1267,7 @@ export function updateAccountIdentity(
 }
 
 /**
- * Cria um novo membro/bot da Staff do zero (exclusivo do Administrador).
+ * Cria um novo membro humano da Staff manualmente (exclusivo do Administrador).
  */
 export function createStaffAccount(input: {
   displayName: string;
@@ -1450,9 +1281,6 @@ export function createStaffAccount(input: {
   equipped: EquippedOutfit;
   customAvatarUrl?: string;
   avatarDisplayMode: AvatarDisplayMode;
-  botAiSpecialty?: BotAiSpecialty;
-  botActive?: boolean;
-  botRoamRooms?: boolean;
   isVip?: boolean;
 }):
   | { ok: true; account: UserAccount; world: WorldModerationState }
@@ -1492,7 +1320,7 @@ export function createStaffAccount(input: {
 
   const serverRegion = STAFF_ROLE_SERVER_MAP[input.staffRoleTier];
   const newAccount: UserAccount = {
-    id: `acc_bot_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+    id: `acc_staff_human_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
     username: normalizedUsername,
     displayName: trimmedDisplay,
     email: `${normalizedUsername}@starlightatelier.com`,
@@ -1506,12 +1334,7 @@ export function createStaffAccount(input: {
     isVip:
       input.isVip ??
       (input.staffRoleTier === 'admin' || input.staffRoleTier === 'designer_global'),
-    isBot: true,
-    botAiSpecialty:
-      input.botAiSpecialty ??
-      (input.staffRoleTier === 'designer_global' ? 'designer' : 'hybrid'),
-    botActive: input.botActive ?? true,
-    botRoamRooms: input.botRoamRooms ?? true,
+    isBot: false,
     createdAt: new Date().toLocaleDateString('pt-BR'),
   };
 
@@ -1568,8 +1391,7 @@ export function createStaffAccount(input: {
 }
 
 /**
- * Permite ao Administrador editar livremente qualquer perfil de bot/membro da Staff
- * (nome, nome de usuário, bio, foto de perfil, roupas/MeDoll, status e servidor de atuação).
+ * Permite ao Administrador editar livremente qualquer perfil de membro da Staff.
  */
 export function updateStaffProfileByAdmin(
   accountId: string,
@@ -1585,9 +1407,6 @@ export function updateStaffProfileByAdmin(
     equipped: EquippedOutfit;
     customAvatarUrl?: string;
     avatarDisplayMode: AvatarDisplayMode;
-    botAiSpecialty?: BotAiSpecialty;
-    botActive?: boolean;
-    botRoamRooms?: boolean;
     isVip?: boolean;
   },
 ):
@@ -1613,9 +1432,6 @@ export function updateStaffProfileByAdmin(
   const nextServer = isOwner ? undefined : STAFF_ROLE_SERVER_MAP[nextTier];
   const nextTitle =
     input.staffRoleTitle?.trim() || DEFAULT_STAFF_ROLE_TITLES[nextTier];
-  const nextRoamRooms = target.isBot
-    ? input.botRoamRooms ?? target.botRoamRooms ?? true
-    : target.botRoamRooms;
 
   const updatedAccount: UserAccount = {
     ...target,
@@ -1624,23 +1440,13 @@ export function updateStaffProfileByAdmin(
     staffRoleTier: nextTier,
     staffRoleTitle: nextTitle,
     serverRegion: nextServer,
+    isBot: false,
     isVip:
       input.isVip ??
       (isOwner || nextTier === 'designer_global' ? true : target.isVip),
-    botAiSpecialty: target.isBot
-      ? input.botAiSpecialty ??
-        target.botAiSpecialty ??
-        (nextTier === 'designer_global' ? 'designer' : 'hybrid')
-      : target.botAiSpecialty,
-    botActive: target.isBot ? input.botActive ?? target.botActive ?? true : target.botActive,
-    botRoamRooms: nextRoamRooms,
   };
 
   saveAccounts(accounts.map((a) => (a.id === accountId ? updatedAccount : a)));
-
-  if (target.isBot && !nextRoamRooms) {
-    removeBotPresenceFromRoomsStorage(accountId);
-  }
 
   const currentProgress = loadPlayerProgress(accountId, input.avatarGender);
   const equippedIds = Object.values(input.equipped).filter((v): v is string => Boolean(v));
@@ -2229,9 +2035,10 @@ export function loadPlayerProgress(
       return fallback;
     }
     const parsed = JSON.parse(raw) as Partial<PlayerProgressState>;
-    const starterIds = INITIAL_CLOTHING_CATALOG.filter((item) => item.starter).map(
-      (item) => item.id,
-    );
+    const resolvedGender: AvatarGender = parsed.avatarGender ?? fallbackGender;
+    const genderFallback = createDefaultPlayerState(resolvedGender, accountId);
+    const validCatalogIds = new Set(INITIAL_CLOTHING_CATALOG.map((item) => item.id));
+    const starterIds = STARTER_IDS_BY_GENDER[resolvedGender]?.owned ?? STARTER_IDS_BY_GENDER.feminino.owned;
     const starterFurnitureIds = FURNITURE_CATALOG.filter((f) => f.starter).map((f) => f.id);
     const starterRoomIds = PURCHASABLE_ROOMS_CATALOG.filter((r) => r.starter).map((r) => r.id);
     const starterWallpaperIds = PURCHASABLE_WALLPAPERS_CATALOG.filter((w) => w.starter).map(
@@ -2241,17 +2048,57 @@ export function loadPlayerProgress(
       ? parsed.suite.items.map((it) => it.furnitureId)
       : [];
 
+    // Migração v3: remove roupas e cabelos legados mantendo AM, VIP, foto de perfil e amigos
+    const isV3 = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
+    const cleanedOwnedItems = isV3 && Array.isArray(parsed.ownedItemIds)
+      ? Array.from(
+          new Set([
+            ...starterIds,
+            ...parsed.ownedItemIds.filter((id) => validCatalogIds.has(id) || id.startsWith('custom_3d_')),
+          ]),
+        )
+      : [...starterIds];
+
+    const rawEq = parsed.equipped ?? {};
+    const cleanedEquipped: EquippedOutfit = isV3
+      ? {
+          cabelo:
+            rawEq.cabelo && (validCatalogIds.has(rawEq.cabelo) || rawEq.cabelo.startsWith('custom_3d_'))
+              ? rawEq.cabelo
+              : genderFallback.equipped.cabelo,
+          blusas:
+            rawEq.blusas && (validCatalogIds.has(rawEq.blusas) || rawEq.blusas.startsWith('custom_3d_'))
+              ? rawEq.blusas
+              : genderFallback.equipped.blusas,
+          vestidos:
+            rawEq.vestidos && (validCatalogIds.has(rawEq.vestidos) || rawEq.vestidos.startsWith('custom_3d_'))
+              ? rawEq.vestidos
+              : undefined,
+          calcas:
+            rawEq.calcas && (validCatalogIds.has(rawEq.calcas) || rawEq.calcas.startsWith('custom_3d_'))
+              ? rawEq.calcas
+              : genderFallback.equipped.calcas,
+          sapatos:
+            rawEq.sapatos && (validCatalogIds.has(rawEq.sapatos) || rawEq.sapatos.startsWith('custom_3d_'))
+              ? rawEq.sapatos
+              : genderFallback.equipped.sapatos,
+          acessorios:
+            rawEq.acessorios && (validCatalogIds.has(rawEq.acessorios) || rawEq.acessorios.startsWith('custom_3d_'))
+              ? rawEq.acessorios
+              : undefined,
+        }
+      : { ...genderFallback.equipped };
+
     const countryMeta = getCountryMeta(parsed.countryCode ?? fallback.countryCode);
     const validPresence: PresenceStatus =
       parsed.presenceStatus === 'ausente' || parsed.presenceStatus === 'offline'
         ? parsed.presenceStatus
         : 'online';
 
-    return {
+    const migratedState: PlayerProgressState = {
+      catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
       starcoins: typeof parsed.starcoins === 'number' ? parsed.starcoins : fallback.starcoins,
-      ownedItemIds: Array.isArray(parsed.ownedItemIds)
-        ? Array.from(new Set([...parsed.ownedItemIds, ...starterIds]))
-        : fallback.ownedItemIds,
+      ownedItemIds: cleanedOwnedItems,
       ownedFurnitureIds: Array.isArray(parsed.ownedFurnitureIds)
         ? Array.from(
             new Set([
@@ -2267,13 +2114,14 @@ export function loadPlayerProgress(
       ownedWallpaperIds: Array.isArray(parsed.ownedWallpaperIds)
         ? Array.from(new Set([...parsed.ownedWallpaperIds, ...starterWallpaperIds]))
         : starterWallpaperIds,
-      equipped: parsed.equipped ?? fallback.equipped,
+      equipped: cleanedEquipped,
       skinTone: parsed.skinTone ?? fallback.skinTone,
-      avatarGender: parsed.avatarGender ?? fallbackGender,
+      avatarGender: resolvedGender,
+      profilePic: typeof parsed.profilePic === 'string' ? parsed.profilePic : undefined,
       customAvatarUrl:
         typeof parsed.customAvatarUrl === 'string' ? parsed.customAvatarUrl : undefined,
       avatarDisplayMode:
-        parsed.avatarDisplayMode === 'photo' && parsed.customAvatarUrl
+        parsed.avatarDisplayMode === 'photo' && (parsed.profilePic || parsed.customAvatarUrl)
           ? 'photo'
           : 'medoll',
       bio: typeof parsed.bio === 'string' ? parsed.bio : fallback.bio,
@@ -2300,6 +2148,15 @@ export function loadPlayerProgress(
           }
         : fallback.suite,
     };
+
+    if (!isV3) {
+      try {
+        window.localStorage.setItem(`${PLAYER_PREFIX}${accountId}`, JSON.stringify(migratedState));
+      } catch {
+        // Silencioso
+      }
+    }
+    return migratedState;
   } catch {
     return fallback;
   }
@@ -2504,9 +2361,6 @@ export function resolvePublicProfileSummary(params: {
       (accountMatch && u.id === accountMatch.id) ||
       normalizeUsername(u.username) === cleanUsername,
   );
-  const ambientMatch = AMBIENT_ROOM_AVATARS.find(
-    (a) => normalizeUsername(a.username) === cleanUsername,
-  );
 
   // Resolve progresso vivo salvo no localStorage (ou do usuário atual)
   let progress: PlayerProgressState;
@@ -2516,10 +2370,9 @@ export function resolvePublicProfileSummary(params: {
     progress = loadPlayerProgress(accountMatch.id, accountMatch.avatarGender);
   } else {
     progress = getAccountLiveProgress(mockMatch?.id, cleanUsername, {
-      skinTone: fallbackAppearance?.skinTone ?? ambientMatch?.skinTone ?? 'pessego',
-      avatarGender:
-        fallbackAppearance?.avatarGender ?? ambientMatch?.avatarGender ?? 'feminino',
-      equipped: fallbackAppearance?.equipped ?? ambientMatch?.equipped ?? {},
+      skinTone: fallbackAppearance?.skinTone ?? 'pessego',
+      avatarGender: fallbackAppearance?.avatarGender ?? 'feminino',
+      equipped: fallbackAppearance?.equipped ?? {},
     });
   }
 

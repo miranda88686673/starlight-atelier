@@ -396,7 +396,7 @@ export const MeDollStudio: React.FC<MeDollStudioProps> = ({
                   Nenhuma peça nesta categoria ainda.
                 </p>
                 <p className="text-xs text-[#78716C] mt-1 mb-4">
-                  Visite a Starplaza para adquirir novos itens com suas Starcoins.
+                  Visite a Starplaza para adquirir novos itens com suas moedas AM.
                 </p>
                 <button
                   type="button"

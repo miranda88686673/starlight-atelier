@@ -580,7 +580,7 @@ export function runAiMaintenanceScan(options?: {
             snapDirty = true;
             fixedPresence = {
               ...fixedPresence,
-              roomId: badRoom ? 'lounge_principal' : fixedPresence.roomId,
+              roomId: badRoom ? 'lounge_party' : fixedPresence.roomId,
               x: badX ? 50 : fixedPresence.x,
               y: badY ? Math.round((minY + maxY) / 2) : fixedPresence.y,
             };
@@ -1325,13 +1325,13 @@ const DESIGNER_ROOM_CONCEPTS: Array<{
   {
     name: 'Galeria Lumière Paris',
     subtitle: 'Lounge artístico para encontros de estilistas · Servidor Internacional',
-    backdropTheme: 'lounge_principal',
+    backdropTheme: 'lounge_party',
     serverRegion: 'EN',
   },
   {
     name: 'Café Galería Diseño ES',
     subtitle: 'Espacio temático de diseño y moda · Servidor Español',
-    backdropTheme: 'cafe_starlight',
+    backdropTheme: 'bar_lounge',
     serverRegion: 'ES',
   },
 ];
@@ -1652,22 +1652,7 @@ export function runBotAutonomousLifeTick(options?: {
       ? pool[Math.floor(Math.random() * pool.length)]
       : pool.find((r) => r.id === existing.roomId) ?? pool[0];
 
-    // Bots têm ~25% de chance ao trocar de sala de atuar diretamente em sua Mesa de Trabalho em `central_staff`
-    const centralStaffRoom = allRooms.find((r) => r.id === 'central_staff');
-    if (shouldSwitchRoom && centralStaffRoom && Math.random() < 0.28) {
-      chosenRoom = centralStaffRoom;
-    }
-
-    const workDeskAnchor =
-      chosenRoom.id === 'central_staff'
-        ? bot.staffRoleTier === 'admin'
-          ? { x: 18, y: 68 }
-          : bot.staffRoleTier?.startsWith('cm_') || bot.botAiSpecialty === 'maintenance'
-            ? { x: 38, y: 65 }
-            : bot.staffRoleTier === 'designer_global' || bot.botAiSpecialty === 'designer'
-              ? { x: 76, y: 65 }
-              : { x: 58, y: 66 }
-        : null;
+    const workDeskAnchor = null;
 
     const nextX = workDeskAnchor
       ? Math.max(10, Math.min(90, Math.round(workDeskAnchor.x + (Math.random() * 6 - 3))))

@@ -44,6 +44,101 @@ export const CATEGORY_LABELS: Record<ClothingCategory, string> = {
 /** Público/estilo principal da peça na Starplaza e Guarda-Roupa */
 export type ItemGenderStyle = 'feminino' | 'masculino' | 'unissex';
 
+/** Classe comercial e de raridade obrigatória para separação na Loja e Guarda-Roupa */
+export type ItemClassTier = 'am' | 'vip' | 'legendary';
+
+/** Estilo geométrico procedural 3D para peças de vestuário no motor Three.js */
+export type Garment3DSilhouette =
+  | 'tshirt'
+  | 'silk_shirt'
+  | 'cropped'
+  | 'corset'
+  | 'blazer'
+  | 'leather_jacket'
+  | 'hoodie'
+  | 'turtleneck'
+  | 'off_shoulder'
+  | 'trench_coat'
+  | 'vest_suit'
+  | 'dress_slip'
+  | 'dress_aline'
+  | 'dress_mermaid'
+  | 'dress_ballgown'
+  | 'dress_blazer'
+  | 'dress_mini_party'
+  | 'pants_tailored'
+  | 'pants_skinny'
+  | 'pants_wide'
+  | 'pants_cargo'
+  | 'shorts'
+  | 'skirt_mini'
+  | 'skirt_midi'
+  | 'skirt_pleated'
+  | 'shoe_heels'
+  | 'shoe_boots'
+  | 'shoe_sneakers'
+  | 'shoe_oxford'
+  | 'shoe_loafers'
+  | 'shoe_sandals'
+  | 'acc_crown'
+  | 'acc_sunglasses'
+  | 'acc_necklace'
+  | 'acc_bag'
+  | 'acc_hat'
+  | 'acc_earrings'
+  | 'acc_watch'
+  | 'acc_scepter';
+
+/** Estilo geométrico procedural 3D para cabelos no motor Three.js */
+export type Hair3DSilhouette =
+  | 'waves_long'
+  | 'bob_classic'
+  | 'high_bun'
+  | 'ponytail_high'
+  | 'straight_sleek'
+  | 'curly_voluminous'
+  | 'braids_twin'
+  | 'pixie_chic'
+  | 'layered_midi'
+  | 'half_up'
+  | 'executive_part'
+  | 'undercut_fade'
+  | 'quiff_textured'
+  | 'curly_fade'
+  | 'surfer_medium'
+  | 'slick_back'
+  | 'buzz_taper'
+  | 'dreads_short'
+  | 'wolf_cut'
+  | 'pompadour';
+
+export type Material3DFinish =
+  | 'cotton'
+  | 'silk'
+  | 'velvet'
+  | 'denim'
+  | 'leather'
+  | 'metallic'
+  | 'sequin'
+  | 'crystal'
+  | 'neon';
+
+export interface ThreeItemSpec {
+  garmentSilhouette?: Garment3DSilhouette;
+  hairSilhouette?: Hair3DSilhouette;
+  finish: Material3DFinish;
+  /** Escala sutil de volume (0.92..1.18) para diferenciação única das 400 peças */
+  volumeScale?: number;
+  /** Comprimento relativo (0.75..1.3) para saias/vestidos/cabelos */
+  lengthScale?: number;
+  /** Brilho emissivo para peças Lendárias ou Neon */
+  emissiveIntensity?: number;
+  /** Detalhe metálico (botões, fivelas, joias, zíper) */
+  metallicTrim?: boolean;
+  /** Detalhe de mechas/ombre nos cabelos */
+  highlightColor?: string;
+}
+
 /** Padrões têxteis e acabamentos visuais aplicados a roupas, móveis e papéis de parede */
 export type DesignPattern =
   | 'solid'
@@ -105,19 +200,23 @@ export interface ClothingItem {
   gender: ItemGenderStyle;
   /** Alias mantido para compatibilidade retroativa com referências legadas */
   genderStyle?: ItemGenderStyle;
+  /** Classe do item: Livre (AM), Exclusivo VIP ou Lendário */
+  itemClass?: ItemClassTier;
   price: number;
   zIndex: number;
   /** Define se a peça já vem desbloqueada no guarda-roupa inicial */
   starter?: boolean;
   /** Define se a peça é exclusiva da Boutique VIP */
   isVipOnly?: boolean;
-  /** Define se a peça pertence à raridade Lendária VIP de alto luxo */
+  /** Define se a peça pertence à classe Lendária */
   isLegendary?: boolean;
+  /** Especificação procedural Three.js 3D para modelagem e materiais PBR */
+  threeSpec?: ThreeItemSpec;
   /** Modelo visual usado para peças criadas pelo Ateliê / Designer Global */
   templateId?: string;
   /** Coleção ou tendência de moda (ex: Streetwear, Alta Costura, Y2K, Casual Chic) */
   collectionTag?: string;
-  /** Cor principal de destaque usada na miniatura e renderização vetorial */
+  /** Cor principal de destaque usada na miniatura e renderização */
   swatchColor: string;
   /** Cor secundária (lapelas, punhos, detalhes de acabamento) */
   secondaryColor?: string;
@@ -129,7 +228,7 @@ export interface ClothingItem {
   description?: string;
   /** Indica se a peça foi criada por clonagem de foto real via Gemini Vision */
   aiGeneratedFromPhoto?: boolean;
-  /** Data URL / caminho de imagem PNG transparente modular para camada 2D */
+  /** Data URL / caminho de imagem PNG transparente modular */
   customLayerPngUrl?: string;
   /** Ajuste horizontal (px no viewBox 280x520) da camada PNG sobre o manequim */
   layerOffsetX?: number;
@@ -264,6 +363,8 @@ export interface PlacedFurniture {
   x: number;
   /** Posição vertical em pixels dentro do palco da Suíte */
   y: number;
+  /** Rotação 3D no eixo Y em graus (0..360) */
+  rotationY?: number;
   /** Ordem de sobreposição na sala */
   zIndex: number;
   /** Espelhamento horizontal para ajustar orientação do móvel */
@@ -393,6 +494,7 @@ export type AvatarDisplayMode = 'medoll' | 'photo';
 
 /** Estado individual de progresso salvo por conta de usuário */
 export interface PlayerProgressState {
+  catalogSchemaVersion?: number;
   starcoins: number;
   ownedItemIds: string[];
   /** Móveis desbloqueados/comprados pelo jogador para decorar a Suíte */
@@ -484,6 +586,7 @@ export type RoomId = string;
 
 /** Fundos arquitetônicos disponíveis para salas padrão e criadas por jogadores */
 export type RoomBackdropTheme =
+  | 'lounge_party'
   | 'quarto_cozy'
   | 'lounge_principal'
   | 'cafe_starlight'
@@ -634,7 +737,7 @@ export type NewsCategory =
   | 'Comunidade & Conduta'
   | 'Atualizações';
 
-/** Post editorial da aba Notícias publicado pelos Gerentes da Comunidade ou Staff */
+/** Post editorial da aba Notícias publicado pela Staff */
 export interface NewsPost {
   id: string;
   title: string;
@@ -654,6 +757,7 @@ export interface NewsPost {
 
 /** Estado compartilhado da sala e moderação (aplicado a todos os perfis) */
 export interface WorldModerationState {
+  catalogSchemaVersion?: number;
   globalNotice: string;
   /** Avisos comunitários e de eventos por servidor regional (geridos pelo Admin ou Gerente da Comunidade) */
   serverNotices?: Partial<Record<ServerRegion, string>>;
@@ -689,17 +793,17 @@ export interface WorldModerationState {
 /** Estado global legado/unificado usado em memória pelo App */
 export interface PersistedGameState extends PlayerProgressState, WorldModerationState {}
 
-/** Mensagem dentro de um chamado de suporte (IA ou Moderador humano) */
+/** Mensagem dentro de um Ticket salvo entre jogador e Community Manager */
 export interface SupportChatMessage {
   id: string;
-  senderRole: 'player' | 'ai_bot' | 'moderator';
-  sender?: 'user' | 'ai' | 'moderator';
+  senderRole: 'player' | 'cm' | 'admin' | 'moderator';
+  sender?: 'user' | 'staff' | 'moderator';
   senderName: string;
   text: string;
   createdAt: number;
 }
 
-/** Chamado de suporte aberto no botão Help ou na aba Moderação */
+/** Ticket de atendimento salvo na tela inicial ou dentro do jogo */
 export interface SupportTicket {
   id: string;
   requesterAccountId?: string;
@@ -710,10 +814,51 @@ export interface SupportTicket {
   serverRegion?: ServerRegion;
   subject: string;
   messages: SupportChatMessage[];
-  status: 'ai_handling' | 'queued_human' | 'resolved';
+  status: 'open' | 'answered' | 'resolved';
   assignedModeratorUsername?: string;
+  assignedCmUsername?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export type PremiumOrderType = 'am_pack' | 'vip';
+export type PremiumOrderStatus = 'pending' | 'credited' | 'rejected';
+
+export interface PremiumOrderMessage {
+  id: string;
+  senderRole: 'player' | 'cm' | 'admin';
+  senderName: string;
+  text: string;
+  attachmentImageUrl?: string;
+  createdAt: number;
+}
+
+export interface PremiumOrder {
+  id: string;
+  requesterAccountId: string;
+  requesterUsername: string;
+  requesterDisplayName?: string;
+  packId: string;
+  packTitle: string;
+  priceLabel: string;
+  orderType: PremiumOrderType;
+  amAmount: number;
+  bonusAmAmount?: number;
+  pixKeyUsed: string;
+  receiptImageUrl?: string;
+  messages: PremiumOrderMessage[];
+  status: PremiumOrderStatus;
+  creditedByUsername?: string;
+  creditedAt?: number;
+  decisionNote?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PremiumPixConfig {
+  pixKey: string;
+  updatedBy?: string;
+  updatedAt?: number;
 }
 
 /** Solicitação / Revisão de banimento na fila do Moderador */

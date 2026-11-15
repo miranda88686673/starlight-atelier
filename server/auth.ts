@@ -70,44 +70,28 @@ export function buildInitialPlayerProgressServer(
   avatarGender: UserAccount['avatarGender'],
   serverRegion: ServerRegion = 'BR',
 ): PlayerProgressState {
-  const starterItems = [
-    'hair_ondas_mel',
-    'hair_bob_paris',
-    'hair_corte_executivo',
-    'hair_fade_moderno',
-    'top_camisa_seda',
-    'top_cropped_veludo',
-    'top_camisa_social_azul',
-    'top_jaqueta_couro',
-    'bottom_saia_midi',
-    'bottom_calca_alfaiataria',
-    'bottom_chino_areia',
-    'shoes_scarpin_preto',
-    'shoes_oxford_couro',
-    'shoes_tenis_branco',
-  ];
+  const isMasc = avatarGender === 'masculino';
+  const isNeutro = avatarGender === 'neutro';
 
-  const defaultEquipped =
-    avatarGender === 'masculino'
-      ? {
-          cabelo: 'hair_corte_executivo',
-          blusas: 'top_camisa_social_azul',
-          calcas: 'bottom_chino_areia',
-          sapatos: 'shoes_oxford_couro',
-        }
-      : avatarGender === 'neutro'
-        ? {
-            cabelo: 'hair_coque_atelier',
-            blusas: 'top_camisa_seda',
-            calcas: 'bottom_calca_alfaiataria',
-            sapatos: 'shoes_tenis_branco',
-          }
-        : {
-            cabelo: 'hair_ondas_mel',
-            blusas: 'top_camisa_seda',
-            calcas: 'bottom_saia_midi',
-            sapatos: 'shoes_scarpin_preto',
-          };
+  const starterItems = isMasc
+    ? ['m_hair_01', 'm_hair_02', 'm_top_01', 'm_bottom_01', 'm_shoes_01']
+    : isNeutro
+      ? ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01', 'm_hair_01', 'm_top_01', 'm_bottom_01', 'm_shoes_01']
+      : ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01'];
+
+  const defaultEquipped = isMasc
+    ? {
+        cabelo: 'm_hair_01',
+        blusas: 'm_top_01',
+        calcas: 'm_bottom_01',
+        sapatos: 'm_shoes_01',
+      }
+    : {
+        cabelo: 'f_hair_01',
+        blusas: 'f_top_01',
+        calcas: 'f_bottom_01',
+        sapatos: 'f_shoes_01',
+      };
 
   const countryCode =
     serverRegion === 'ES' ? 'ES' : serverRegion === 'EN' ? 'US' : 'BR';
@@ -119,11 +103,9 @@ export function buildInitialPlayerProgressServer(
         : 'America/Sao_Paulo';
 
   return {
+    catalogSchemaVersion: 3,
     starcoins: 1200,
-    ownedItemIds:
-      avatarGender === 'neutro'
-        ? Array.from(new Set([...starterItems, 'hair_coque_atelier']))
-        : starterItems,
+    ownedItemIds: starterItems,
     ownedFurnitureIds: ['furn_tapete_persa', 'furn_sofa_veludo', 'furn_luminaria_arco'],
     ownedRoomTemplateIds: ['tpl_room_cozy', 'tpl_room_lounge'],
     ownedWallpaperIds: ['wp_boiserie_marfim'],
@@ -172,132 +154,6 @@ export function createSeededServerAccounts(): UserAccount[] {
       isVip: true,
       isPrimaryOwner: true,
       createdAt: '01/01/2025',
-    },
-    {
-      id: 'acc_staff_bella',
-      username: 'bella_mod',
-      displayName: 'Bella',
-      email: 'bella@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'mod_br',
-      staffRoleTitle: 'Moderador (BR)',
-      serverRegion: 'BR',
-      isBot: true,
-      botAiSpecialty: 'moderation',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '05/01/2025',
-    },
-    {
-      id: 'acc_staff_kaio',
-      username: 'kaio_dev',
-      displayName: 'Kaio',
-      email: 'kaio@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'mod_en',
-      staffRoleTitle: 'Moderador (EN)',
-      serverRegion: 'EN',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '10/01/2025',
-    },
-    {
-      id: 'acc_staff_mari',
-      username: 'mari_estilo',
-      displayName: 'Mari',
-      email: 'mari@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'mod_es',
-      staffRoleTitle: 'Moderador (ES)',
-      serverRegion: 'ES',
-      isBot: true,
-      botAiSpecialty: 'moderation',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '15/01/2025',
-    },
-    {
-      id: 'acc_staff_lucas',
-      username: 'lucas_eventos',
-      displayName: 'Lucas',
-      email: 'lucas@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'cm_br',
-      staffRoleTitle: 'Gerente da Comunidade (BR)',
-      serverRegion: 'BR',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '18/01/2025',
-    },
-    {
-      id: 'acc_staff_celine',
-      username: 'celine_atelier',
-      displayName: 'Celine',
-      email: 'celine@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'designer_global',
-      staffRoleTitle: 'Designer Global',
-      isVip: true,
-      isBot: true,
-      botAiSpecialty: 'designer',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '20/01/2025',
-    },
-    {
-      id: 'acc_staff_sofia_cm',
-      username: 'sofia_comunidad',
-      displayName: 'Sofía',
-      email: 'sofia@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'feminino',
-      role: 'admin',
-      staffRoleTier: 'cm_es',
-      staffRoleTitle: 'Gerente da Comunidade (ES)',
-      serverRegion: 'ES',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '22/01/2025',
-    },
-    {
-      id: 'acc_staff_alex_cm',
-      username: 'alex_community',
-      displayName: 'Alex',
-      email: 'alex@starlightatelier.com',
-      password: '',
-      password_hash: hashPassword('staff123'),
-      avatarGender: 'masculino',
-      role: 'admin',
-      staffRoleTier: 'cm_en',
-      staffRoleTitle: 'Gerente da Comunidade (EN)',
-      serverRegion: 'EN',
-      isBot: true,
-      botAiSpecialty: 'hybrid',
-      botActive: true,
-      botRoamRooms: true,
-      createdAt: '24/01/2025',
     },
   ];
 }

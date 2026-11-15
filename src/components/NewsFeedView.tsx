@@ -3,7 +3,6 @@ import { Calendar, Camera, Globe, Newspaper, Plus, Sparkles, X } from 'lucide-re
 import { NEWS_PHOTO_ASSETS } from '../data/catalog';
 import { NewsCategory, NewsPost, ServerRegion, UserAccount } from '../types/game';
 import {
-  getCommunityManagerServer,
   isDesignerGlobalAccount,
   isPrimaryAdminAccount,
   normalizeUsername,
@@ -46,17 +45,16 @@ export const NewsFeedView: React.FC<NewsFeedViewProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'todas' | NewsCategory>('todas');
   const [composerOpen, setComposerOpen] = useState(false);
 
-  const cmServer = getCommunityManagerServer(currentUser);
   const isOwner = isPrimaryAdminAccount(currentUser);
   const isDesigner = isDesignerGlobalAccount(currentUser);
-  const canPublish = isOwner || Boolean(cmServer) || isDesigner;
+  const canPublish = isOwner || isDesigner;
 
   const [draftTitle, setDraftTitle] = useState('');
   const [draftSummary, setDraftSummary] = useState('');
   const [draftBody, setDraftBody] = useState('');
   const [draftCategory, setDraftCategory] = useState<NewsCategory>('Lançamentos');
   const [draftServer, setDraftServer] = useState<ServerRegion>(
-    cmServer ?? currentUser.serverRegion ?? 'BR',
+    currentUser.serverRegion ?? 'BR',
   );
   const [draftPhotoIdx, setDraftPhotoIdx] = useState(0);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
@@ -84,11 +82,11 @@ export const NewsFeedView: React.FC<NewsFeedViewProps> = ({
       imageUrl: chosenAsset.url,
       imageCaption: chosenAsset.label,
       category: draftCategory,
-      serverRegion: cmServer ?? draftServer,
+      serverRegion: draftServer,
       authorAccountId: currentUser.id,
       authorUsername: normalizeUsername(currentUser.username),
       authorDisplayName: currentUser.displayName,
-      authorRoleTier: currentUser.staffRoleTier ?? 'cm_br',
+      authorRoleTier: currentUser.staffRoleTier ?? 'admin',
     });
     setDraftTitle('');
     setDraftSummary('');
@@ -122,7 +120,7 @@ export const NewsFeedView: React.FC<NewsFeedViewProps> = ({
               Starlight Magazine & Notícias
             </h2>
             <p className="text-sm text-[#57534E] mt-0.5 max-w-2xl">
-              Cobertura fotográfica dos lançamentos da Starplaza, edições Lendárias VIP, eventos da comunidade e boletins dos Gerentes da Comunidade (BR · ES · EN).
+              Cobertura fotográfica dos lançamentos da Starplaza, edições Lendárias VIP, eventos da comunidade e boletins oficiais (BR · ES · EN).
             </p>
           </div>
         </div>
@@ -135,7 +133,7 @@ export const NewsFeedView: React.FC<NewsFeedViewProps> = ({
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#78350F] bg-[#FFFBEB] hover:bg-[#FEF3C7] border border-[#D97706] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              VIP & StarCoins
+              Loja Premium
             </button>
           )}
           {onGoToShop && (
@@ -221,10 +219,9 @@ export const NewsFeedView: React.FC<NewsFeedViewProps> = ({
                 <label className="block">
                   <span className="text-xs font-semibold text-[#44403C]">Servidor</span>
                   <select
-                    disabled={Boolean(cmServer)}
-                    value={cmServer ?? draftServer}
+                    value={draftServer}
                     onChange={(e) => setDraftServer(e.target.value as ServerRegion)}
-                    className="mt-1 w-full px-2.5 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D] disabled:opacity-60"
+                    className="mt-1 w-full px-2.5 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
                   >
                     <option value="BR">BR (PT)</option>
                     <option value="ES">ES (ES)</option>

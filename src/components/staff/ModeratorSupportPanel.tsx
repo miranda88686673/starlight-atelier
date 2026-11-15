@@ -3,10 +3,8 @@ import {
   Ban,
   CheckCircle2,
   Flag,
-  LifeBuoy,
   MessageSquare,
   RefreshCw,
-  Send,
   ShieldAlert,
   ShieldCheck,
   UserX,
@@ -17,7 +15,6 @@ import type {
   MockUser,
   RoomReportEntry,
   ServerRegion,
-  SupportTicket,
   UserAccount,
 } from '../../types/game';
 import { useGlobalState } from '../../core/state/GlobalStateManager';
@@ -43,31 +40,24 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
   onToggleBanUser,
   onSimulateSentinelChatTest,
 }) => {
-  const {
-    supportTickets,
-    banReviews,
-    refreshSupportTickets,
-    refreshBanReviews,
-  } = useGlobalState();
+  const { banReviews, refreshBanReviews } = useGlobalState();
 
-  const [selectedRoomId, setSelectedRoomId] = useState<string>('lounge_principal');
+  const [selectedRoomId, setSelectedRoomId] = useState<string>('lounge_party');
   const [roomsSnap, setRoomsSnap] = useState(() => readRoomsSnapshot());
-  const [replyByTicketId, setReplyByTicketId] = useState<Record<string, string>>({});
   const [banTargetIdOrUser, setBanTargetIdOrUser] = useState('');
   const [banReasonInput, setBanReasonInput] = useState('Violação das regras de convivência');
   const [sentinelInput, setSentinelInput] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Abrir pedido manual de revisão de banimento (para testes ou solicitação interna)
+  // Abrir pedido manual de revisão de banimento
   const [appealTargetUser, setAppealTargetUser] = useState('');
   const [appealReason, setAppealReason] = useState('');
 
   useEffect(() => {
-    void refreshSupportTickets();
     void refreshBanReviews();
     setRoomsSnap(readRoomsSnapshot());
-  }, [refreshBanReviews, refreshSupportTickets]);
+  }, [refreshBanReviews]);
 
   const role = resolveCoreStaffRole(currentUser) || 'moderator';
   const staffHeaders = {
@@ -82,37 +72,6 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
     [roomsSnap.customRooms],
   );
   const roomMessages = roomsSnap.messagesByRoom?.[selectedRoomId] ?? [];
-
-  const handleTicketAction = async (
-    ticket: SupportTicket,
-    nextStatus: SupportTicket['status'],
-  ) => {
-    setBusy(true);
-    try {
-      const replyText = (replyByTicketId[ticket.id] || '').trim();
-      const res = await fetch(`/api/support/tickets/${ticket.id}`, {
-        method: 'PATCH',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          replyText: replyText || undefined,
-          status: nextStatus,
-          moderatorUsername: currentUser.displayName || currentUser.username,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (data.ok) {
-        setReplyByTicketId((prev) => ({ ...prev, [ticket.id]: '' }));
-        setFeedback(`Ticket #${ticket.id} atualizado para "${nextStatus}".`);
-        await refreshSupportTickets();
-      } else {
-        setFeedback(data.error || 'Falha ao responder chamado.');
-      }
-    } catch {
-      setFeedback('Erro de conexão ao atualizar ticket.');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleBanReviewDecision = async (
     review: BanReviewRequest,
@@ -205,7 +164,7 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
     }
   };
 
-  const queuedCount = supportTickets.filter((t) => t.status === 'queued_human').length;
+  const pendingReviewsCount = banReviews.filter((r) => r.status === 'pending').length;
 
   return (
     <div className="space-y-6">
@@ -218,28 +177,27 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-display text-lg font-bold text-white">
-                Mesa da Moderação · Lei, Ordem & Suporte
+                Mesa da Moderação · Segurança &amp; Conduta
               </h3>
               <span className="px-2 py-0.5 text-[10px] font-bold bg-[#34D399] text-[#06281E] rounded-md">
-                {queuedCount} Chamado(s) na Fila
+                {pendingReviewsCount} Revisão(ões) Pendente(s)
               </span>
             </div>
             <p className="text-xs text-emerald-100 mt-0.5">
-              Atendimento escalonado do botão Help (Login), fila de revisão de banimentos, histórico de chat em tempo real e punição direta por User ID.
+              Monitoramento do chat das salas em tempo real, denúncias /report, fila de revisão de banimentos e punição direta por User ID.
             </p>
           </div>
         </div>
         <button
           type="button"
           onClick={() => {
-            void refreshSupportTickets();
             void refreshBanReviews();
             setRoomsSnap(readRoomsSnapshot());
           }}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg cursor-pointer"
         >
           <RefreshCw className="w-3.5 h-3.5" />
-          Sincronizar Fila
+          Sincronizar Moderação
         </button>
       </div>
 
@@ -255,105 +213,6 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
           </button>
         </div>
       )}
-
-      {/* 1. Fila de Suporte IA -> Moderador Humano */}
-      <section className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="font-display text-base font-bold text-[#1C1917] flex items-center gap-2">
-              <LifeBuoy className="w-4 h-4 text-[#059669]" />
-              Caixa de Chamados do Suporte (Login Help + IA)
-            </h4>
-            <p className="text-xs text-[#6B645D]">
-              Bots de IA nunca assumem ou encerram tickets marcados para Moderador Humano.
-            </p>
-          </div>
-          <span className="text-xs font-semibold text-[#57534E]">
-            Total: {supportTickets.length}
-          </span>
-        </div>
-
-        {supportTickets.length === 0 ? (
-          <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#EFEAE3] text-xs text-[#6B645D]">
-            Nenhum chamado encaminhado até o momento. Jogadores podem abrir chamados pelo botão <strong>Help · Suporte IA</strong> na tela de Login.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {supportTickets.map((ticket) => (
-              <div
-                key={ticket.id}
-                className={`p-4 rounded-xl border ${
-                  ticket.status === 'queued_human'
-                    ? 'bg-amber-50/50 border-amber-300'
-                    : 'bg-[#FAF8F5] border-[#E6E0D8]'
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-bold text-[#1C1917]">
-                      @{ticket.requesterUsername} · {ticket.subject}
-                    </span>
-                    <span className="ml-2 text-[10px] font-mono text-[#78716C]">
-                      #{ticket.id} ({ticket.category})
-                    </span>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
-                      ticket.status === 'resolved'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : ticket.status === 'queued_human'
-                          ? 'bg-amber-200 text-amber-900'
-                          : 'bg-sky-100 text-sky-800'
-                    }`}
-                  >
-                    {ticket.status === 'queued_human'
-                      ? 'Aguardando Moderador'
-                      : ticket.status === 'resolved'
-                        ? 'Resolvido'
-                        : 'Atendido por IA'}
-                  </span>
-                </div>
-
-                {ticket.messages.length > 0 && (
-                  <div className="mt-2.5 max-h-36 overflow-y-auto space-y-1.5 p-2.5 rounded-lg bg-white border border-[#EFEAE3]">
-                    {ticket.messages.slice(-6).map((m) => (
-                      <div key={m.id} className="text-[11px] text-[#44403C]">
-                        <strong className="text-[#1C1917]">{m.senderName}:</strong> {m.text}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {ticket.status !== 'resolved' && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      value={replyByTicketId[ticket.id] ?? ''}
-                      onChange={(e) =>
-                        setReplyByTicketId((prev) => ({
-                          ...prev,
-                          [ticket.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="Escreva a resposta formal do Moderador..."
-                      className="flex-1 min-w-[200px] px-3 py-1.5 text-xs bg-white border border-[#E6E0D8] rounded-lg"
-                    />
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handleTicketAction(ticket, 'resolved')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#059669] hover:bg-[#047857] rounded-lg cursor-pointer"
-                    >
-                      <Send className="w-3 h-3" />
-                      Responder & Resolver
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
 
       {/* 2. Histórico de Chat em Tempo Real + Banir/Mutar por User ID */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -429,7 +288,7 @@ export const ModeratorSupportPanel: React.FC<ModeratorSupportPanelProps> = ({
               list="mod-user-ids"
               value={banTargetIdOrUser}
               onChange={(e) => setBanTargetIdOrUser(e.target.value)}
-              placeholder="Ex: usr_1 ou @nome_jogador"
+              placeholder="Ex: @nome_jogador ou ID"
               className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
             />
             <datalist id="mod-user-ids">

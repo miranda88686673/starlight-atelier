@@ -40,6 +40,8 @@ import {
   notifyRemoteDjSynced,
   notifyRemoteInit,
   notifyRemotePatch,
+  notifyRemotePremiumOrders,
+  notifyRemotePremiumPix,
   notifyRemotePresence,
   notifyRemoteRoomHealth,
   notifyRemoteRoomTerminated,
@@ -50,6 +52,8 @@ import {
 import type { RoomTerminatedNotice } from './socketBridge';
 import type {
   BanReviewRequest,
+  PremiumOrder,
+  PremiumPixConfig,
   RoomDjTrack,
   RoomHealthMetric,
   RoomId,
@@ -76,6 +80,8 @@ interface GlobalStateContextValue {
   staffAuditLogs: StaffAuditLogEntry[];
   supportTickets: SupportTicket[];
   banReviews: BanReviewRequest[];
+  premiumOrders: PremiumOrder[];
+  premiumPixConfig: PremiumPixConfig;
   roomHealthList: RoomHealthMetric[];
   lastTerminatedNotice: RoomTerminatedNotice | null;
   clearTerminatedNotice: () => void;
@@ -84,6 +90,8 @@ interface GlobalStateContextValue {
   refreshStaffAuditLogs: (actor: UserAccount) => Promise<void>;
   refreshSupportTickets: () => Promise<void>;
   refreshBanReviews: () => Promise<void>;
+  refreshPremiumOrders: () => Promise<void>;
+  refreshPremiumPixConfig: () => Promise<void>;
   refreshRoomHealth: () => Promise<void>;
   bindHeartbeatUser: (
     account: UserAccount | null,
@@ -232,6 +240,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
   );
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [banReviews, setBanReviews] = useState<BanReviewRequest[]>([]);
+  const [premiumOrders, setPremiumOrders] = useState<PremiumOrder[]>([]);
+  const [premiumPixConfig, setPremiumPixConfig] = useState<PremiumPixConfig>({
+    pixKey: '7198826894',
+  });
   const [roomHealthList, setRoomHealthList] = useState<RoomHealthMetric[]>([]);
   const [lastTerminatedNotice, setLastTerminatedNotice] =
     useState<RoomTerminatedNotice | null>(null);
@@ -319,6 +331,14 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       if (Array.isArray(snapshot.ban_reviews)) {
         setBanReviews(snapshot.ban_reviews);
         notifyRemoteBanReviews(snapshot.ban_reviews);
+      }
+      if (Array.isArray(snapshot.premium_orders)) {
+        setPremiumOrders(snapshot.premium_orders);
+        notifyRemotePremiumOrders(snapshot.premium_orders);
+      }
+      if (snapshot.premium_pix_config?.pixKey) {
+        setPremiumPixConfig(snapshot.premium_pix_config);
+        notifyRemotePremiumPix(snapshot.premium_pix_config);
       }
       if (snapshot.room_health && typeof snapshot.room_health === 'object') {
         const list = Object.values(snapshot.room_health);
@@ -414,6 +434,24 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!Array.isArray(payload?.reviews)) return;
         setBanReviews(payload.reviews);
         notifyRemoteBanReviews(payload.reviews);
+      },
+    );
+
+    socket.on(
+      'premium:orders_updated',
+      (payload: { orders?: PremiumOrder[] }) => {
+        if (!Array.isArray(payload?.orders)) return;
+        setPremiumOrders(payload.orders);
+        notifyRemotePremiumOrders(payload.orders);
+      },
+    );
+
+    socket.on(
+      'premium:pix_updated',
+      (payload: { config?: PremiumPixConfig }) => {
+        if (!payload?.config?.pixKey) return;
+        setPremiumPixConfig(payload.config);
+        notifyRemotePremiumPix(payload.config);
       },
     );
 
@@ -609,6 +647,32 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshPremiumOrders = useCallback(async () => {
+    try {
+      const res = await fetch('/api/premium-orders');
+      if (!res.ok) return;
+      const data = (await res.json()) as { ok?: boolean; orders?: PremiumOrder[] };
+      if (data.ok && Array.isArray(data.orders)) {
+        setPremiumOrders(data.orders);
+      }
+    } catch {
+      // Silencioso
+    }
+  }, []);
+
+  const refreshPremiumPixConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/premium-pix-config');
+      if (!res.ok) return;
+      const data = (await res.json()) as { ok?: boolean; config?: PremiumPixConfig };
+      if (data.ok && data.config?.pixKey) {
+        setPremiumPixConfig(data.config);
+      }
+    } catch {
+      // Silencioso
+    }
+  }, []);
+
   const refreshRoomHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/rooms/health');
@@ -631,6 +695,8 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       staffAuditLogs,
       supportTickets,
       banReviews,
+      premiumOrders,
+      premiumPixConfig,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -639,6 +705,8 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshStaffAuditLogs,
       refreshSupportTickets,
       refreshBanReviews,
+      refreshPremiumOrders,
+      refreshPremiumPixConfig,
       refreshRoomHealth,
       bindHeartbeatUser,
     }),
@@ -650,6 +718,8 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       staffAuditLogs,
       supportTickets,
       banReviews,
+      premiumOrders,
+      premiumPixConfig,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -658,6 +728,8 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshStaffAuditLogs,
       refreshSupportTickets,
       refreshBanReviews,
+      refreshPremiumOrders,
+      refreshPremiumPixConfig,
       refreshRoomHealth,
       bindHeartbeatUser,
     ],

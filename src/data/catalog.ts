@@ -50,694 +50,638 @@ export const SKIN_TONES: SkinToneOption[] = [
   { id: 'cacau', label: 'Cacau Profundo', base: '#8B563E', shadow: '#683C28', blush: '#B85A56' },
 ];
 
-/**
- * Passo 2: Catálogo completo de vestuário (MeDoll & Starplaza).
- * Itens com `starter: true` já começam no guarda-roupa do jogador.
- */
-export const INITIAL_CLOTHING_CATALOG: ClothingItem[] = [
-  // --- CABELOS (z-index 50) ---
-  {
-    id: 'hair_ondas_mel',
-    name: 'Ondas Mel Clássicas',
-    brand: 'Atelier Lumière',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    starter: true,
-    swatchColor: '#B57B45',
-  },
-  {
-    id: 'hair_bob_paris',
-    name: 'Chanel Parisiense Ébano',
-    brand: 'Maison Noir',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    starter: true,
-    swatchColor: '#242024',
-  },
-  {
-    id: 'hair_coque_atelier',
-    name: 'Coque Alto Editorial',
-    brand: 'Maison Noir',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 180,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    swatchColor: '#4A312C',
-  },
-  {
-    id: 'hair_longo_cereja',
-    name: 'Longo Acobreado Rosé',
-    brand: 'Atelier Lumière',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 240,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    swatchColor: '#A94438',
-  },
-  {
-    id: 'hair_rabo_seda',
-    name: 'Rabo Alto Platinado',
-    brand: 'Atelier Lumière',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 260,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    swatchColor: '#E5D3B3',
-  },
-  {
-    id: 'hair_corte_executivo',
-    name: 'Corte Executivo Castanho',
-    brand: 'Homme Atelier',
-    category: 'cabelo',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    starter: true,
-    swatchColor: '#4A3224',
-  },
-  {
-    id: 'hair_fade_moderno',
-    name: 'Undercut Fade Ébano',
-    brand: 'Urban District',
-    category: 'cabelo',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    starter: true,
-    swatchColor: '#1F1D20',
-  },
-  {
-    id: 'hair_cachos_urbanos',
-    name: 'Cachos Volumosos Café',
-    brand: 'Urban District',
-    category: 'cabelo',
-    gender: 'masculino',
-    price: 190,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    swatchColor: '#36231C',
-  },
-  {
-    id: 'hair_surf_loiro',
-    name: 'Repartido Médio Dourado',
-    brand: 'Côté Mer',
-    category: 'cabelo',
-    gender: 'unissex',
-    price: 220,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    swatchColor: '#C89B54',
-  },
+/** Versão do catálogo 3D: incrementa para zerar inventários e looks legados */
+export const CATALOG_SCHEMA_VERSION = 3;
 
-  // --- BLUSAS, CAMISAS & JAQUETAS (z-index 40) ---
-  {
-    id: 'top_camisa_seda',
-    name: 'Camisa de Seda Marfim',
-    brand: 'Studio Rivoli',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.blusas,
-    starter: true,
-    swatchColor: '#F5EFE6',
+export const STARTER_IDS_BY_GENDER: Record<'feminino' | 'masculino' | 'neutro', {
+  cabelo: string;
+  blusas: string;
+  calcas: string;
+  sapatos: string;
+  owned: string[];
+}> = {
+  feminino: {
+    cabelo: 'f_hair_01',
+    blusas: 'f_top_01',
+    calcas: 'f_bottom_01',
+    sapatos: 'f_shoes_01',
+    owned: ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01'],
   },
-  {
-    id: 'top_cropped_veludo',
-    name: 'Cropped Veludo Carmim',
-    brand: 'Rouge Couture',
-    category: 'blusas',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.blusas,
-    starter: true,
-    swatchColor: '#B91C4D',
+  masculino: {
+    cabelo: 'm_hair_01',
+    blusas: 'm_top_01',
+    calcas: 'm_bottom_01',
+    sapatos: 'm_shoes_01',
+    owned: ['m_hair_01', 'm_hair_02', 'm_top_01', 'm_bottom_01', 'm_shoes_01'],
   },
-  {
-    id: 'top_camisa_social_azul',
-    name: 'Camisa Social Slim Celeste',
-    brand: 'Homme Atelier',
-    category: 'blusas',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.blusas,
-    starter: true,
-    swatchColor: '#90B2D8',
+  neutro: {
+    cabelo: 'f_hair_01',
+    blusas: 'f_top_01',
+    calcas: 'f_bottom_01',
+    sapatos: 'f_shoes_01',
+    owned: [
+      'f_hair_01',
+      'f_hair_02',
+      'f_top_01',
+      'f_bottom_01',
+      'f_shoes_01',
+      'm_hair_01',
+      'm_top_01',
+      'm_bottom_01',
+      'm_shoes_01',
+    ],
   },
-  {
-    id: 'top_camiseta_basica_preta',
-    name: 'T-Shirt Premium Grafite',
-    brand: 'Urban District',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.blusas,
-    starter: true,
-    swatchColor: '#2B2B30',
-  },
-  {
-    id: 'top_blazer_tweed',
-    name: 'Blazer Tweed Atelier',
-    brand: 'Studio Rivoli',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 320,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#2F3640',
-  },
-  {
-    id: 'top_corset_dourado',
-    name: 'Corset Cetim Champagne',
-    brand: 'Atelier Lumière',
-    category: 'blusas',
-    gender: 'feminino',
-    price: 290,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#DFC496',
-  },
-  {
-    id: 'top_blusa_ombro_laco',
-    name: 'Blusa Ombro a Ombro Pérola',
-    brand: 'Atelier Lumière',
-    category: 'blusas',
-    gender: 'feminino',
-    price: 230,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#F6E8EC',
-  },
-  {
-    id: 'top_sueter_listrado',
-    name: 'Suéter Breton Listrado',
-    brand: 'Côté Mer',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 150,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#23334C',
-  },
-  {
-    id: 'top_jaqueta_couro',
-    name: 'Jaqueta Biker Couro Noir',
-    brand: 'Maison Noir',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 360,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#1E1C21',
-  },
-  {
-    id: 'top_jaqueta_bomber',
-    name: 'Jaqueta Bomber Musgo',
-    brand: 'Urban District',
-    category: 'blusas',
-    gender: 'masculino',
-    price: 280,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#3B5242',
-  },
-  {
-    id: 'top_sobretudo_caramelo',
-    name: 'Trench Coat Caramelo Clássico',
-    brand: 'Homme Atelier',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 410,
-    zIndex: LAYER_Z_INDEX.blusas,
-    swatchColor: '#B58453',
-  },
-  {
-    id: 'top_hoodie_y2k_ny',
-    name: 'Hoodie Varsity SoHo Y2K',
-    brand: 'SoHo Youth USA',
-    category: 'blusas',
-    gender: 'unissex',
-    price: 310,
-    zIndex: LAYER_Z_INDEX.blusas,
-    collectionTag: 'Streetwear & Y2K EUA',
-    swatchColor: '#1E3A8A',
-  },
-  {
-    id: 'top_cropped_y2k_la',
-    name: 'Baby Tee Sunset Strip Y2K',
-    brand: 'Melrose Studio',
-    category: 'blusas',
-    gender: 'feminino',
-    price: 245,
-    zIndex: LAYER_Z_INDEX.blusas,
-    collectionTag: 'Streetwear & Y2K EUA',
-    swatchColor: '#EC4899',
-  },
+};
 
-  // --- VESTIDOS (z-index 42) ---
-  {
-    id: 'dress_tubinho_atelier',
-    name: 'Vestido Tubinho Noir Chanel',
-    brand: 'Maison Noir',
-    category: 'vestidos',
-    gender: 'feminino',
-    price: 340,
-    zIndex: LAYER_Z_INDEX.vestidos,
-    swatchColor: '#1F1D22',
-  },
-  {
-    id: 'dress_midi_floral_rose',
-    name: 'Vestido Midi Evasê Rosé',
-    brand: 'Atelier Lumière',
-    category: 'vestidos',
-    gender: 'feminino',
-    price: 310,
-    zIndex: LAYER_Z_INDEX.vestidos,
-    swatchColor: '#E59BB0',
-  },
-  {
-    id: 'dress_gala_escarlate',
-    name: 'Vestido Longo Gala Carmim',
-    brand: 'Rouge Couture',
-    category: 'vestidos',
-    gender: 'feminino',
-    price: 480,
-    zIndex: LAYER_Z_INDEX.vestidos,
-    swatchColor: '#A61B4B',
-  },
-  {
-    id: 'dress_cetim_champagne',
-    name: 'Slip Dress Cetim Champagne',
-    brand: 'Atelier Lumière',
-    category: 'vestidos',
-    gender: 'feminino',
-    price: 370,
-    zIndex: LAYER_Z_INDEX.vestidos,
-    swatchColor: '#E5CAA0',
-  },
+interface PaletteSwatch {
+  label: string;
+  primary: string;
+  secondary: string;
+  accent: string;
+  pattern?: ClothingItem['pattern'];
+}
 
-  // --- CALÇAS & SAIAS (z-index 30) ---
-  {
-    id: 'bottom_calca_alfaiataria',
-    name: 'Calça Alfaiataria Grafite',
-    brand: 'Studio Rivoli',
-    category: 'calcas',
-    gender: 'unissex',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.calcas,
-    starter: true,
-    swatchColor: '#374151',
-  },
-  {
-    id: 'bottom_saia_midi',
-    name: 'Saia Midi Plissada Rosé',
-    brand: 'Atelier Lumière',
-    category: 'calcas',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.calcas,
-    starter: true,
-    swatchColor: '#E8A5B2',
-  },
-  {
-    id: 'bottom_chino_areia',
-    name: 'Calça Chino Alfaiataria Areia',
-    brand: 'Homme Atelier',
-    category: 'calcas',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.calcas,
-    starter: true,
-    swatchColor: '#C8B496',
-  },
-  {
-    id: 'bottom_jeans_cintura',
-    name: 'Jeans Reto Vintage',
-    brand: 'Côté Mer',
-    category: 'calcas',
-    gender: 'unissex',
-    price: 210,
-    zIndex: LAYER_Z_INDEX.calcas,
-    swatchColor: '#486C94',
-  },
-  {
-    id: 'bottom_saia_couro',
-    name: 'Minissaia Estruturada Vinho',
-    brand: 'Rouge Couture',
-    category: 'calcas',
-    gender: 'feminino',
-    price: 260,
-    zIndex: LAYER_Z_INDEX.calcas,
-    swatchColor: '#6E1E33',
-  },
-  {
-    id: 'bottom_cargo_urbana',
-    name: 'Calça Cargo Street Grafite',
-    brand: 'Urban District',
-    category: 'calcas',
-    gender: 'masculino',
-    price: 245,
-    zIndex: LAYER_Z_INDEX.calcas,
-    swatchColor: '#3E454C',
-  },
-  {
-    id: 'bottom_jogger_creme',
-    name: 'Calça Jogger Moletom Creme',
-    brand: 'Urban District',
-    category: 'calcas',
-    gender: 'unissex',
-    price: 185,
-    zIndex: LAYER_Z_INDEX.calcas,
-    swatchColor: '#E6DDD0',
-  },
-  {
-    id: 'bottom_baggy_denim_us',
-    name: 'Jeans Baggy Skater Y2K NY',
-    brand: 'SoHo Youth USA',
-    category: 'calcas',
-    gender: 'unissex',
-    price: 295,
-    zIndex: LAYER_Z_INDEX.calcas,
-    collectionTag: 'Streetwear & Y2K EUA',
-    swatchColor: '#3B6592',
-  },
-
-  // --- SAPATOS (z-index 20) ---
-  {
-    id: 'shoes_scarpin_preto',
-    name: 'Scarpin Bico Fino Preto',
-    brand: 'Maison Noir',
-    category: 'sapatos',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    starter: true,
-    swatchColor: '#1E1B1E',
-  },
-  {
-    id: 'shoes_sapatilha_creme',
-    name: 'Sapatilha Laço Marfim',
-    brand: 'Studio Rivoli',
-    category: 'sapatos',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    starter: true,
-    swatchColor: '#EAE0D2',
-  },
-  {
-    id: 'shoes_oxford_couro',
-    name: 'Sapato Oxford Couro Marrom',
-    brand: 'Homme Atelier',
-    category: 'sapatos',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    starter: true,
-    swatchColor: '#6D3E24',
-  },
-  {
-    id: 'shoes_tenis_branco',
-    name: 'Tênis Minimalista Branco',
-    brand: 'Urban District',
-    category: 'sapatos',
-    gender: 'unissex',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    starter: true,
-    swatchColor: '#F7F5F2',
-  },
-  {
-    id: 'shoes_bota_cano',
-    name: 'Bota Salto Bloco Caramelo',
-    brand: 'Côté Mer',
-    category: 'sapatos',
-    gender: 'feminino',
-    price: 230,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    swatchColor: '#9C5C36',
-  },
-  {
-    id: 'shoes_sandalia_ouro',
-    name: 'Sandália Tiras Douradas',
-    brand: 'Atelier Lumière',
-    category: 'sapatos',
-    gender: 'feminino',
-    price: 270,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    swatchColor: '#D4A853',
-  },
-  {
-    id: 'shoes_coturno_preto',
-    name: 'Coturno Urbano Couro Preto',
-    brand: 'Urban District',
-    category: 'sapatos',
-    gender: 'masculino',
-    price: 250,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    swatchColor: '#1D1B1F',
-  },
-  {
-    id: 'shoes_chunky_y2k',
-    name: 'Sneaker Chunky Retro LA',
-    brand: 'Melrose Studio',
-    category: 'sapatos',
-    gender: 'unissex',
-    price: 285,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    collectionTag: 'Streetwear & Y2K EUA',
-    swatchColor: '#F3EDE2',
-  },
-
-  // --- ACESSÓRIOS & ACESSÓRIOS DE CABEÇA (z-index 60) ---
-  {
-    id: 'acc_oculos_gatinho',
-    name: 'Óculos Gatinho Tartaruga',
-    brand: 'Maison Noir',
-    category: 'acessorios',
-    gender: 'feminino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    starter: true,
-    swatchColor: '#5B3926',
-  },
-  {
-    id: 'acc_bone_street',
-    name: 'Boné Minimalista Preto',
-    brand: 'Urban District',
-    category: 'acessorios',
-    gender: 'masculino',
-    price: 0,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    starter: true,
-    swatchColor: '#201F23',
-  },
-  {
-    id: 'acc_boina_francesa',
-    name: 'Boina Lã Carmim',
-    brand: 'Rouge Couture',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 140,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#B91C4D',
-  },
-  {
-    id: 'acc_tiara_perolas',
-    name: 'Tiara Arco de Pérolas',
-    brand: 'Atelier Lumière',
-    category: 'acessorios',
-    gender: 'feminino',
-    price: 165,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#FAF5EC',
-  },
-  {
-    id: 'acc_chapeu_fedora',
-    name: 'Chapéu Fedora Feltro Areia',
-    brand: 'Homme Atelier',
-    category: 'acessorios',
-    gender: 'masculino',
-    price: 210,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#C5AB89',
-  },
-  {
-    id: 'acc_oculos_aviador',
-    name: 'Óculos Aviador Dourado',
-    brand: 'Homme Atelier',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 175,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#C69A3B',
-  },
-  {
-    id: 'acc_colar_perolas',
-    name: 'Colar Duplo Pérolas',
-    brand: 'Atelier Lumière',
-    category: 'acessorios',
-    gender: 'feminino',
-    price: 190,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#FAF5EC',
-  },
-  {
-    id: 'acc_relogio_couro',
-    name: 'Relógio Executivo Dourado',
-    brand: 'Homme Atelier',
-    category: 'acessorios',
-    gender: 'masculino',
-    price: 220,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#B8893A',
-  },
-  {
-    id: 'acc_bolsa_estruturada',
-    name: 'Bolsa Tote Couro Caramelo',
-    brand: 'Studio Rivoli',
-    category: 'acessorios',
-    gender: 'feminino',
-    price: 310,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    swatchColor: '#A66134',
-  },
-
-  // --- BOUTIQUE VIP EXCLUSIVA (Itens Dourados para Assinantes VIP & Admin) ---
-  {
-    id: 'hair_coroa_ondas_vip',
-    name: 'Ondas Imperial Ouro Rosé VIP',
-    brand: 'Maison Royale VIP',
-    category: 'cabelo',
-    gender: 'feminino',
-    price: 540,
-    zIndex: LAYER_Z_INDEX.cabelo,
-    isVipOnly: true,
-    collectionTag: 'Boutique VIP Exclusiva',
-    swatchColor: '#E6B97A',
-  },
-  {
-    id: 'top_smoking_ouro_vip',
-    name: 'Smoking Imperial Fios de Ouro VIP',
-    brand: 'Maison Royale VIP',
-    category: 'blusas',
-    gender: 'masculino',
-    price: 680,
-    zIndex: LAYER_Z_INDEX.blusas,
-    isVipOnly: true,
-    collectionTag: 'Boutique VIP Exclusiva',
-    swatchColor: '#1E1B24',
-  },
-  {
-    id: 'dress_alta_costura_diamante',
-    name: 'Vestido Alta Costura Diamante VIP',
-    brand: 'Maison Royale VIP',
-    category: 'vestidos',
-    gender: 'feminino',
-    price: 890,
-    zIndex: LAYER_Z_INDEX.vestidos,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#F3E5AB',
-  },
-  {
-    id: 'bottom_calca_vip_preta',
-    name: 'Calça Alfaiataria Galã Dourada VIP',
-    brand: 'Maison Royale VIP',
-    category: 'calcas',
-    gender: 'masculino',
-    price: 460,
-    zIndex: LAYER_Z_INDEX.calcas,
-    isVipOnly: true,
-    collectionTag: 'Boutique VIP Exclusiva',
-    swatchColor: '#18181B',
-  },
-  {
-    id: 'shoes_salto_cristal_vip',
-    name: 'Scarpin Cristal Atelier VIP',
-    brand: 'Maison Royale VIP',
-    category: 'sapatos',
-    gender: 'feminino',
-    price: 420,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    isVipOnly: true,
-    collectionTag: 'Boutique VIP Exclusiva',
-    swatchColor: '#E0F2FE',
-  },
-  {
-    id: 'shoes_mocassim_ouro_vip',
-    name: 'Mocassim Verniz & Ouro VIP',
-    brand: 'Maison Royale VIP',
-    category: 'sapatos',
-    gender: 'masculino',
-    price: 430,
-    zIndex: LAYER_Z_INDEX.sapatos,
-    isVipOnly: true,
-    collectionTag: 'Boutique VIP Exclusiva',
-    swatchColor: '#B8893A',
-  },
-  {
-    id: 'acc_coroa_imperial_vip',
-    name: 'Coroa Imperial Diamante VIP',
-    brand: 'Maison Royale VIP',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 620,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#FBBF24',
-  },
-  {
-    id: 'acc_coroa_diamante_soberana_vip',
-    name: 'Tiara Soberana Safira & Diamante',
-    brand: 'Maison Royale VIP',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 980,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#38BDF8',
-  },
-  {
-    id: 'acc_cetro_real_vip',
-    name: 'Cetro Real Ouro & Diamante',
-    brand: 'Maison Royale VIP',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 1150,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#F59E0B',
-  },
-  {
-    id: 'acc_relogio_ouro_vip',
-    name: 'Cronógrafo Ouro Maciço 24k',
-    brand: 'Maison Royale VIP',
-    category: 'acessorios',
-    gender: 'unissex',
-    price: 840,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#D97706',
-  },
-  {
-    id: 'acc_bolsa_grife_vip',
-    name: 'Bolsa Couture Croco Diamante',
-    brand: 'Maison Royale VIP',
-    category: 'acessorios',
-    gender: 'feminino',
-    price: 920,
-    zIndex: LAYER_Z_INDEX.acessorios,
-    isVipOnly: true,
-    isLegendary: true,
-    collectionTag: 'Lendário Boutique VIP',
-    swatchColor: '#18181B',
-  },
+const FASHION_PALETTES: PaletteSwatch[] = [
+  { label: 'Obsidiana', primary: '#1E1D24', secondary: '#34323D', accent: '#D4AF37', pattern: 'solid' },
+  { label: 'Marfim Imperial', primary: '#F4EDE2', secondary: '#DECBB0', accent: '#C59B4D', pattern: 'solid' },
+  { label: 'Carmim Atelier', primary: '#8F1D3D', secondary: '#591025', accent: '#F3D08E', pattern: 'solid' },
+  { label: 'Safira Noturna', primary: '#1D3557', secondary: '#2D4F7C', accent: '#E2E8F0', pattern: 'solid' },
+  { label: 'Esmeralda Royale', primary: '#115E48', secondary: '#1B7A5E', accent: '#FBBF24', pattern: 'solid' },
+  { label: 'Rosé Quartzo', primary: '#DDA0B1', secondary: '#BA768B', accent: '#FFF1F2', pattern: 'floral' },
+  { label: 'Champagne Seda', primary: '#E6CFA8', secondary: '#C9AD7F', accent: '#FAF5EC', pattern: 'solid' },
+  { label: 'Índigo Denim', primary: '#3A5A85', secondary: '#263E5E', accent: '#D97706', pattern: 'denim' },
+  { label: 'Ametista Velvet', primary: '#5B2C6F', secondary: '#3E1C4D', accent: '#E9D5FF', pattern: 'solid' },
+  { label: 'Terracota Milano', primary: '#A84B31', secondary: '#7B321F', accent: '#F5E1C8', pattern: 'plaid' },
+  { label: 'Prata Lunar', primary: '#CBD5E1', secondary: '#94A3B8', accent: '#F8FAFC', pattern: 'sequin' },
+  { label: 'Ciano Neon', primary: '#0EA5E9', secondary: '#0F172A', accent: '#38BDF8', pattern: 'neon' },
+  { label: 'Verde Sálvia', primary: '#6E8875', secondary: '#4C6352', accent: '#EAE0D2', pattern: 'striped' },
+  { label: 'Caramelo Couro', primary: '#8C5230', secondary: '#5C331A', accent: '#EAB308', pattern: 'solid' },
+  { label: 'Ouro Solar', primary: '#D4A037', secondary: '#9E711C', accent: '#FEF3C7', pattern: 'sequin' },
+  { label: 'Grafite Urbano', primary: '#3F444E', secondary: '#252930', accent: '#94A3B8', pattern: 'striped' },
 ];
+
+interface HairColorDef {
+  label: string;
+  base: string;
+  highlight: string;
+}
+
+const HAIR_COLORS: HairColorDef[] = [
+  { label: 'Ébano Noturno', base: '#1E1B1F', highlight: '#3B343D' },
+  { label: 'Castanho Expresso', base: '#3F281E', highlight: '#634131' },
+  { label: 'Caramelo Mel', base: '#9B6538', highlight: '#C98E55' },
+  { label: 'Loiro Champagne', base: '#DFC088', highlight: '#F4DFB4' },
+  { label: 'Platinado Gelo', base: '#EAECEF', highlight: '#FFFFFF' },
+  { label: 'Ruivo Acobreado', base: '#9E3D28', highlight: '#CC6246' },
+  { label: 'Borgonha Vinho', base: '#5E1A2D', highlight: '#8E2D47' },
+  { label: 'Avelã Dourado', base: '#754D32', highlight: '#A8744E' },
+  { label: 'Rosa Pastel', base: '#E59BB6', highlight: '#F8C8DC' },
+  { label: 'Prata Glacial', base: '#9CA3AF', highlight: '#E5E7EB' },
+];
+
+const BRANDS_AM = ['Atelier Lumière', 'Studio Rivoli', 'Urban District', 'Côté Mer', 'Homme Atelier', 'Rouge Couture'];
+const BRANDS_VIP = ['Maison Royale VIP', 'Atelier Impérial VIP', 'Palais Doré VIP'];
+const BRANDS_LEG = ['Celestial Couture', 'Mythos Atelier 3D', 'Sovereign Prism'];
+
+function resolveClassTier(index: number, isStarter: boolean): {
+  itemClass: 'am' | 'vip' | 'legendary';
+  isVipOnly: boolean;
+  isLegendary: boolean;
+} {
+  if (isStarter) {
+    return { itemClass: 'am', isVipOnly: false, isLegendary: false };
+  }
+  const mod = index % 10;
+  // ~17% Lendário, ~28% VIP, ~55% Livre AM
+  if (mod === 8 || (mod === 9 && index % 3 === 0)) {
+    return { itemClass: 'legendary', isVipOnly: false, isLegendary: true };
+  }
+  if (mod === 3 || mod === 6 || mod === 9) {
+    return { itemClass: 'vip', isVipOnly: true, isLegendary: false };
+  }
+  return { itemClass: 'am', isVipOnly: false, isLegendary: false };
+}
+
+function buildFinish(
+  itemClass: 'am' | 'vip' | 'legendary',
+  index: number,
+  category: ClothingCategory,
+  silhouette: string
+): ClothingItem['threeSpec'] extends infer T ? T extends { finish: infer F } ? F : never : never {
+  if (itemClass === 'legendary') {
+    const legFinishes = ['crystal', 'sequin', 'metallic', 'neon'] as const;
+    return legFinishes[index % legFinishes.length];
+  }
+  if (itemClass === 'vip') {
+    const vipFinishes = ['silk', 'velvet', 'metallic', 'sequin'] as const;
+    return vipFinishes[index % vipFinishes.length];
+  }
+  if (silhouette.includes('leather') || silhouette === 'shoe_boots' || silhouette === 'shoe_oxford' || silhouette === 'acc_bag') {
+    return 'leather';
+  }
+  if (silhouette.includes('cargo') || silhouette === 'pants_wide' || silhouette === 'pants_skinny') {
+    return index % 2 === 0 ? 'denim' : 'cotton';
+  }
+  if (category === 'vestidos') return index % 2 === 0 ? 'silk' : 'velvet';
+  if (category === 'sapatos') return index % 3 === 0 ? 'cotton' : 'leather';
+  if (category === 'acessorios') return 'metallic';
+  return index % 3 === 0 ? 'silk' : 'cotton';
+}
+
+function build3DCatalog400(): ClothingItem[] {
+  const items: ClothingItem[] = [];
+
+  // =========================================================================
+  // 1) 100 ROUPAS FEMININAS (24 blusas + 26 vestidos + 20 calças + 16 sapatos + 14 acessórios)
+  // =========================================================================
+  const fTopSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'silk_shirt', label: 'Camisa de Seda' },
+    { sil: 'cropped', label: 'Cropped Estruturado' },
+    { sil: 'corset', label: 'Corset Esculpido' },
+    { sil: 'blazer', label: 'Blazer Acinturado' },
+    { sil: 'off_shoulder', label: 'Blusa Ombro a Ombro' },
+    { sil: 'leather_jacket', label: 'Jaqueta Biker' },
+    { sil: 'turtleneck', label: 'Gola Alta Cashmere' },
+    { sil: 'trench_coat', label: 'Sobretudo Atelier' },
+  ];
+  for (let i = 1; i <= 24; i++) {
+    const id = `f_top_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i, starter);
+    const tpl = fTopSilhouettes[(i - 1) % fTopSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[1] : FASHION_PALETTES[(i * 3) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'blusas', tpl.sil || 'silk_shirt');
+    items.push({
+      id,
+      name: starter ? 'Camisa de Seda Marfim 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'blusas',
+      gender: 'feminino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 920 + (i % 5) * 110 : itemClass === 'vip' ? 420 + (i % 5) * 55 : 160 + (i % 6) * 45,
+      zIndex: LAYER_Z_INDEX.blusas,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      pattern: pal.pattern,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        volumeScale: 0.96 + (i % 5) * 0.03,
+        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
+        metallicTrim: itemClass !== 'am' || i % 2 === 0,
+      },
+    });
+  }
+
+  const fDressSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'dress_slip', label: 'Slip Dress Cetim' },
+    { sil: 'dress_aline', label: 'Vestido Evasê' },
+    { sil: 'dress_mermaid', label: 'Vestido Sereia Gala' },
+    { sil: 'dress_ballgown', label: 'Vestido Baile Real' },
+    { sil: 'dress_blazer', label: 'Vestido Blazer' },
+    { sil: 'dress_mini_party', label: 'Mini Dress Cocktail' },
+  ];
+  for (let i = 1; i <= 26; i++) {
+    const id = `f_dress_${String(i).padStart(2, '0')}`;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 24, false);
+    const tpl = fDressSilhouettes[(i - 1) % fDressSilhouettes.length];
+    const pal = FASHION_PALETTES[(i * 5 + 2) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'vestidos', tpl.sil || 'dress_aline');
+    items.push({
+      id,
+      name: `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'vestidos',
+      gender: 'feminino',
+      itemClass,
+      price: itemClass === 'legendary' ? 1050 + (i % 6) * 100 : itemClass === 'vip' ? 490 + (i % 5) * 60 : 240 + (i % 6) * 45,
+      zIndex: LAYER_Z_INDEX.vestidos,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      pattern: pal.pattern,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        volumeScale: 0.97 + (i % 4) * 0.03,
+        lengthScale: 0.85 + (i % 5) * 0.08,
+        emissiveIntensity: itemClass === 'legendary' ? 0.38 : 0,
+        metallicTrim: true,
+      },
+    });
+  }
+
+  const fBottomSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'skirt_midi', label: 'Saia Midi Plissada' },
+    { sil: 'skirt_mini', label: 'Minissaia Estruturada' },
+    { sil: 'skirt_pleated', label: 'Saia Colegial Pregas' },
+    { sil: 'pants_tailored', label: 'Calça Alfaiataria Slim' },
+    { sil: 'pants_wide', label: 'Pantalona Fluida' },
+    { sil: 'pants_skinny', label: 'Calça Sculpt Skinny' },
+  ];
+  for (let i = 1; i <= 20; i++) {
+    const id = `f_bottom_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 50, starter);
+    const tpl = fBottomSilhouettes[(i - 1) % fBottomSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[5] : FASHION_PALETTES[(i * 7 + 1) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'calcas', tpl.sil || 'skirt_midi');
+    items.push({
+      id,
+      name: starter ? 'Saia Midi Rosé Atelier 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'calcas',
+      gender: 'feminino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 4) * 95 : itemClass === 'vip' ? 390 + (i % 5) * 45 : 150 + (i % 6) * 40,
+      zIndex: LAYER_Z_INDEX.calcas,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      pattern: pal.pattern,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        volumeScale: 0.96 + (i % 4) * 0.03,
+        emissiveIntensity: itemClass === 'legendary' ? 0.3 : 0,
+        metallicTrim: itemClass !== 'am',
+      },
+    });
+  }
+
+  const fShoeSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'shoe_heels', label: 'Scarpin Stiletto' },
+    { sil: 'shoe_sandals', label: 'Sandália Tiras Finas' },
+    { sil: 'shoe_boots', label: 'Bota Cano Alto' },
+    { sil: 'shoe_sneakers', label: 'Sneaker Plataforma' },
+  ];
+  for (let i = 1; i <= 16; i++) {
+    const id = `f_shoes_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 70, starter);
+    const tpl = fShoeSilhouettes[(i - 1) % fShoeSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[0] : FASHION_PALETTES[(i * 3 + 4) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'sapatos', tpl.sil || 'shoe_heels');
+    items.push({
+      id,
+      name: starter ? 'Scarpin Clássico Noir 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'sapatos',
+      gender: 'feminino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 860 + (i % 4) * 80 : itemClass === 'vip' ? 380 + (i % 4) * 45 : 140 + (i % 5) * 35,
+      zIndex: LAYER_Z_INDEX.sapatos,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
+        metallicTrim: true,
+      },
+    });
+  }
+
+  const fAccSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'acc_crown', label: 'Tiara Imperial' },
+    { sil: 'acc_necklace', label: 'Colar Choker Cristal' },
+    { sil: 'acc_bag', label: 'Bolsa Couture' },
+    { sil: 'acc_sunglasses', label: 'Óculos Gatinho' },
+    { sil: 'acc_earrings', label: 'Brincos Gota' },
+    { sil: 'acc_hat', label: 'Boina Francesa' },
+    { sil: 'acc_scepter', label: 'Cetro Estelar' },
+  ];
+  for (let i = 1; i <= 14; i++) {
+    const id = `f_acc_${String(i).padStart(2, '0')}`;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 86, false);
+    const tpl = fAccSilhouettes[(i - 1) % fAccSilhouettes.length];
+    const pal = FASHION_PALETTES[(i * 4 + 6) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'acessorios', tpl.sil || 'acc_bag');
+    items.push({
+      id,
+      name: `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'acessorios',
+      gender: 'feminino',
+      itemClass,
+      price: itemClass === 'legendary' ? 950 + (i % 5) * 120 : itemClass === 'vip' ? 410 + (i % 4) * 55 : 130 + (i % 5) * 40,
+      zIndex: LAYER_Z_INDEX.acessorios,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        emissiveIntensity: itemClass === 'legendary' ? 0.45 : 0,
+        metallicTrim: true,
+      },
+    });
+  }
+
+  // =========================================================================
+  // 2) 100 ROUPAS MASCULINAS (32 blusas + 28 calças + 22 sapatos + 18 acessórios)
+  // =========================================================================
+  const mTopSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'silk_shirt', label: 'Camisa Social Slim' },
+    { sil: 'blazer', label: 'Blazer Estruturado' },
+    { sil: 'vest_suit', label: 'Colete & Alfaiataria' },
+    { sil: 'leather_jacket', label: 'Jaqueta Biker Couro' },
+    { sil: 'hoodie', label: 'Hoodie Streetwear' },
+    { sil: 'tshirt', label: 'T-Shirt Heavyweight' },
+    { sil: 'turtleneck', label: 'Suéter Gola Alta' },
+    { sil: 'trench_coat', label: 'Trench Coat Galã' },
+  ];
+  for (let i = 1; i <= 32; i++) {
+    const id = `m_top_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 100, starter);
+    const tpl = mTopSilhouettes[(i - 1) % mTopSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[3] : FASHION_PALETTES[(i * 3 + 2) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'blusas', tpl.sil || 'blazer');
+    items.push({
+      id,
+      name: starter ? 'Camisa & Blazer Safira 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'blusas',
+      gender: 'masculino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 940 + (i % 5) * 110 : itemClass === 'vip' ? 430 + (i % 5) * 55 : 170 + (i % 6) * 45,
+      zIndex: LAYER_Z_INDEX.blusas,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      pattern: pal.pattern,
+      threeSpec: {
+        garmentSilhouette: starter ? 'blazer' : tpl.sil,
+        finish,
+        volumeScale: 0.98 + (i % 4) * 0.03,
+        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
+        metallicTrim: itemClass !== 'am' || i % 2 === 0,
+      },
+    });
+  }
+
+  const mBottomSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'pants_tailored', label: 'Calça Alfaiataria Galã' },
+    { sil: 'pants_skinny', label: 'Calça Slim Fit' },
+    { sil: 'pants_cargo', label: 'Calça Cargo Street' },
+    { sil: 'pants_wide', label: 'Calça Baggy Skate' },
+    { sil: 'shorts', label: 'Bermuda Chino Resort' },
+  ];
+  for (let i = 1; i <= 28; i++) {
+    const id = `m_bottom_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 132, starter);
+    const tpl = mBottomSilhouettes[(i - 1) % mBottomSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[15] : FASHION_PALETTES[(i * 5 + 3) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'calcas', tpl.sil || 'pants_tailored');
+    items.push({
+      id,
+      name: starter ? 'Calça Alfaiataria Grafite 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'calcas',
+      gender: 'masculino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 890 + (i % 4) * 90 : itemClass === 'vip' ? 395 + (i % 5) * 45 : 155 + (i % 6) * 40,
+      zIndex: LAYER_Z_INDEX.calcas,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      pattern: pal.pattern,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        volumeScale: 0.97 + (i % 4) * 0.03,
+        emissiveIntensity: itemClass === 'legendary' ? 0.3 : 0,
+        metallicTrim: itemClass !== 'am',
+      },
+    });
+  }
+
+  const mShoeSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'shoe_oxford', label: 'Sapato Oxford Couro' },
+    { sil: 'shoe_loafers', label: 'Mocassim Verniz' },
+    { sil: 'shoe_boots', label: 'Coturno Chelsea' },
+    { sil: 'shoe_sneakers', label: 'Tênis Urban Low' },
+  ];
+  for (let i = 1; i <= 22; i++) {
+    const id = `m_shoes_${String(i).padStart(2, '0')}`;
+    const starter = i === 1;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 160, starter);
+    const tpl = mShoeSilhouettes[(i - 1) % mShoeSilhouettes.length];
+    const pal = starter ? FASHION_PALETTES[13] : FASHION_PALETTES[(i * 4 + 5) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'sapatos', tpl.sil || 'shoe_oxford');
+    items.push({
+      id,
+      name: starter ? 'Oxford Couro Clássico 3D' : `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'sapatos',
+      gender: 'masculino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 870 + (i % 4) * 85 : itemClass === 'vip' ? 385 + (i % 4) * 45 : 145 + (i % 5) * 35,
+      zIndex: LAYER_Z_INDEX.sapatos,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
+        metallicTrim: true,
+      },
+    });
+  }
+
+  const mAccSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
+    { sil: 'acc_watch', label: 'Cronógrafo Executivo' },
+    { sil: 'acc_sunglasses', label: 'Óculos Aviador' },
+    { sil: 'acc_hat', label: 'Chapéu Fedora' },
+    { sil: 'acc_necklace', label: 'Corrente Elo Real' },
+    { sil: 'acc_crown', label: 'Coroa Soberana' },
+    { sil: 'acc_scepter', label: 'Cetro Imperial' },
+  ];
+  for (let i = 1; i <= 18; i++) {
+    const id = `m_acc_${String(i).padStart(2, '0')}`;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 182, false);
+    const tpl = mAccSilhouettes[(i - 1) % mAccSilhouettes.length];
+    const pal = FASHION_PALETTES[(i * 3 + 7) % FASHION_PALETTES.length];
+    const finish = buildFinish(itemClass, i, 'acessorios', tpl.sil || 'acc_watch');
+    items.push({
+      id,
+      name: `${tpl.label} ${pal.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
+      category: 'acessorios',
+      gender: 'masculino',
+      itemClass,
+      price: itemClass === 'legendary' ? 960 + (i % 5) * 120 : itemClass === 'vip' ? 420 + (i % 4) * 55 : 135 + (i % 5) * 40,
+      zIndex: LAYER_Z_INDEX.acessorios,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
+      swatchColor: pal.primary,
+      secondaryColor: pal.secondary,
+      accentColor: pal.accent,
+      threeSpec: {
+        garmentSilhouette: tpl.sil,
+        finish,
+        emissiveIntensity: itemClass === 'legendary' ? 0.45 : 0,
+        metallicTrim: true,
+      },
+    });
+  }
+
+  // =========================================================================
+  // 3) 100 CABELOS FEMININOS
+  // =========================================================================
+  const fHairSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['hairSilhouette']; label: string }[] = [
+    { sil: 'waves_long', label: 'Ondas Longas Glamour' },
+    { sil: 'bob_classic', label: 'Chanel Parisiense' },
+    { sil: 'high_bun', label: 'Coque Alto Editorial' },
+    { sil: 'ponytail_high', label: 'Rabo de Cavalo Seda' },
+    { sil: 'straight_sleek', label: 'Liso Espelhado' },
+    { sil: 'curly_voluminous', label: 'Cachos Volumosos' },
+    { sil: 'braids_twin', label: 'Tranças Atelier' },
+    { sil: 'pixie_chic', label: 'Pixie Chic' },
+    { sil: 'layered_midi', label: 'Repicado Midi' },
+    { sil: 'half_up', label: 'Meio Preso Imperial' },
+  ];
+  for (let i = 1; i <= 100; i++) {
+    const id = `f_hair_${String(i).padStart(2, '0')}`;
+    const starter = i <= 2;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 200, starter);
+    const tpl = fHairSilhouettes[(i - 1) % fHairSilhouettes.length];
+    const col = HAIR_COLORS[(Math.floor((i - 1) / 10) + (i % 3)) % HAIR_COLORS.length];
+    const finish = itemClass === 'legendary' ? 'crystal' : itemClass === 'vip' ? 'silk' : 'cotton';
+    items.push({
+      id,
+      name:
+        i === 1
+          ? 'Ondas Clássicas Castanho 3D'
+          : i === 2
+            ? 'Coque Baixo Parisiense 3D'
+            : `${tpl.label} ${col.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : 'Atelier Hair 3D',
+      category: 'cabelo',
+      gender: 'feminino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 5) * 95 : itemClass === 'vip' ? 400 + (i % 5) * 45 : 150 + (i % 6) * 35,
+      zIndex: LAYER_Z_INDEX.cabelo,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Atelier Capilar 3D',
+      swatchColor: col.base,
+      secondaryColor: col.highlight,
+      threeSpec: {
+        hairSilhouette: i === 2 ? 'high_bun' : tpl.sil,
+        finish,
+        volumeScale: 0.94 + (i % 5) * 0.04,
+        lengthScale: 0.88 + (i % 4) * 0.09,
+        emissiveIntensity: itemClass === 'legendary' ? 0.25 : 0,
+        highlightColor: col.highlight,
+      },
+    });
+  }
+
+  // =========================================================================
+  // 4) 100 CABELOS MASCULINOS
+  // =========================================================================
+  const mHairSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['hairSilhouette']; label: string }[] = [
+    { sil: 'executive_part', label: 'Corte Executivo' },
+    { sil: 'undercut_fade', label: 'Undercut Fade' },
+    { sil: 'quiff_textured', label: 'Topete Texturizado' },
+    { sil: 'curly_fade', label: 'Cachos Taper Fade' },
+    { sil: 'surfer_medium', label: 'Repartido Médio' },
+    { sil: 'slick_back', label: 'Slick Back Galã' },
+    { sil: 'buzz_taper', label: 'Buzz Cut Militar' },
+    { sil: 'dreads_short', label: 'Locs Urbanos' },
+    { sil: 'wolf_cut', label: 'Wolf Cut Moderno' },
+    { sil: 'pompadour', label: 'Pompadour Clássico' },
+  ];
+  for (let i = 1; i <= 100; i++) {
+    const id = `m_hair_${String(i).padStart(2, '0')}`;
+    const starter = i <= 2;
+    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 300, starter);
+    const tpl = mHairSilhouettes[(i - 1) % mHairSilhouettes.length];
+    const col = HAIR_COLORS[(Math.floor((i - 1) / 10) + (i % 3)) % HAIR_COLORS.length];
+    const finish = itemClass === 'legendary' ? 'crystal' : itemClass === 'vip' ? 'silk' : 'cotton';
+    items.push({
+      id,
+      name:
+        i === 1
+          ? 'Corte Executivo Ébano 3D'
+          : i === 2
+            ? 'Undercut Fade Expresso 3D'
+            : `${tpl.label} ${col.label}`,
+      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : 'Homme Hair 3D',
+      category: 'cabelo',
+      gender: 'masculino',
+      itemClass,
+      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 5) * 95 : itemClass === 'vip' ? 400 + (i % 5) * 45 : 150 + (i % 6) * 35,
+      zIndex: LAYER_Z_INDEX.cabelo,
+      starter,
+      isVipOnly,
+      isLegendary,
+      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Homme Capilar 3D',
+      swatchColor: col.base,
+      secondaryColor: col.highlight,
+      threeSpec: {
+        hairSilhouette: tpl.sil,
+        finish,
+        volumeScale: 0.94 + (i % 5) * 0.04,
+        lengthScale: 0.9 + (i % 4) * 0.07,
+        emissiveIntensity: itemClass === 'legendary' ? 0.25 : 0,
+        highlightColor: col.highlight,
+      },
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Catálogo oficial 3D Three.js (400 peças exclusivas: 100 roupas F + 100 roupas M + 100 cabelos F + 100 cabelos M).
+ */
+export const INITIAL_CLOTHING_CATALOG: ClothingItem[] = build3DCatalog400();
+
+export function resolveItemClass(item: Pick<ClothingItem, 'itemClass' | 'isVipOnly' | 'isLegendary'>): 'am' | 'vip' | 'legendary' {
+  if (item.itemClass) return item.itemClass;
+  if (item.isLegendary) return 'legendary';
+  if (item.isVipOnly) return 'vip';
+  return 'am';
+}
 
 /**
  * Passo 3: Catálogo de móveis disponíveis para o módulo Suíte 2D e Starplaza.
@@ -1267,395 +1211,38 @@ export const DEFAULT_SUITE_ITEMS: PlacedFurniture[] = [
   },
 ];
 
-/** Lista inicial de jogadoras fictícias distribuídas pelos servidores BR, ES e EN */
-export const DEFAULT_MOCK_USERS: MockUser[] = [
-  {
-    id: 'usr_1',
-    username: 'clara_couture',
-    displayName: 'Clara Couture',
-    level: 28,
-    starcoins: 1480,
-    status: 'active',
-    joinedAt: '12/04/2025',
-    serverRegion: 'BR',
-    countryCode: 'BR',
-  },
-  {
-    id: 'usr_2',
-    username: 'mia_vintage',
-    displayName: 'Mia Vintage',
-    level: 19,
-    starcoins: 620,
-    status: 'active',
-    joinedAt: '03/08/2025',
-    serverRegion: 'ES',
-    countryCode: 'ES',
-  },
-  {
-    id: 'usr_3',
-    username: 'luna_star',
-    displayName: 'Luna Star',
-    level: 34,
-    starcoins: 3150,
-    status: 'active',
-    joinedAt: '21/01/2025',
-    serverRegion: 'EN',
-    countryCode: 'US',
-  },
-  {
-    id: 'usr_4',
-    username: 'rafa_street',
-    displayName: 'Rafa Street',
-    level: 11,
-    starcoins: 290,
-    status: 'banned',
-    banReason: 'Spam no chat público da Suíte',
-    joinedAt: '18/10/2025',
-    serverRegion: 'BR',
-    countryCode: 'BR-SP',
-  },
-  {
-    id: 'usr_5',
-    username: 'nina_pop',
-    displayName: 'Nina Pop',
-    level: 22,
-    starcoins: 940,
-    status: 'active',
-    joinedAt: '07/06/2025',
-    serverRegion: 'ES',
-    countryCode: 'AR',
-  },
-  {
-    id: 'usr_6',
-    username: 'emma_london',
-    displayName: 'Emma London',
-    level: 25,
-    starcoins: 1210,
-    status: 'active',
-    joinedAt: '14/09/2025',
-    serverRegion: 'EN',
-    countryCode: 'US',
-  },
+/** Nenhum player fantasma pré-criado: apenas contas reais registradas */
+export const DEFAULT_MOCK_USERS: MockUser[] = [];
+
+/** Nenhuma conta Staff bot/seed pré-criada além do Administrador Geral real */
+export const DEFAULT_STAFF_MEMBERS: StaffMember[] = [];
+
+const LOUNGE_PARTY_PROPS = [
+  { id: 'party_sofa_vip_l', label: 'Sofá Lounge VIP Esquerdo', kind: 'sofa' as const, x: 22, y: 64, seatX: 22, seatY: 64, collidable: false, primaryColor: '#9E1646', accentColor: '#D4A853' },
+  { id: 'party_sofa_vip_r', label: 'Sofá Lounge VIP Direito', kind: 'sofa' as const, x: 64, y: 64, seatX: 64, seatY: 64, collidable: false, primaryColor: '#1E1B24', accentColor: '#D4A853' },
+  { id: 'party_table_champagne', label: 'Mesa Central Champagne', kind: 'table' as const, x: 43, y: 70, collidable: true, collisionRadius: 7, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
+  { id: 'party_chair_l', label: 'Poltrona Pista Esquerda', kind: 'chair' as const, x: 30, y: 80, seatX: 30, seatY: 80, collidable: false },
+  { id: 'party_chair_r', label: 'Poltrona Pista Direita', kind: 'chair' as const, x: 56, y: 80, seatX: 56, seatY: 80, collidable: false },
 ];
 
-/** Equipe inicial de Moderação / Staff usada apenas no primeiro seed */
-export const DEFAULT_STAFF_MEMBERS: StaffMember[] = [
-  {
-    id: 'staff_admin',
-    accountId: 'acc_admin_owner',
-    username: 'admin',
-    roleTitle: 'Administrador Geral',
-    roleTier: 'admin',
-    status: 'online',
-    bio: 'Aqui para manter a Starlight Atelier segura, criativa e divertida para todos!',
-    skinTone: 'pessego',
-    avatarGender: 'feminino',
-    equipped: {
-      cabelo: 'hair_coque_atelier',
-      blusas: 'top_blazer_tweed',
-      calcas: 'bottom_calca_alfaiataria',
-      sapatos: 'shoes_scarpin_preto',
-      acessorios: 'acc_oculos_gatinho',
-    },
-    isPrimaryOwner: true,
-  },
-  {
-    id: 'staff_bella',
-    accountId: 'acc_staff_bella',
-    username: 'bella_mod',
-    roleTitle: 'Moderador (BR)',
-    roleTier: 'mod_br',
-    status: 'online',
-    bio: 'Acompanhando as salas e o chat do servidor BR para manter a comunidade segura.',
-    skinTone: 'porcelana',
-    avatarGender: 'feminino',
-    equipped: {
-      cabelo: 'hair_longo_cereja',
-      blusas: 'top_cropped_veludo',
-      calcas: 'bottom_saia_midi',
-      sapatos: 'shoes_scarpin_preto',
-      acessorios: 'acc_boina_francesa',
-    },
-  },
-  {
-    id: 'staff_kaio',
-    accountId: 'acc_staff_kaio',
-    username: 'kaio_dev',
-    roleTitle: 'Moderador (EN)',
-    roleTier: 'mod_en',
-    status: 'online',
-    bio: 'Moderando o servidor EN e executando auditorias técnicas de estabilidade nas salas.',
-    skinTone: 'mel',
-    avatarGender: 'masculino',
-    equipped: {
-      cabelo: 'hair_corte_executivo',
-      blusas: 'top_camisa_social_azul',
-      calcas: 'bottom_chino_areia',
-      sapatos: 'shoes_oxford_couro',
-    },
-  },
-  {
-    id: 'staff_mari',
-    accountId: 'acc_staff_mari',
-    username: 'mari_estilo',
-    roleTitle: 'Moderador (ES)',
-    roleTier: 'mod_es',
-    status: 'online',
-    bio: 'Cuidando do chat e da convivência no servidor ES.',
-    skinTone: 'cacau',
-    avatarGender: 'feminino',
-    equipped: {
-      cabelo: 'hair_ondas_mel',
-      blusas: 'top_corset_dourado',
-      calcas: 'bottom_saia_couro',
-      sapatos: 'shoes_sandalia_ouro',
-      acessorios: 'acc_colar_perolas',
-    },
-  },
-  {
-    id: 'staff_lucas_cm',
-    accountId: 'acc_staff_lucas',
-    username: 'lucas_eventos',
-    roleTitle: 'Gerente da Comunidade (BR)',
-    roleTier: 'cm_br',
-    status: 'online',
-    bio: 'Organizando desfiles, eventos temáticos, mantendo o servidor estável e auxiliando estilistas no Servidor BR!',
-    skinTone: 'pessego',
-    avatarGender: 'masculino',
-    equipped: {
-      cabelo: 'hair_fade_moderno',
-      blusas: 'top_jaqueta_bomber',
-      calcas: 'bottom_jeans_cintura',
-      sapatos: 'shoes_tenis_branco',
-      acessorios: 'acc_oculos_aviador',
-    },
-  },
-  {
-    id: 'staff_celine_designer',
-    accountId: 'acc_staff_celine',
-    username: 'celine_atelier',
-    roleTitle: 'Designer Global',
-    roleTier: 'designer_global',
-    status: 'online',
-    bio: 'Criando coleções exclusivas inspiradas nas tendências globais de moda e arquitetando novas salas temáticas!',
-    skinTone: 'porcelana',
-    avatarGender: 'feminino',
-    equipped: {
-      cabelo: 'hair_rabo_seda',
-      blusas: 'top_blusa_ombro_laco',
-      calcas: 'bottom_saia_couro',
-      sapatos: 'shoes_bota_cano',
-      acessorios: 'acc_tiara_perolas',
-    },
-  },
-  {
-    id: 'staff_sofia_cm_es',
-    accountId: 'acc_staff_sofia_cm',
-    username: 'sofia_comunidad',
-    roleTitle: 'Gerente da Comunidade (ES)',
-    roleTier: 'cm_es',
-    status: 'online',
-    bio: 'Compartiendo novedades de moda, eventos y buenas prácticas en la comunidad de habla hispana.',
-    skinTone: 'mel',
-    avatarGender: 'feminino',
-    equipped: {
-      cabelo: 'hair_bob_paris',
-      blusas: 'top_camisa_seda',
-      calcas: 'bottom_saia_midi',
-      sapatos: 'shoes_sandalia_ouro',
-      acessorios: 'acc_boina_francesa',
-    },
-  },
-  {
-    id: 'staff_alex_cm_en',
-    accountId: 'acc_staff_alex_cm',
-    username: 'alex_community',
-    roleTitle: 'Gerente da Comunidade (EN)',
-    roleTier: 'cm_en',
-    status: 'online',
-    bio: 'Curating NYC streetwear drop news, rooftop fashion showcases and welcoming stylists to the EN Server.',
-    skinTone: 'porcelana',
-    avatarGender: 'masculino',
-    equipped: {
-      cabelo: 'hair_surf_loiro',
-      blusas: 'top_hoodie_y2k_ny',
-      calcas: 'bottom_baggy_denim_us',
-      sapatos: 'shoes_chunky_y2k',
-      acessorios: 'acc_oculos_aviador',
-    },
-  },
-];
-
-const LOUNGE_PROPS = [
-  { id: 'lounge_sofa_l', label: 'Sofá Veludo Esquerdo', kind: 'sofa' as const, x: 24, y: 66, seatX: 24, seatY: 66, collidable: false },
-  { id: 'lounge_table_c', label: 'Mesa de Mármore Central', kind: 'table' as const, x: 42, y: 72, collidable: true, collisionRadius: 7 },
-  { id: 'lounge_chair_r', label: 'Poltrona Atelier', kind: 'chair' as const, x: 64, y: 68, seatX: 64, seatY: 68, collidable: false },
-];
-
-const CAFE_PROPS = [
-  { id: 'cafe_table_1', label: 'Mesa Bistrô Paris', kind: 'table' as const, x: 32, y: 72, collidable: true, collisionRadius: 6.5 },
-  { id: 'cafe_chair_1a', label: 'Cadeira Bistrô Esquerda', kind: 'chair' as const, x: 23, y: 73, seatX: 23, seatY: 73, collidable: false },
-  { id: 'cafe_chair_1b', label: 'Cadeira Bistrô Direita', kind: 'chair' as const, x: 41, y: 73, seatX: 41, seatY: 73, collidable: false },
-  { id: 'cafe_sofa_2', label: 'Sofá Bistrô Rosé', kind: 'sofa' as const, x: 63, y: 66, seatX: 63, seatY: 66, collidable: false },
-];
-
-const ROOFTOP_PROPS = [
-  { id: 'roof_sofa_vip', label: 'Sofá Panorâmico VIP', kind: 'sofa' as const, x: 28, y: 66, seatX: 28, seatY: 66, collidable: false },
-  { id: 'roof_table_drinks', label: 'Mesa Lounge Drinks', kind: 'table' as const, x: 52, y: 72, collidable: true, collisionRadius: 6.5 },
-  { id: 'roof_chair_sunset', label: 'Poltrona Sunset', kind: 'chair' as const, x: 68, y: 74, seatX: 68, seatY: 74, collidable: false },
-];
-
-/** Salas Globais disponíveis por Servidor Regional (BR, ES, EN) vinculadas ao Admin Geral */
+/**
+ * Salas Principais Oficiais do Starlight Atelier:
+ * Apenas "Lounge Party", identificada como criada pelo Starlight Atelier com emblema Oficial.
+ */
 export const GLOBAL_ROOMS: RoomDef[] = [
   {
-    id: 'lounge_principal',
-    name: 'Lounge Principal BR',
-    subtitle: 'Salão de boas-vindas em mármore marfim · Servidor Brasileiro',
-    backdropTheme: 'lounge_principal',
-    walkMinY: 56,
+    id: 'lounge_party',
+    name: 'Lounge Party',
+    subtitle: 'Salão principal oficial 3D com pista iluminada, lounges VIP e Cabine de DJ ao vivo · Criada pelo Starlight Atelier',
+    backdropTheme: 'lounge_party',
+    walkMinY: 54,
     walkMaxY: 88,
     visibility: 'public',
     serverRegion: 'BR',
     ownerId: 'acc_admin_owner',
+    creatorUsername: 'Starlight Atelier',
     isOfficial: true,
-    interactiveProps: LOUNGE_PROPS,
-  },
-  {
-    id: 'central_staff',
-    name: 'Central da Staff · Mesas de Trabalho',
-    subtitle: 'Sede operacional com as 4 Mesas Interativas de Staff e Bots Autônomos',
-    backdropTheme: 'lounge_principal',
-    walkMinY: 56,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'BR',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: [
-      { id: 'staff_sofa_reuniao', label: 'Sofá de Reunião Staff', kind: 'sofa', x: 24, y: 78, seatX: 24, seatY: 78, collidable: false },
-      { id: 'staff_table_cafe', label: 'Mesa de Apoio Staff', kind: 'table', x: 46, y: 78, collidable: true, collisionRadius: 6 },
-    ],
-  },
-  {
-    id: 'cafe_starlight',
-    name: 'Café Starlight BR',
-    subtitle: 'Bistrô parisiense para encontros e bate-papo em Português',
-    backdropTheme: 'cafe_starlight',
-    walkMinY: 58,
-    walkMaxY: 89,
-    visibility: 'public',
-    serverRegion: 'BR',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: CAFE_PROPS,
-  },
-  {
-    id: 'festa_cobertura',
-    name: 'Festa na Cobertura BR',
-    subtitle: 'Terraço panorâmico ao entardecer com pista iluminada',
-    backdropTheme: 'festa_cobertura',
-    walkMinY: 55,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'BR',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: ROOFTOP_PROPS,
-  },
-  {
-    id: 'estudio_3d_designer',
-    name: 'Estúdio 3D Designer BR',
-    subtitle: 'Passarela 3D holográfica, iluminação volumétrica e cabine de DJ · Servidor Brasileiro',
-    backdropTheme: 'estudio_3d_designer',
-    walkMinY: 56,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'BR',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: [
-      { id: 'studio_chair_jurado1', label: 'Poltrona Editorial 1', kind: 'chair', x: 24, y: 72, seatX: 24, seatY: 72, collidable: false },
-      { id: 'studio_chair_jurado2', label: 'Poltrona Editorial 2', kind: 'chair', x: 35, y: 74, seatX: 35, seatY: 74, collidable: false },
-      { id: 'studio_table_sketch', label: 'Bancada de Croquis', kind: 'table', x: 64, y: 76, collidable: true, collisionRadius: 6.5 },
-    ],
-  },
-  {
-    id: 'salon_es',
-    name: 'Salón Principal ES',
-    subtitle: 'Punto de encuentro oficial del Servidor Español',
-    backdropTheme: 'lounge_principal',
-    walkMinY: 56,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'ES',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: LOUNGE_PROPS,
-  },
-  {
-    id: 'cafe_es',
-    name: 'Café Estrella ES',
-    subtitle: 'Bistró elegante para conversar en Español y mostrar looks',
-    backdropTheme: 'cafe_starlight',
-    walkMinY: 58,
-    walkMaxY: 89,
-    visibility: 'public',
-    serverRegion: 'ES',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: CAFE_PROPS,
-  },
-  {
-    id: 'terraza_es',
-    name: 'Terraza de Gala ES',
-    subtitle: 'Fiesta nocturna panorámica en el Servidor Español',
-    backdropTheme: 'festa_cobertura',
-    walkMinY: 55,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'ES',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: ROOFTOP_PROPS,
-  },
-  {
-    id: 'lounge_en',
-    name: 'Main Lounge EN',
-    subtitle: 'Welcome marble hall for the English Server community',
-    backdropTheme: 'lounge_principal',
-    walkMinY: 56,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'EN',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: LOUNGE_PROPS,
-  },
-  {
-    id: 'cafe_en',
-    name: 'Starlight Café EN',
-    subtitle: 'Cozy bistro for fashion chats and meetups in English',
-    backdropTheme: 'cafe_starlight',
-    walkMinY: 58,
-    walkMaxY: 89,
-    visibility: 'public',
-    serverRegion: 'EN',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: CAFE_PROPS,
-  },
-  {
-    id: 'rooftop_en',
-    name: 'Rooftop Party EN',
-    subtitle: 'Evening terrace party on the English Server',
-    backdropTheme: 'festa_cobertura',
-    walkMinY: 55,
-    walkMaxY: 88,
-    visibility: 'public',
-    serverRegion: 'EN',
-    ownerId: 'acc_admin_owner',
-    isOfficial: true,
-    interactiveProps: ROOFTOP_PROPS,
+    interactiveProps: LOUNGE_PARTY_PROPS,
   },
 ];
 
@@ -1745,23 +1332,23 @@ export const ACCOUNT_COUNTRIES: Array<{
   },
 ];
 
-/** Notícias editoriais iniciais publicadas pelos Gerentes da Comunidade (BR, ES, EN) e Designer Global */
+/** Notícias editoriais iniciais do Starlight Atelier */
 export const INITIAL_NEWS_POSTS: NewsPost[] = [
   {
     id: 'news_seed_1',
     title: 'Streetwear SoHo & Tendências Y2K chegam à Starplaza!',
     summary:
-      'A coleção inspirada na juventude americana acaba de aterrizar nas araras: hoodies varsity, jeans baggy skater e sneakers chunky com visual contemporâneo.',
+      'A coleção inspirada na juventude americana acaba de aterrissar nas araras: hoodies varsity, jeans baggy skater e sneakers chunky com visual contemporâneo.',
     body:
       'Olá estilistas do Servidor BR! Nosso ateliê recebeu peças assinadas com inspiração direta nas ruas de Nova York e Los Angeles. Aproveitem para caminhar pelas salas clicando livremente no piso e testar combinações Streetwear, Y2K e Casual Chic com seus amigos. Lembrem-se sempre de manter o respeito no chat público!',
     imageUrl: newsStreetwearUsImg,
     imageCaption: 'Lookbook Streetwear & Y2K · Edição Nova York & Los Angeles',
     category: 'Lançamentos',
     serverRegion: 'BR',
-    authorAccountId: 'acc_staff_lucas',
-    authorUsername: 'lucas_eventos',
-    authorDisplayName: 'Lucas',
-    authorRoleTier: 'cm_br',
+    authorAccountId: 'acc_admin_owner',
+    authorUsername: 'vitor',
+    authorDisplayName: 'Vitor',
+    authorRoleTier: 'admin',
     createdAt: Date.now() - 1000 * 60 * 65,
   },
   {
@@ -1775,44 +1362,44 @@ export const INITIAL_NEWS_POSTS: NewsPost[] = [
     imageCaption: 'Vitrine Alta Costura · Joias Lendárias Maison Royale VIP',
     category: 'Coleção VIP',
     serverRegion: 'ES',
-    authorAccountId: 'acc_staff_sofia_cm',
-    authorUsername: 'sofia_comunidad',
-    authorDisplayName: 'Sofía',
-    authorRoleTier: 'cm_es',
+    authorAccountId: 'acc_admin_owner',
+    authorUsername: 'vitor',
+    authorDisplayName: 'Vitor',
+    authorRoleTier: 'admin',
     createdAt: Date.now() - 1000 * 60 * 140,
   },
   {
     id: 'news_seed_3',
     title: 'Smooth Point-and-Click Walking & Real-Time Community Guidelines',
     summary:
-      'Explore Public Lounges and Suites by clicking anywhere on the floor. Plus: weekly VIP drops and community etiquette reminders for EN Server stylists.',
+      'Explore Public Lounges and Suites by clicking anywhere on the floor. Plus: curated VIP drops and community etiquette reminders for EN Server stylists.',
     body:
-      'Hey stylists on the English Server! You can now walk effortlessly across every public room and personal suite simply by clicking on the floor. Our Global Designer drops fresh US-inspired collections every 2 hours and exclusive Legendary VIP editions every week. Keep conversations welcoming and report any misconduct via /report.',
+      'Hey stylists on the English Server! You can now walk effortlessly across every public room and personal suite simply by clicking on the floor. Keep conversations welcoming, open a Ticket whenever you need Community Manager assistance, and report any misconduct via /report.',
     imageUrl: newsRunwayEventImg,
     imageCaption: 'Evening Rooftop Fashion Meetup · Global Community Spotlight',
     category: 'Comunidade & Conduta',
     serverRegion: 'EN',
-    authorAccountId: 'acc_staff_alex_cm',
-    authorUsername: 'alex_community',
-    authorDisplayName: 'Alex',
-    authorRoleTier: 'cm_en',
+    authorAccountId: 'acc_admin_owner',
+    authorUsername: 'vitor',
+    authorDisplayName: 'Vitor',
+    authorRoleTier: 'admin',
     createdAt: Date.now() - 1000 * 60 * 220,
   },
   {
     id: 'news_seed_4',
-    title: 'Auditoria Automática de Guarda-Roupa & Novos Móveis de Suíte',
+    title: 'Anatomia Modular & Novos Móveis de Suíte',
     summary:
-      'O estúdio agora garante encaixe perfeito entre silhuetas feminina, masculina e neutra, além de novas peças de decoração exclusivas.',
+      'O estúdio garante encaixe perfeito entre silhuetas feminina, masculina e neutra, além de novas peças de decoração exclusivas na Starplaza.',
     body:
-      'Para garantir que nenhum estilista apareça com peças sobrepostas ou incompatíveis nas salas, nosso departamento de design realiza verificações contínuas de vestuário enquanto prepara novos mobiliários para sua Suíte 2D. Confira também a nova aba VIP & SC para turbinar seus Starcoins!',
+      'Para garantir que todo estilista brilhe com peças perfeitamente ajustadas nas salas, nosso departamento de design prepara novos vestuários e mobiliários para sua Suíte 2D. Confira também a nova aba Loja Premium para adquirir moedas AM e status VIP!',
     imageUrl: newsAtelierFurnitureImg,
     imageCaption: 'Atelier de Arquitetura 2D · Interiores & Estilo Impecável',
     category: 'Atualizações',
     serverRegion: 'BR',
-    authorAccountId: 'acc_staff_celine',
-    authorUsername: 'celine_atelier',
-    authorDisplayName: 'Celine',
-    authorRoleTier: 'designer_global',
+    authorAccountId: 'acc_admin_owner',
+    authorUsername: 'vitor',
+    authorDisplayName: 'Vitor',
+    authorRoleTier: 'admin',
     createdAt: Date.now() - 1000 * 60 * 310,
   },
 ];

@@ -94,6 +94,10 @@ export class AvatarRigAssembler {
     const legSwing = isWalk ? Math.sin(avatar.walkCyclePhase) * 0.34 : 0;
     const armSwing = isWalk ? Math.sin(avatar.walkCyclePhase) * 0.32 : 0;
 
+    const isMasc = avatar.avatarGender === 'masculino';
+    const armX = isMasc ? 19 : 14.5;
+    const armSpread = isMasc ? 0.08 : 0.14;
+
     return {
       torso: {
         x: 0,
@@ -110,16 +114,16 @@ export class AvatarRigAssembler {
         scaleY: 1,
       },
       left_arm: {
-        x: -16,
+        x: -armX,
         y: -96 + breathY + walkBob + sitDropY,
-        rotation: armSwing + (isSit ? -0.18 : 0.06),
+        rotation: armSwing + (isSit ? -0.18 : armSpread),
         scaleX: 1,
         scaleY: 1,
       },
       right_arm: {
-        x: 16,
+        x: armX,
         y: -96 + breathY + walkBob + sitDropY,
-        rotation: -armSwing + (isSit ? 0.18 : -0.06),
+        rotation: -armSwing + (isSit ? 0.18 : -armSpread),
         scaleX: 1,
         scaleY: 1,
       },
@@ -174,6 +178,10 @@ export class AvatarRigAssembler {
       ctx.scale(-1, 1);
     }
 
+    const hasTopOrDress = Boolean(dressAsset || topAsset);
+    const hasBottomOrDress = Boolean(dressAsset || bottomAsset);
+    const isFullMalhaBase = !hasTopOrDress && !hasBottomOrDress;
+
     // Pipeline estrito de camadas 0 -> 8
     for (let layer = 0 as AvatarStrictLayerIndex; layer <= 8; layer = (layer + 1) as AvatarStrictLayerIndex) {
       switch (layer) {
@@ -188,12 +196,20 @@ export class AvatarRigAssembler {
         }
 
         case AVATAR_STRICT_LAYER_ORDER.BODY_BASE: {
-          this.drawBodyBase(ctx, bones, palette, isMasc, isSit);
+          this.drawBodyBase(ctx, bones, palette, isMasc, isSit, isFullMalhaBase);
           break;
         }
 
         case AVATAR_STRICT_LAYER_ORDER.UNDERWEAR_SKIN: {
-          this.drawUnderwearAndSkinShading(ctx, bones, palette, isMasc, isSit);
+          this.drawUnderwearAndSkinShading(
+            ctx,
+            bones,
+            palette,
+            isMasc,
+            isSit,
+            hasTopOrDress,
+            hasBottomOrDress,
+          );
           break;
         }
 
@@ -221,7 +237,7 @@ export class AvatarRigAssembler {
         }
 
         case AVATAR_STRICT_LAYER_ORDER.HEAD_FACE: {
-          this.drawHeadAndFace(ctx, bones, palette, isMasc, isBlinking);
+          this.drawHeadAndFace(ctx, bones, palette, isMasc, isBlinking, !hairAsset);
           break;
         }
 
@@ -282,28 +298,49 @@ export class AvatarRigAssembler {
     ctx.restore();
   }
 
-  /** Camada 1: Esqueleto base (pernas, braços e tronco conectados às âncoras) */
+  /** Camada 1: Esqueleto base anatômico (proporções fiéis ao Sheet Masculino / Feminino) */
   private drawBodyBase(
     ctx: CanvasRenderingContext2D,
     bones: BoneAnchors,
     palette: { base: string; shadow: string },
     isMasc: boolean,
     isSit: boolean,
+    isFullMalhaBase: boolean,
   ): void {
     ctx.save();
-    ctx.fillStyle = palette.base;
-    ctx.strokeStyle = palette.shadow;
-    ctx.lineWidth = 1.3;
+    const ink = '#2B231F';
+    const limbFill = isFullMalhaBase ? '#8E9484' : palette.base;
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    const drawArm = (anchor: typeof bones.left_arm, widthTop: number) => {
+      ctx.save();
+      ctx.translate(anchor.x, anchor.y);
+      ctx.rotate(anchor.rotation);
+      // Braço + antebraço afilado
+      ctx.fillStyle = limbFill;
+      ctx.strokeStyle = ink;
+      ctx.beginPath();
+      ctx.moveTo(-widthTop / 2, 0);
+      ctx.quadraticCurveTo(-widthTop / 2 - 1.5, 16, -widthTop * 0.38, 36);
+      ctx.lineTo(widthTop * 0.38, 36);
+      ctx.quadraticCurveTo(widthTop / 2 + 1.5, 16, widthTop / 2, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Mão articulada em pele
+      ctx.fillStyle = palette.base;
+      ctx.beginPath();
+      ctx.ellipse(0, 41, widthTop * 0.42, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    };
 
     // Braço esquerdo (atrás)
-    ctx.save();
-    ctx.translate(bones.left_arm.x, bones.left_arm.y);
-    ctx.rotate(bones.left_arm.rotation);
-    ctx.beginPath();
-    ctx.roundRect(-4, 0, 8, 38, 4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    drawArm(bones.left_arm, isMasc ? 9.5 : 7.5);
 
     // Perna esquerda e direita ancoradas em `legs`
     const legAngle = bones.legs.rotation;
@@ -312,36 +349,66 @@ export class AvatarRigAssembler {
       ctx.translate(bones.legs.x + offsetX, bones.legs.y);
       ctx.rotate(isSit ? legAngle : legAngle * phaseSign);
       ctx.scale(1, bones.legs.scaleY);
+
+      const thighW = isMasc ? 6.5 : 6.2;
+      const ankleW = isMasc ? 4.2 : 3.6;
+
+      ctx.fillStyle = limbFill;
+      ctx.strokeStyle = ink;
       ctx.beginPath();
-      ctx.roundRect(-5.5, 0, 11, 48, 5);
+      ctx.moveTo(-thighW, 0);
+      ctx.quadraticCurveTo(-thighW - 0.5, 22, -ankleW, 44);
+      ctx.lineTo(ankleW, 44);
+      ctx.quadraticCurveTo(thighW + 0.5, 22, thighW, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Contorno sutil do joelho
+      ctx.strokeStyle = isFullMalhaBase ? '#53584B' : palette.shadow;
+      ctx.beginPath();
+      ctx.moveTo(-3.2, 23);
+      ctx.quadraticCurveTo(0, 21, 3.2, 23);
+      ctx.stroke();
+
+      // Pé descalço em pele
+      ctx.fillStyle = palette.base;
+      ctx.strokeStyle = ink;
+      ctx.beginPath();
+      ctx.roundRect(-ankleW - 1, 43, ankleW * 2 + 2, 8.5, 3.5);
       ctx.fill();
       ctx.stroke();
       ctx.restore();
     };
-    drawLeg(-7, 1);
-    drawLeg(7, -1);
+    drawLeg(isMasc ? -7.5 : -7, 1);
+    drawLeg(isMasc ? 7.5 : 7, -1);
 
     // Tronco ancorado em `torso`
     ctx.save();
     ctx.translate(bones.torso.x, bones.torso.y);
     ctx.rotate(bones.torso.rotation);
-    const shoulderW = isMasc ? 18 : 15;
-    const waistW = isMasc ? 13 : 10.5;
-    const hipW = isMasc ? 14 : 15.5;
+    const shoulderW = isMasc ? 19 : 14.5;
+    const waistW = isMasc ? 13 : 10;
+    const hipW = isMasc ? 13.5 : 16.5;
 
     // Pescoço
+    ctx.fillStyle = palette.base;
+    ctx.strokeStyle = ink;
     ctx.beginPath();
-    ctx.roundRect(-4.5, -24, 9, 12, 4);
+    ctx.roundRect(isMasc ? -5 : -4, -24, isMasc ? 10 : 8, 12, 4);
     ctx.fill();
+    ctx.stroke();
 
     // Torso anatômico
+    ctx.fillStyle = isFullMalhaBase ? '#8E9484' : palette.base;
+    ctx.strokeStyle = ink;
     ctx.beginPath();
     ctx.moveTo(-shoulderW, -14);
     ctx.lineTo(shoulderW, -14);
     ctx.quadraticCurveTo(waistW + 2, 8, waistW, 18);
-    ctx.quadraticCurveTo(hipW, 28, hipW - 1, 35);
+    ctx.quadraticCurveTo(hipW + 0.5, 28, hipW - 1, 35);
     ctx.lineTo(-hipW + 1, 35);
-    ctx.quadraticCurveTo(-hipW, 28, -waistW, 18);
+    ctx.quadraticCurveTo(-hipW - 0.5, 28, -waistW, 18);
     ctx.quadraticCurveTo(-waistW - 2, 8, -shoulderW, -14);
     ctx.closePath();
     ctx.fill();
@@ -349,92 +416,113 @@ export class AvatarRigAssembler {
     ctx.restore();
 
     // Braço direito (frente)
-    ctx.save();
-    ctx.translate(bones.right_arm.x, bones.right_arm.y);
-    ctx.rotate(bones.right_arm.rotation);
-    ctx.beginPath();
-    ctx.roundRect(-4, 0, 8, 38, 4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    drawArm(bones.right_arm, isMasc ? 9.5 : 7.5);
 
     ctx.restore();
   }
 
-  /** Camada 2: Roupas íntimas básicas e sombreamento corporal sutil */
+  /** Camada 2: Malha base verde-oliva ou pele/clavículas quando vestido */
   private drawUnderwearAndSkinShading(
     ctx: CanvasRenderingContext2D,
     bones: BoneAnchors,
     palette: { base: string; shadow: string },
     isMasc: boolean,
     _isSit: boolean,
+    hasTopOrDress: boolean,
+    hasBottomOrDress: boolean,
   ): void {
     ctx.save();
     ctx.translate(bones.torso.x, bones.torso.y);
     ctx.rotate(bones.torso.rotation);
 
-    ctx.fillStyle = '#F5EFEA';
-    ctx.strokeStyle = '#DDD3CA';
-    ctx.lineWidth = 1;
+    if (!hasTopOrDress) {
+      ctx.fillStyle = '#8E9484';
+      ctx.strokeStyle = '#4F5548';
+      ctx.lineWidth = 1;
+      if (isMasc) {
+        ctx.beginPath();
+        ctx.moveTo(-14, -7);
+        ctx.quadraticCurveTo(-7, -3, -0.5, -6);
+        ctx.moveTo(14, -7);
+        ctx.quadraticCurveTo(7, -3, 0.5, -6);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(-10, -5);
+        ctx.quadraticCurveTo(-5, -1, -0.5, -4);
+        ctx.moveTo(10, -5);
+        ctx.quadraticCurveTo(5, -1, 0.5, -4);
+        ctx.stroke();
+      }
+    }
 
-    if (!isMasc) {
-      // Top básico de manequim
+    if (!hasBottomOrDress && hasTopOrDress) {
+      ctx.fillStyle = '#8E9484';
+      ctx.strokeStyle = '#2B231F';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(-11.5, -5, 23, 10, 4);
+      ctx.roundRect(-13.5, 22, 27, 13, 5);
       ctx.fill();
       ctx.stroke();
     }
 
-    // Short básico de manequim
-    ctx.beginPath();
-    ctx.roundRect(-13, 24, 26, 12, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    // Leve sombra na clavícula
+    // Clavículas sobre a pele do decote
     ctx.strokeStyle = palette.shadow;
     ctx.lineWidth = 0.9;
     ctx.beginPath();
-    ctx.moveTo(-7, -10);
-    ctx.quadraticCurveTo(0, -7, 7, -10);
+    ctx.moveTo(-7, -11);
+    ctx.quadraticCurveTo(0, -8, 7, -11);
     ctx.stroke();
 
     ctx.restore();
   }
 
-  /** Camada 6: Cabeça, olhos com piscar procedural, blush e expressão */
+  /** Camada 6: Cabeça, mandíbula esculpida, olhos com piscar procedural e cabelo base padrão */
   private drawHeadAndFace(
     ctx: CanvasRenderingContext2D,
     bones: BoneAnchors,
     palette: { base: string; shadow: string; blush: string; lip: string },
     isMasc: boolean,
     isBlinking: boolean,
+    showDefaultBaseHair: boolean,
   ): void {
     ctx.save();
     ctx.translate(bones.head.x, bones.head.y);
     ctx.rotate(bones.head.rotation);
 
-    // Cabeça oval
+    const ink = '#2B231F';
     ctx.fillStyle = palette.base;
-    ctx.strokeStyle = palette.shadow;
-    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.25;
+
+    // Cabeça com mandíbula masculina mais quadrada e feminina oval refinada
     ctx.beginPath();
-    ctx.ellipse(0, 0, isMasc ? 15.5 : 14.5, 17.5, 0, 0, Math.PI * 2);
+    if (isMasc) {
+      ctx.moveTo(-14.5, -4);
+      ctx.quadraticCurveTo(-15, -17, 0, -17.5);
+      ctx.quadraticCurveTo(15, -17, 14.5, -4);
+      ctx.quadraticCurveTo(14.5, 10, 7, 15.5);
+      ctx.lineTo(0, 17.5);
+      ctx.lineTo(-7, 15.5);
+      ctx.quadraticCurveTo(-14.5, 10, -14.5, -4);
+    } else {
+      ctx.ellipse(0, 0, 13.8, 17, 0, 0, Math.PI * 2);
+    }
     ctx.fill();
     ctx.stroke();
 
     // Blush sutil
     ctx.fillStyle = palette.blush;
-    ctx.globalAlpha = 0.32;
+    ctx.globalAlpha = isMasc ? 0.16 : 0.34;
     ctx.beginPath();
-    ctx.ellipse(-7, 4.5, 3.2, 1.8, 0, 0, Math.PI * 2);
-    ctx.ellipse(7, 4.5, 3.2, 1.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(-7, 4.5, 3, 1.7, 0, 0, Math.PI * 2);
+    ctx.ellipse(7, 4.5, 3, 1.7, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
     // Olhos
     if (isBlinking) {
-      ctx.strokeStyle = '#292524';
+      ctx.strokeStyle = ink;
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(-7.5, -1);
@@ -443,37 +531,75 @@ export class AvatarRigAssembler {
       ctx.lineTo(7.5, -1);
       ctx.stroke();
     } else {
-      ctx.fillStyle = '#1C1917';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 0.7;
       ctx.beginPath();
-      ctx.arc(-5, -1.2, 2.1, 0, Math.PI * 2);
-      ctx.arc(5, -1.2, 2.1, 0, Math.PI * 2);
+      ctx.ellipse(-5, -1.2, 2.8, 1.9, 0, 0, Math.PI * 2);
+      ctx.ellipse(5, -1.2, 2.8, 1.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#2A221E';
+      ctx.beginPath();
+      ctx.arc(-5, -1.2, 1.65, 0, Math.PI * 2);
+      ctx.arc(5, -1.2, 1.65, 0, Math.PI * 2);
       ctx.fill();
 
-      // Brilho estelar nos olhos
       ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
-      ctx.arc(-4.3, -2, 0.75, 0, Math.PI * 2);
-      ctx.arc(5.7, -2, 0.75, 0, Math.PI * 2);
+      ctx.arc(-4.3, -1.8, 0.65, 0, Math.PI * 2);
+      ctx.arc(5.7, -1.8, 0.65, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Sobrancelhas
-    ctx.strokeStyle = '#3F2E26';
-    ctx.lineWidth = 1.2;
+    // Sobrancelhas definidas
+    ctx.strokeStyle = '#2A1D17';
+    ctx.lineWidth = isMasc ? 1.8 : 1.15;
     ctx.beginPath();
-    ctx.moveTo(-8, -5.5);
-    ctx.quadraticCurveTo(-5, -7, -2, -5.5);
-    ctx.moveTo(2, -5.5);
-    ctx.quadraticCurveTo(5, -7, 8, -5.5);
+    ctx.moveTo(-8.2, -5.2);
+    ctx.quadraticCurveTo(-5, -6.8, -2, -5.2);
+    ctx.moveTo(2, -5.2);
+    ctx.quadraticCurveTo(5, -6.8, 8.2, -5.2);
     ctx.stroke();
 
-    // Boca suave
-    ctx.strokeStyle = palette.lip;
-    ctx.lineWidth = 1.4;
+    // Boca definida
+    ctx.strokeStyle = isMasc ? palette.shadow : palette.lip;
+    ctx.lineWidth = 1.35;
     ctx.beginPath();
-    ctx.moveTo(-3.5, 8.2);
-    ctx.quadraticCurveTo(0, 10.4, 3.5, 8.2);
+    ctx.moveTo(-3.4, 8.2);
+    ctx.quadraticCurveTo(0, 10.1, 3.4, 8.2);
     ctx.stroke();
+
+    // Cabelo Base Padrão (Estrutura Facial e Cabelo Padrão da imagem de referência)
+    if (showDefaultBaseHair) {
+      ctx.fillStyle = '#332119';
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.1;
+      if (isMasc) {
+        ctx.beginPath();
+        ctx.arc(0, -4, 15.5, Math.PI * 0.96, Math.PI * 2.04);
+        ctx.quadraticCurveTo(8, -13, 0, -10.5);
+        ctx.quadraticCurveTo(-9, -13.5, -15.5, -3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        // Coque baixo traseiro + repartição ao meio
+        ctx.beginPath();
+        ctx.arc(0, 6, 7.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(0, -4, 14.8, Math.PI * 0.94, Math.PI * 2.06);
+        ctx.quadraticCurveTo(8, -11, 0, -13);
+        ctx.quadraticCurveTo(-8, -11, -14.8, -1.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
 
     ctx.restore();
   }

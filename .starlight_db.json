@@ -1026,10 +1026,10 @@
       "accountId": "acc_admin_owner",
       "username": "vitor",
       "displayName": "Vitor",
-      "status": "online",
+      "status": "offline",
       "lastInteractionAt": 1794698933160,
       "lastHeartbeatAt": 1794698943879,
-      "socketConnected": true
+      "socketConnected": false
     }
   },
   "support_tickets": [],
@@ -1047,7 +1047,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     },
     "central_staff": {
       "roomId": "central_staff",
@@ -1061,7 +1061,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     },
     "cafe_atelier": {
       "roomId": "cafe_atelier",
@@ -1075,7 +1075,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     },
     "passarela_vip": {
       "roomId": "passarela_vip",
@@ -1089,7 +1089,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     },
     "club_starlight": {
       "roomId": "club_starlight",
@@ -1103,7 +1103,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     },
     "cobertura_sunset": {
       "roomId": "cobertura_sunset",
@@ -1117,7 +1117,7 @@
       "packetDropRate": 0,
       "wsErrorsPerMin": 0,
       "simulatedSpike": false,
-      "lastCheckedAt": 1794698942895
+      "lastCheckedAt": 1794753177328
     }
   },
   "password_reset_tokens": []
