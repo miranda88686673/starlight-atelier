@@ -5,7 +5,6 @@ import newsAtelierFurnitureImg from '../assets/images/news_atelier_furniture_179
 import {
   ClothingItem,
   FurnitureDef,
-  LAYER_Z_INDEX,
   MockUser,
   NewsPost,
   PlacedFurniture,
@@ -13,9 +12,17 @@ import {
   PurchasableWallpaperItem,
   RoomAvatarPresence,
   RoomDef,
+  RoomInteractiveProp,
   SkinToneOption,
   StaffMember,
+  WorldModerationState,
 } from '../types/game';
+import {
+  FEMALE_AM_CLOTHING_100,
+  LEGENDARY_CROWNS_4,
+  MALE_AM_CLOTHING_100,
+  SPECIAL_ACCESSORIES_NEW,
+} from './generatedCatalog';
 
 export const NEWS_PHOTO_ASSETS = [
   {
@@ -50,637 +57,133 @@ export const SKIN_TONES: SkinToneOption[] = [
   { id: 'cacau', label: 'Cacau Profundo', base: '#8B563E', shadow: '#683C28', blush: '#B85A56' },
 ];
 
-/** Versão do catálogo 3D: incrementa para zerar inventários e looks legados */
-export const CATALOG_SCHEMA_VERSION = 3;
+/** Versão do catálogo 3D: v4 remove todas as roupas antigas e deixa personagens em traje íntimo padrão */
+export const CATALOG_SCHEMA_VERSION = 4;
 
 export const STARTER_IDS_BY_GENDER: Record<'feminino' | 'masculino' | 'neutro', {
-  cabelo: string;
-  blusas: string;
-  calcas: string;
-  sapatos: string;
+  cabelo?: string;
+  blusas?: string;
+  calcas?: string;
+  sapatos?: string;
+  acessorios?: string;
   owned: string[];
 }> = {
   feminino: {
-    cabelo: 'f_hair_01',
-    blusas: 'f_top_01',
-    calcas: 'f_bottom_01',
-    sapatos: 'f_shoes_01',
-    owned: ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01'],
+    owned: [],
   },
   masculino: {
-    cabelo: 'm_hair_01',
-    blusas: 'm_top_01',
-    calcas: 'm_bottom_01',
-    sapatos: 'm_shoes_01',
-    owned: ['m_hair_01', 'm_hair_02', 'm_top_01', 'm_bottom_01', 'm_shoes_01'],
+    owned: [],
   },
   neutro: {
-    cabelo: 'f_hair_01',
-    blusas: 'f_top_01',
-    calcas: 'f_bottom_01',
-    sapatos: 'f_shoes_01',
-    owned: [
-      'f_hair_01',
-      'f_hair_02',
-      'f_top_01',
-      'f_bottom_01',
-      'f_shoes_01',
-      'm_hair_01',
-      'm_top_01',
-      'm_bottom_01',
-      'm_shoes_01',
-    ],
+    owned: [],
   },
 };
 
-interface PaletteSwatch {
-  label: string;
-  primary: string;
-  secondary: string;
-  accent: string;
-  pattern?: ClothingItem['pattern'];
-}
-
-const FASHION_PALETTES: PaletteSwatch[] = [
-  { label: 'Obsidiana', primary: '#1E1D24', secondary: '#34323D', accent: '#D4AF37', pattern: 'solid' },
-  { label: 'Marfim Imperial', primary: '#F4EDE2', secondary: '#DECBB0', accent: '#C59B4D', pattern: 'solid' },
-  { label: 'Carmim Atelier', primary: '#8F1D3D', secondary: '#591025', accent: '#F3D08E', pattern: 'solid' },
-  { label: 'Safira Noturna', primary: '#1D3557', secondary: '#2D4F7C', accent: '#E2E8F0', pattern: 'solid' },
-  { label: 'Esmeralda Royale', primary: '#115E48', secondary: '#1B7A5E', accent: '#FBBF24', pattern: 'solid' },
-  { label: 'Rosé Quartzo', primary: '#DDA0B1', secondary: '#BA768B', accent: '#FFF1F2', pattern: 'floral' },
-  { label: 'Champagne Seda', primary: '#E6CFA8', secondary: '#C9AD7F', accent: '#FAF5EC', pattern: 'solid' },
-  { label: 'Índigo Denim', primary: '#3A5A85', secondary: '#263E5E', accent: '#D97706', pattern: 'denim' },
-  { label: 'Ametista Velvet', primary: '#5B2C6F', secondary: '#3E1C4D', accent: '#E9D5FF', pattern: 'solid' },
-  { label: 'Terracota Milano', primary: '#A84B31', secondary: '#7B321F', accent: '#F5E1C8', pattern: 'plaid' },
-  { label: 'Prata Lunar', primary: '#CBD5E1', secondary: '#94A3B8', accent: '#F8FAFC', pattern: 'sequin' },
-  { label: 'Ciano Neon', primary: '#0EA5E9', secondary: '#0F172A', accent: '#38BDF8', pattern: 'neon' },
-  { label: 'Verde Sálvia', primary: '#6E8875', secondary: '#4C6352', accent: '#EAE0D2', pattern: 'striped' },
-  { label: 'Caramelo Couro', primary: '#8C5230', secondary: '#5C331A', accent: '#EAB308', pattern: 'solid' },
-  { label: 'Ouro Solar', primary: '#D4A037', secondary: '#9E711C', accent: '#FEF3C7', pattern: 'sequin' },
-  { label: 'Grafite Urbano', primary: '#3F444E', secondary: '#252930', accent: '#94A3B8', pattern: 'striped' },
-];
-
-interface HairColorDef {
-  label: string;
-  base: string;
-  highlight: string;
-}
-
-const HAIR_COLORS: HairColorDef[] = [
-  { label: 'Ébano Noturno', base: '#1E1B1F', highlight: '#3B343D' },
-  { label: 'Castanho Expresso', base: '#3F281E', highlight: '#634131' },
-  { label: 'Caramelo Mel', base: '#9B6538', highlight: '#C98E55' },
-  { label: 'Loiro Champagne', base: '#DFC088', highlight: '#F4DFB4' },
-  { label: 'Platinado Gelo', base: '#EAECEF', highlight: '#FFFFFF' },
-  { label: 'Ruivo Acobreado', base: '#9E3D28', highlight: '#CC6246' },
-  { label: 'Borgonha Vinho', base: '#5E1A2D', highlight: '#8E2D47' },
-  { label: 'Avelã Dourado', base: '#754D32', highlight: '#A8744E' },
-  { label: 'Rosa Pastel', base: '#E59BB6', highlight: '#F8C8DC' },
-  { label: 'Prata Glacial', base: '#9CA3AF', highlight: '#E5E7EB' },
-];
-
-const BRANDS_AM = ['Atelier Lumière', 'Studio Rivoli', 'Urban District', 'Côté Mer', 'Homme Atelier', 'Rouge Couture'];
-const BRANDS_VIP = ['Maison Royale VIP', 'Atelier Impérial VIP', 'Palais Doré VIP'];
-const BRANDS_LEG = ['Celestial Couture', 'Mythos Atelier 3D', 'Sovereign Prism'];
-
-function resolveClassTier(index: number, isStarter: boolean): {
-  itemClass: 'am' | 'vip' | 'legendary';
-  isVipOnly: boolean;
-  isLegendary: boolean;
-} {
-  if (isStarter) {
-    return { itemClass: 'am', isVipOnly: false, isLegendary: false };
-  }
-  const mod = index % 10;
-  // ~17% Lendário, ~28% VIP, ~55% Livre AM
-  if (mod === 8 || (mod === 9 && index % 3 === 0)) {
-    return { itemClass: 'legendary', isVipOnly: false, isLegendary: true };
-  }
-  if (mod === 3 || mod === 6 || mod === 9) {
-    return { itemClass: 'vip', isVipOnly: true, isLegendary: false };
-  }
-  return { itemClass: 'am', isVipOnly: false, isLegendary: false };
-}
-
-function buildFinish(
-  itemClass: 'am' | 'vip' | 'legendary',
-  index: number,
-  category: ClothingCategory,
-  silhouette: string
-): ClothingItem['threeSpec'] extends infer T ? T extends { finish: infer F } ? F : never : never {
-  if (itemClass === 'legendary') {
-    const legFinishes = ['crystal', 'sequin', 'metallic', 'neon'] as const;
-    return legFinishes[index % legFinishes.length];
-  }
-  if (itemClass === 'vip') {
-    const vipFinishes = ['silk', 'velvet', 'metallic', 'sequin'] as const;
-    return vipFinishes[index % vipFinishes.length];
-  }
-  if (silhouette.includes('leather') || silhouette === 'shoe_boots' || silhouette === 'shoe_oxford' || silhouette === 'acc_bag') {
-    return 'leather';
-  }
-  if (silhouette.includes('cargo') || silhouette === 'pants_wide' || silhouette === 'pants_skinny') {
-    return index % 2 === 0 ? 'denim' : 'cotton';
-  }
-  if (category === 'vestidos') return index % 2 === 0 ? 'silk' : 'velvet';
-  if (category === 'sapatos') return index % 3 === 0 ? 'cotton' : 'leather';
-  if (category === 'acessorios') return 'metallic';
-  return index % 3 === 0 ? 'silk' : 'cotton';
-}
-
-function build3DCatalog400(): ClothingItem[] {
-  const items: ClothingItem[] = [];
-
-  // =========================================================================
-  // 1) 100 ROUPAS FEMININAS (24 blusas + 26 vestidos + 20 calças + 16 sapatos + 14 acessórios)
-  // =========================================================================
-  const fTopSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'silk_shirt', label: 'Camisa de Seda' },
-    { sil: 'cropped', label: 'Cropped Estruturado' },
-    { sil: 'corset', label: 'Corset Esculpido' },
-    { sil: 'blazer', label: 'Blazer Acinturado' },
-    { sil: 'off_shoulder', label: 'Blusa Ombro a Ombro' },
-    { sil: 'leather_jacket', label: 'Jaqueta Biker' },
-    { sil: 'turtleneck', label: 'Gola Alta Cashmere' },
-    { sil: 'trench_coat', label: 'Sobretudo Atelier' },
-  ];
-  for (let i = 1; i <= 24; i++) {
-    const id = `f_top_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i, starter);
-    const tpl = fTopSilhouettes[(i - 1) % fTopSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[1] : FASHION_PALETTES[(i * 3) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'blusas', tpl.sil || 'silk_shirt');
-    items.push({
-      id,
-      name: starter ? 'Camisa de Seda Marfim 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'blusas',
-      gender: 'feminino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 920 + (i % 5) * 110 : itemClass === 'vip' ? 420 + (i % 5) * 55 : 160 + (i % 6) * 45,
-      zIndex: LAYER_Z_INDEX.blusas,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      pattern: pal.pattern,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        volumeScale: 0.96 + (i % 5) * 0.03,
-        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
-        metallicTrim: itemClass !== 'am' || i % 2 === 0,
-      },
-    });
-  }
-
-  const fDressSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'dress_slip', label: 'Slip Dress Cetim' },
-    { sil: 'dress_aline', label: 'Vestido Evasê' },
-    { sil: 'dress_mermaid', label: 'Vestido Sereia Gala' },
-    { sil: 'dress_ballgown', label: 'Vestido Baile Real' },
-    { sil: 'dress_blazer', label: 'Vestido Blazer' },
-    { sil: 'dress_mini_party', label: 'Mini Dress Cocktail' },
-  ];
-  for (let i = 1; i <= 26; i++) {
-    const id = `f_dress_${String(i).padStart(2, '0')}`;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 24, false);
-    const tpl = fDressSilhouettes[(i - 1) % fDressSilhouettes.length];
-    const pal = FASHION_PALETTES[(i * 5 + 2) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'vestidos', tpl.sil || 'dress_aline');
-    items.push({
-      id,
-      name: `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'vestidos',
-      gender: 'feminino',
-      itemClass,
-      price: itemClass === 'legendary' ? 1050 + (i % 6) * 100 : itemClass === 'vip' ? 490 + (i % 5) * 60 : 240 + (i % 6) * 45,
-      zIndex: LAYER_Z_INDEX.vestidos,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      pattern: pal.pattern,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        volumeScale: 0.97 + (i % 4) * 0.03,
-        lengthScale: 0.85 + (i % 5) * 0.08,
-        emissiveIntensity: itemClass === 'legendary' ? 0.38 : 0,
-        metallicTrim: true,
-      },
-    });
-  }
-
-  const fBottomSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'skirt_midi', label: 'Saia Midi Plissada' },
-    { sil: 'skirt_mini', label: 'Minissaia Estruturada' },
-    { sil: 'skirt_pleated', label: 'Saia Colegial Pregas' },
-    { sil: 'pants_tailored', label: 'Calça Alfaiataria Slim' },
-    { sil: 'pants_wide', label: 'Pantalona Fluida' },
-    { sil: 'pants_skinny', label: 'Calça Sculpt Skinny' },
-  ];
-  for (let i = 1; i <= 20; i++) {
-    const id = `f_bottom_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 50, starter);
-    const tpl = fBottomSilhouettes[(i - 1) % fBottomSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[5] : FASHION_PALETTES[(i * 7 + 1) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'calcas', tpl.sil || 'skirt_midi');
-    items.push({
-      id,
-      name: starter ? 'Saia Midi Rosé Atelier 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'calcas',
-      gender: 'feminino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 4) * 95 : itemClass === 'vip' ? 390 + (i % 5) * 45 : 150 + (i % 6) * 40,
-      zIndex: LAYER_Z_INDEX.calcas,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      pattern: pal.pattern,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        volumeScale: 0.96 + (i % 4) * 0.03,
-        emissiveIntensity: itemClass === 'legendary' ? 0.3 : 0,
-        metallicTrim: itemClass !== 'am',
-      },
-    });
-  }
-
-  const fShoeSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'shoe_heels', label: 'Scarpin Stiletto' },
-    { sil: 'shoe_sandals', label: 'Sandália Tiras Finas' },
-    { sil: 'shoe_boots', label: 'Bota Cano Alto' },
-    { sil: 'shoe_sneakers', label: 'Sneaker Plataforma' },
-  ];
-  for (let i = 1; i <= 16; i++) {
-    const id = `f_shoes_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 70, starter);
-    const tpl = fShoeSilhouettes[(i - 1) % fShoeSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[0] : FASHION_PALETTES[(i * 3 + 4) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'sapatos', tpl.sil || 'shoe_heels');
-    items.push({
-      id,
-      name: starter ? 'Scarpin Clássico Noir 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'sapatos',
-      gender: 'feminino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 860 + (i % 4) * 80 : itemClass === 'vip' ? 380 + (i % 4) * 45 : 140 + (i % 5) * 35,
-      zIndex: LAYER_Z_INDEX.sapatos,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
-        metallicTrim: true,
-      },
-    });
-  }
-
-  const fAccSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'acc_crown', label: 'Tiara Imperial' },
-    { sil: 'acc_necklace', label: 'Colar Choker Cristal' },
-    { sil: 'acc_bag', label: 'Bolsa Couture' },
-    { sil: 'acc_sunglasses', label: 'Óculos Gatinho' },
-    { sil: 'acc_earrings', label: 'Brincos Gota' },
-    { sil: 'acc_hat', label: 'Boina Francesa' },
-    { sil: 'acc_scepter', label: 'Cetro Estelar' },
-  ];
-  for (let i = 1; i <= 14; i++) {
-    const id = `f_acc_${String(i).padStart(2, '0')}`;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 86, false);
-    const tpl = fAccSilhouettes[(i - 1) % fAccSilhouettes.length];
-    const pal = FASHION_PALETTES[(i * 4 + 6) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'acessorios', tpl.sil || 'acc_bag');
-    items.push({
-      id,
-      name: `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'acessorios',
-      gender: 'feminino',
-      itemClass,
-      price: itemClass === 'legendary' ? 950 + (i % 5) * 120 : itemClass === 'vip' ? 410 + (i % 4) * 55 : 130 + (i % 5) * 40,
-      zIndex: LAYER_Z_INDEX.acessorios,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        emissiveIntensity: itemClass === 'legendary' ? 0.45 : 0,
-        metallicTrim: true,
-      },
-    });
-  }
-
-  // =========================================================================
-  // 2) 100 ROUPAS MASCULINAS (32 blusas + 28 calças + 22 sapatos + 18 acessórios)
-  // =========================================================================
-  const mTopSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'silk_shirt', label: 'Camisa Social Slim' },
-    { sil: 'blazer', label: 'Blazer Estruturado' },
-    { sil: 'vest_suit', label: 'Colete & Alfaiataria' },
-    { sil: 'leather_jacket', label: 'Jaqueta Biker Couro' },
-    { sil: 'hoodie', label: 'Hoodie Streetwear' },
-    { sil: 'tshirt', label: 'T-Shirt Heavyweight' },
-    { sil: 'turtleneck', label: 'Suéter Gola Alta' },
-    { sil: 'trench_coat', label: 'Trench Coat Galã' },
-  ];
-  for (let i = 1; i <= 32; i++) {
-    const id = `m_top_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 100, starter);
-    const tpl = mTopSilhouettes[(i - 1) % mTopSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[3] : FASHION_PALETTES[(i * 3 + 2) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'blusas', tpl.sil || 'blazer');
-    items.push({
-      id,
-      name: starter ? 'Camisa & Blazer Safira 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'blusas',
-      gender: 'masculino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 940 + (i % 5) * 110 : itemClass === 'vip' ? 430 + (i % 5) * 55 : 170 + (i % 6) * 45,
-      zIndex: LAYER_Z_INDEX.blusas,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      pattern: pal.pattern,
-      threeSpec: {
-        garmentSilhouette: starter ? 'blazer' : tpl.sil,
-        finish,
-        volumeScale: 0.98 + (i % 4) * 0.03,
-        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
-        metallicTrim: itemClass !== 'am' || i % 2 === 0,
-      },
-    });
-  }
-
-  const mBottomSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'pants_tailored', label: 'Calça Alfaiataria Galã' },
-    { sil: 'pants_skinny', label: 'Calça Slim Fit' },
-    { sil: 'pants_cargo', label: 'Calça Cargo Street' },
-    { sil: 'pants_wide', label: 'Calça Baggy Skate' },
-    { sil: 'shorts', label: 'Bermuda Chino Resort' },
-  ];
-  for (let i = 1; i <= 28; i++) {
-    const id = `m_bottom_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 132, starter);
-    const tpl = mBottomSilhouettes[(i - 1) % mBottomSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[15] : FASHION_PALETTES[(i * 5 + 3) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'calcas', tpl.sil || 'pants_tailored');
-    items.push({
-      id,
-      name: starter ? 'Calça Alfaiataria Grafite 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'calcas',
-      gender: 'masculino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 890 + (i % 4) * 90 : itemClass === 'vip' ? 395 + (i % 5) * 45 : 155 + (i % 6) * 40,
-      zIndex: LAYER_Z_INDEX.calcas,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      pattern: pal.pattern,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        volumeScale: 0.97 + (i % 4) * 0.03,
-        emissiveIntensity: itemClass === 'legendary' ? 0.3 : 0,
-        metallicTrim: itemClass !== 'am',
-      },
-    });
-  }
-
-  const mShoeSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'shoe_oxford', label: 'Sapato Oxford Couro' },
-    { sil: 'shoe_loafers', label: 'Mocassim Verniz' },
-    { sil: 'shoe_boots', label: 'Coturno Chelsea' },
-    { sil: 'shoe_sneakers', label: 'Tênis Urban Low' },
-  ];
-  for (let i = 1; i <= 22; i++) {
-    const id = `m_shoes_${String(i).padStart(2, '0')}`;
-    const starter = i === 1;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 160, starter);
-    const tpl = mShoeSilhouettes[(i - 1) % mShoeSilhouettes.length];
-    const pal = starter ? FASHION_PALETTES[13] : FASHION_PALETTES[(i * 4 + 5) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'sapatos', tpl.sil || 'shoe_oxford');
-    items.push({
-      id,
-      name: starter ? 'Oxford Couro Clássico 3D' : `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'sapatos',
-      gender: 'masculino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 870 + (i % 4) * 85 : itemClass === 'vip' ? 385 + (i % 4) * 45 : 145 + (i % 5) * 35,
-      zIndex: LAYER_Z_INDEX.sapatos,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        emissiveIntensity: itemClass === 'legendary' ? 0.35 : 0,
-        metallicTrim: true,
-      },
-    });
-  }
-
-  const mAccSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['garmentSilhouette']; label: string }[] = [
-    { sil: 'acc_watch', label: 'Cronógrafo Executivo' },
-    { sil: 'acc_sunglasses', label: 'Óculos Aviador' },
-    { sil: 'acc_hat', label: 'Chapéu Fedora' },
-    { sil: 'acc_necklace', label: 'Corrente Elo Real' },
-    { sil: 'acc_crown', label: 'Coroa Soberana' },
-    { sil: 'acc_scepter', label: 'Cetro Imperial' },
-  ];
-  for (let i = 1; i <= 18; i++) {
-    const id = `m_acc_${String(i).padStart(2, '0')}`;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 182, false);
-    const tpl = mAccSilhouettes[(i - 1) % mAccSilhouettes.length];
-    const pal = FASHION_PALETTES[(i * 3 + 7) % FASHION_PALETTES.length];
-    const finish = buildFinish(itemClass, i, 'acessorios', tpl.sil || 'acc_watch');
-    items.push({
-      id,
-      name: `${tpl.label} ${pal.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : BRANDS_AM[i % BRANDS_AM.length],
-      category: 'acessorios',
-      gender: 'masculino',
-      itemClass,
-      price: itemClass === 'legendary' ? 960 + (i % 5) * 120 : itemClass === 'vip' ? 420 + (i % 4) * 55 : 135 + (i % 5) * 40,
-      zIndex: LAYER_Z_INDEX.acessorios,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Coleção AM 3D',
-      swatchColor: pal.primary,
-      secondaryColor: pal.secondary,
-      accentColor: pal.accent,
-      threeSpec: {
-        garmentSilhouette: tpl.sil,
-        finish,
-        emissiveIntensity: itemClass === 'legendary' ? 0.45 : 0,
-        metallicTrim: true,
-      },
-    });
-  }
-
-  // =========================================================================
-  // 3) 100 CABELOS FEMININOS
-  // =========================================================================
-  const fHairSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['hairSilhouette']; label: string }[] = [
-    { sil: 'waves_long', label: 'Ondas Longas Glamour' },
-    { sil: 'bob_classic', label: 'Chanel Parisiense' },
-    { sil: 'high_bun', label: 'Coque Alto Editorial' },
-    { sil: 'ponytail_high', label: 'Rabo de Cavalo Seda' },
-    { sil: 'straight_sleek', label: 'Liso Espelhado' },
-    { sil: 'curly_voluminous', label: 'Cachos Volumosos' },
-    { sil: 'braids_twin', label: 'Tranças Atelier' },
-    { sil: 'pixie_chic', label: 'Pixie Chic' },
-    { sil: 'layered_midi', label: 'Repicado Midi' },
-    { sil: 'half_up', label: 'Meio Preso Imperial' },
-  ];
-  for (let i = 1; i <= 100; i++) {
-    const id = `f_hair_${String(i).padStart(2, '0')}`;
-    const starter = i <= 2;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 200, starter);
-    const tpl = fHairSilhouettes[(i - 1) % fHairSilhouettes.length];
-    const col = HAIR_COLORS[(Math.floor((i - 1) / 10) + (i % 3)) % HAIR_COLORS.length];
-    const finish = itemClass === 'legendary' ? 'crystal' : itemClass === 'vip' ? 'silk' : 'cotton';
-    items.push({
-      id,
-      name:
-        i === 1
-          ? 'Ondas Clássicas Castanho 3D'
-          : i === 2
-            ? 'Coque Baixo Parisiense 3D'
-            : `${tpl.label} ${col.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : 'Atelier Hair 3D',
-      category: 'cabelo',
-      gender: 'feminino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 5) * 95 : itemClass === 'vip' ? 400 + (i % 5) * 45 : 150 + (i % 6) * 35,
-      zIndex: LAYER_Z_INDEX.cabelo,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Atelier Capilar 3D',
-      swatchColor: col.base,
-      secondaryColor: col.highlight,
-      threeSpec: {
-        hairSilhouette: i === 2 ? 'high_bun' : tpl.sil,
-        finish,
-        volumeScale: 0.94 + (i % 5) * 0.04,
-        lengthScale: 0.88 + (i % 4) * 0.09,
-        emissiveIntensity: itemClass === 'legendary' ? 0.25 : 0,
-        highlightColor: col.highlight,
-      },
-    });
-  }
-
-  // =========================================================================
-  // 4) 100 CABELOS MASCULINOS
-  // =========================================================================
-  const mHairSilhouettes: { sil: NonNullable<ClothingItem['threeSpec']>['hairSilhouette']; label: string }[] = [
-    { sil: 'executive_part', label: 'Corte Executivo' },
-    { sil: 'undercut_fade', label: 'Undercut Fade' },
-    { sil: 'quiff_textured', label: 'Topete Texturizado' },
-    { sil: 'curly_fade', label: 'Cachos Taper Fade' },
-    { sil: 'surfer_medium', label: 'Repartido Médio' },
-    { sil: 'slick_back', label: 'Slick Back Galã' },
-    { sil: 'buzz_taper', label: 'Buzz Cut Militar' },
-    { sil: 'dreads_short', label: 'Locs Urbanos' },
-    { sil: 'wolf_cut', label: 'Wolf Cut Moderno' },
-    { sil: 'pompadour', label: 'Pompadour Clássico' },
-  ];
-  for (let i = 1; i <= 100; i++) {
-    const id = `m_hair_${String(i).padStart(2, '0')}`;
-    const starter = i <= 2;
-    const { itemClass, isVipOnly, isLegendary } = resolveClassTier(i + 300, starter);
-    const tpl = mHairSilhouettes[(i - 1) % mHairSilhouettes.length];
-    const col = HAIR_COLORS[(Math.floor((i - 1) / 10) + (i % 3)) % HAIR_COLORS.length];
-    const finish = itemClass === 'legendary' ? 'crystal' : itemClass === 'vip' ? 'silk' : 'cotton';
-    items.push({
-      id,
-      name:
-        i === 1
-          ? 'Corte Executivo Ébano 3D'
-          : i === 2
-            ? 'Undercut Fade Expresso 3D'
-            : `${tpl.label} ${col.label}`,
-      brand: itemClass === 'legendary' ? BRANDS_LEG[i % BRANDS_LEG.length] : itemClass === 'vip' ? BRANDS_VIP[i % BRANDS_VIP.length] : 'Homme Hair 3D',
-      category: 'cabelo',
-      gender: 'masculino',
-      itemClass,
-      price: starter ? 0 : itemClass === 'legendary' ? 880 + (i % 5) * 95 : itemClass === 'vip' ? 400 + (i % 5) * 45 : 150 + (i % 6) * 35,
-      zIndex: LAYER_Z_INDEX.cabelo,
-      starter,
-      isVipOnly,
-      isLegendary,
-      collectionTag: itemClass === 'legendary' ? 'Lendário Celestial 3D' : itemClass === 'vip' ? 'Boutique VIP 3D' : 'Homme Capilar 3D',
-      swatchColor: col.base,
-      secondaryColor: col.highlight,
-      threeSpec: {
-        hairSilhouette: tpl.sil,
-        finish,
-        volumeScale: 0.94 + (i % 5) * 0.04,
-        lengthScale: 0.9 + (i % 4) * 0.07,
-        emissiveIntensity: itemClass === 'legendary' ? 0.25 : 0,
-        highlightColor: col.highlight,
-      },
-    });
-  }
-
-  return items;
-}
-
 /**
- * Catálogo oficial 3D Three.js (400 peças exclusivas: 100 roupas F + 100 roupas M + 100 cabelos F + 100 cabelos M).
+ * Catálogo oficial v4: 100 peças masculinas (Livres AM), 100 peças femininas (Livres AM) + 4 Coroas Lendárias (2023–2026).
  */
-export const INITIAL_CLOTHING_CATALOG: ClothingItem[] = build3DCatalog400();
+export const INITIAL_CLOTHING_CATALOG: ClothingItem[] = [
+  ...SPECIAL_ACCESSORIES_NEW,
+  ...LEGENDARY_CROWNS_4,
+  ...FEMALE_AM_CLOTHING_100,
+  ...MALE_AM_CLOTHING_100,
+];
 
 export function resolveItemClass(item: Pick<ClothingItem, 'itemClass' | 'isVipOnly' | 'isLegendary'>): 'am' | 'vip' | 'legendary' {
   if (item.itemClass) return item.itemClass;
   if (item.isLegendary) return 'legendary';
   if (item.isVipOnly) return 'vip';
   return 'am';
+}
+
+/** Janela padrão de venda por tempo limitado para itens Lendários: 24 horas reais */
+export const LEGENDARY_AVAILABILITY_MS = 24 * 60 * 60 * 1000;
+
+export interface LegendarySaleStatus {
+  isSoldOut: boolean;
+  reason: 'none' | 'admin_sold_out' | 'expired_24h';
+  launchedAt?: number;
+  expiresAt?: number;
+  remainingMs: number;
+}
+
+/**
+ * Resolve em tempo real (pelo relógio da vida real) se um item pode ser comprado na Starplaza:
+ * - Marcado manualmente como "Vendido" pelo Admin (`soldOutItemIds`) -> bloqueado (`admin_sold_out`)
+ * - Item Lendário fora da janela de 24h reais -> automaticamente status "Vendido" (`expired_24h`)
+ */
+export function resolveLegendarySaleStatus(
+  item: Pick<
+    ClothingItem,
+    'id' | 'itemClass' | 'isVipOnly' | 'isLegendary' | 'launchedAt' | 'legendaryExpiresAt' | 'customCreatedAt'
+  >,
+  worldState?: Pick<WorldModerationState, 'soldOutItemIds' | 'legendaryLaunchTimestamps'>,
+  nowMs: number = Date.now(),
+): LegendarySaleStatus {
+  const manualSoldOut = Boolean(worldState?.soldOutItemIds?.includes(item.id));
+  const isLegendary = resolveItemClass(item) === 'legendary';
+
+  if (!isLegendary) {
+    return {
+      isSoldOut: manualSoldOut,
+      reason: manualSoldOut ? 'admin_sold_out' : 'none',
+      remainingMs: 0,
+    };
+  }
+
+  const worldLaunchTs = worldState?.legendaryLaunchTimestamps?.[item.id];
+  const launchedAt = worldLaunchTs ?? item.launchedAt ?? item.customCreatedAt;
+  const expiresAt =
+    worldLaunchTs !== undefined
+      ? worldLaunchTs + LEGENDARY_AVAILABILITY_MS
+      : item.legendaryExpiresAt ??
+        (launchedAt !== undefined ? launchedAt + LEGENDARY_AVAILABILITY_MS : undefined);
+
+  if (manualSoldOut) {
+    return {
+      isSoldOut: true,
+      reason: 'admin_sold_out',
+      launchedAt,
+      expiresAt,
+      remainingMs: 0,
+    };
+  }
+
+  if (expiresAt !== undefined) {
+    const remainingMs = Math.max(0, expiresAt - nowMs);
+    if (remainingMs <= 0) {
+      return {
+        isSoldOut: true,
+        reason: 'expired_24h',
+        launchedAt,
+        expiresAt,
+        remainingMs: 0,
+      };
+    }
+    return {
+      isSoldOut: false,
+      reason: 'none',
+      launchedAt,
+      expiresAt,
+      remainingMs,
+    };
+  }
+
+  return {
+    isSoldOut: false,
+    reason: 'none',
+    launchedAt,
+    expiresAt,
+    remainingMs: LEGENDARY_AVAILABILITY_MS,
+  };
+}
+
+export function formatCountdown24h(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
 
 /**
@@ -992,92 +495,40 @@ export const FURNITURE_CATALOG: FurnitureDef[] = [
  */
 export const PURCHASABLE_ROOMS_CATALOG: PurchasableRoomItem[] = [
   {
-    id: 'room_tpl_atelier_padrao',
-    name: 'Salão Atelier Clássico',
-    subtitle: 'Ambiente acolhedor padrão em madeira clara e painéis rosés',
+    id: 'room_tpl_floresta_piquenique',
+    name: 'Floresta do Laguinho & Piquenique',
+    subtitle: 'Floresta com laguinho de peixes saltando, coelhos pelo gramado, árvores, toalhas de piquenique com frutas e 1 Cabine de DJ',
     themeTag: 'casa',
-    backdropTheme: 'atelier_rosa',
-    price: 0,
-    starter: true,
-    accentColor: '#C8235D',
-    secondaryColor: '#FAF5F7',
-    walkMinY: 56,
-    walkMaxY: 88,
-  },
-  {
-    id: 'room_tpl_casa_moderna',
-    name: 'Casa Moderna Living & Jardim',
-    subtitle: 'Sala ampla residencial com janelão panorâmico e piso carvalho',
-    themeTag: 'casa',
-    backdropTheme: 'casa_estar_moderna',
-    price: 450,
-    accentColor: '#467A5B',
-    secondaryColor: '#EAE2D6',
-    walkMinY: 56,
+    backdropTheme: 'floresta_piquenique',
+    price: 420,
+    accentColor: '#22C55E',
+    secondaryColor: '#DCFCE7',
+    walkMinY: 53,
     walkMaxY: 89,
   },
   {
-    id: 'room_tpl_bar_lounge',
-    name: 'Bar Lounge Coquetelaria',
-    subtitle: 'Bistrô noturno com luzes âmbar, prateleira iluminada e madeira escura',
-    themeTag: 'bar',
-    backdropTheme: 'bar_lounge',
-    price: 580,
-    accentColor: '#D97706',
-    secondaryColor: '#291D19',
-    walkMinY: 56,
-    walkMaxY: 88,
-  },
-  {
-    id: 'room_tpl_boate_neon',
-    name: 'Boate Neon Starlight Club',
-    subtitle: 'Pista noturna com holofotes, equalizador de palco e atmosfera clubber',
+    id: 'room_tpl_boate_neon_club',
+    name: 'Boate Neon Pista LED',
+    subtitle: 'Boate noturna com 1 Cabine de DJ, pista de dança que muda de cor, luzes giratórias multicoloridas e LED neon',
     themeTag: 'boate',
     backdropTheme: 'boate_neon',
-    price: 720,
-    accentColor: '#A855F7',
+    price: 580,
+    accentColor: '#EC4899',
     secondaryColor: '#130F26',
     walkMinY: 55,
     walkMaxY: 89,
   },
   {
-    id: 'room_tpl_hotel_royal_vip',
-    name: 'Suíte Palace Hotel 5 Estrelas VIP',
-    subtitle: 'Lobby & suíte de hotel palaciano em mármore e lustres dourados',
-    themeTag: 'hotel',
-    backdropTheme: 'hotel_royal_vip',
-    price: 1150,
-    isVipOnly: true,
-    accentColor: '#D4A853',
-    secondaryColor: '#1F1B24',
-    walkMinY: 55,
-    walkMaxY: 88,
-  },
-  {
-    id: 'room_tpl_cobertura_diamante_vip',
-    name: 'Cobertura Diamante VIP',
-    subtitle: 'Terraço exclusivo de luxo absoluto com skyline estrelado e detalhes em ouro',
-    themeTag: 'hotel',
-    backdropTheme: 'cobertura_diamante_vip',
-    price: 1550,
-    isVipOnly: true,
-    isLegendary: true,
-    accentColor: '#38BDF8',
-    secondaryColor: '#0F172A',
-    walkMinY: 54,
-    walkMaxY: 88,
-  },
-  {
-    id: 'room_tpl_estudio_3d_designer',
-    name: 'Estúdio 3D Designer de Alta-Costura',
-    subtitle: 'Ambiente futurista com passarela 3D, perspectiva volumétrica e iluminação de passarela',
-    themeTag: 'hotel',
-    backdropTheme: 'estudio_3d_designer',
-    price: 650,
-    accentColor: '#38BDF8',
-    secondaryColor: '#111827',
-    walkMinY: 56,
-    walkMaxY: 88,
+    id: 'room_tpl_ilha_coqueiro',
+    name: 'Ilha do Coqueiro & Mar',
+    subtitle: 'Ilha cercada pela água do mar com 1 coqueiro, 1 Cabine de DJ funcional e peixes saltando na água',
+    themeTag: 'geral',
+    backdropTheme: 'ilha_coqueiro',
+    price: 750,
+    accentColor: '#0EA5E9',
+    secondaryColor: '#F2D296',
+    walkMinY: 53,
+    walkMaxY: 89,
   },
 ];
 
@@ -1217,32 +668,144 @@ export const DEFAULT_MOCK_USERS: MockUser[] = [];
 /** Nenhuma conta Staff bot/seed pré-criada além do Administrador Geral real */
 export const DEFAULT_STAFF_MEMBERS: StaffMember[] = [];
 
-const LOUNGE_PARTY_PROPS = [
-  { id: 'party_sofa_vip_l', label: 'Sofá Lounge VIP Esquerdo', kind: 'sofa' as const, x: 22, y: 64, seatX: 22, seatY: 64, collidable: false, primaryColor: '#9E1646', accentColor: '#D4A853' },
-  { id: 'party_sofa_vip_r', label: 'Sofá Lounge VIP Direito', kind: 'sofa' as const, x: 64, y: 64, seatX: 64, seatY: 64, collidable: false, primaryColor: '#1E1B24', accentColor: '#D4A853' },
-  { id: 'party_table_champagne', label: 'Mesa Central Champagne', kind: 'table' as const, x: 43, y: 70, collidable: true, collisionRadius: 7, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
-  { id: 'party_chair_l', label: 'Poltrona Pista Esquerda', kind: 'chair' as const, x: 30, y: 80, seatX: 30, seatY: 80, collidable: false },
-  { id: 'party_chair_r', label: 'Poltrona Pista Direita', kind: 'chair' as const, x: 56, y: 80, seatX: 56, seatY: 80, collidable: false },
+export const LOUNGE_PARTY_PROPS: RoomInteractiveProp[] = [
+  { id: 'party_sofa_magenta_l', label: 'Sofá Magenta VIP Esquerdo', kind: 'sofa', x: 18, y: 64, seatX: 18, seatY: 64, collidable: false, primaryColor: '#BE185D', accentColor: '#D4A853' },
+  { id: 'party_sofa_black_r', label: 'Sofá Ônix Central Direito', kind: 'sofa', x: 72, y: 68, seatX: 72, seatY: 68, collidable: false, primaryColor: '#171717', accentColor: '#D4A853' },
+  { id: 'party_sofa_blue_front', label: 'Sofá Azul Coquetel', kind: 'sofa', x: 84, y: 82, seatX: 84, seatY: 82, collidable: false, primaryColor: '#2563EB', accentColor: '#D4A853' },
+  { id: 'party_table_center', label: 'Mesa Redonda Pista Central', kind: 'table', x: 40, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
+  { id: 'party_table_vip_l', label: 'Mesa Lounge Esquerdo', kind: 'table', x: 22, y: 46, collidable: true, collisionRadius: 6, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
+  { id: 'party_table_vip_r', label: 'Mesa Lounge Direito', kind: 'table', x: 82, y: 52, collidable: true, collisionRadius: 6, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
+  { id: 'party_table_blue_front', label: 'Mesa Coquetel Azul', kind: 'table', x: 80, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#FAF6F0', accentColor: '#D4A853' },
+  { id: 'party_chair_magenta', label: 'Poltrona Magenta Pista', kind: 'chair', x: 19, y: 80, seatX: 19, seatY: 80, collidable: false, primaryColor: '#E11D48', accentColor: '#D4A853' },
+  { id: 'party_chair_center', label: 'Assento Pista Circular', kind: 'chair', x: 58, y: 78, seatX: 58, seatY: 78, collidable: false, primaryColor: '#1C1917', accentColor: '#D4A853' },
+];
+
+export const LOUNGE_PARTY_NATAL_PROPS: RoomInteractiveProp[] = [
+  { id: 'natal_sofa_red_l', label: 'Sofá Veludo Vermelho Noel', kind: 'sofa', x: 18, y: 64, seatX: 18, seatY: 64, collidable: false, primaryColor: '#B91C1C', accentColor: '#F59E0B' },
+  { id: 'natal_sofa_green_r', label: 'Sofá Verde Pinheiro Imperial', kind: 'sofa', x: 72, y: 68, seatX: 72, seatY: 68, collidable: false, primaryColor: '#166534', accentColor: '#FDE047' },
+  { id: 'natal_sofa_gold_front', label: 'Sofá Dourado Ceia de Natal', kind: 'sofa', x: 84, y: 82, seatX: 84, seatY: 82, collidable: false, primaryColor: '#D97706', accentColor: '#FEF08A' },
+  { id: 'natal_table_center', label: 'Mesa de Banquete Natalino', kind: 'table', x: 40, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#FEF3C7', accentColor: '#DC2626' },
+  { id: 'natal_table_vip_l', label: 'Mesa Bistrô Natal Esquerda', kind: 'table', x: 22, y: 46, collidable: true, collisionRadius: 6, primaryColor: '#FEF3C7', accentColor: '#15803D' },
+  { id: 'natal_table_vip_r', label: 'Mesa Bistrô Natal Direita', kind: 'table', x: 82, y: 52, collidable: true, collisionRadius: 6, primaryColor: '#FEF3C7', accentColor: '#DC2626' },
+  { id: 'natal_table_gold_front', label: 'Mesa Dourada de Presentes', kind: 'table', x: 80, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#FEF3C7', accentColor: '#F59E0B' },
+  { id: 'natal_chair_ruby', label: 'Poltrona Vermelha Festiva', kind: 'chair', x: 19, y: 80, seatX: 19, seatY: 80, collidable: false, primaryColor: '#DC2626', accentColor: '#FEF08A' },
+  { id: 'natal_chair_center', label: 'Assento Estrela de Natal', kind: 'chair', x: 58, y: 78, seatX: 58, seatY: 78, collidable: false, primaryColor: '#166534', accentColor: '#FBBF24' },
+  { id: 'natal_tree_decor', label: 'Árvore de Natal Encantada', kind: 'decor', decorType: 'tree', x: 88, y: 45, collidable: true, collisionRadius: 7, primaryColor: '#15803D', accentColor: '#FACC15' },
+];
+
+export const LOUNGE_PARTY_HALLOWEEN_PROPS: RoomInteractiveProp[] = [
+  { id: 'hal_sofa_black_l', label: 'Sofá Gótico Vampírico', kind: 'sofa', x: 18, y: 64, seatX: 18, seatY: 64, collidable: false, primaryColor: '#18181B', accentColor: '#7C3AED' },
+  { id: 'hal_sofa_purple_r', label: 'Sofá Púrpura Feitiço', kind: 'sofa', x: 72, y: 68, seatX: 72, seatY: 68, collidable: false, primaryColor: '#6B21A8', accentColor: '#F97316' },
+  { id: 'hal_sofa_orange_front', label: 'Sofá Abóbora das Bruxas', kind: 'sofa', x: 84, y: 82, seatX: 84, seatY: 82, collidable: false, primaryColor: '#EA580C', accentColor: '#FEF08A' },
+  { id: 'hal_table_center', label: 'Mesa do Caldeirão Central', kind: 'table', x: 40, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#27272A', accentColor: '#F97316' },
+  { id: 'hal_table_vip_l', label: 'Mesa Mística Esquerda', kind: 'table', x: 22, y: 46, collidable: true, collisionRadius: 6, primaryColor: '#27272A', accentColor: '#A855F7' },
+  { id: 'hal_table_vip_r', label: 'Mesa das Sombras Direita', kind: 'table', x: 82, y: 52, collidable: true, collisionRadius: 6, primaryColor: '#27272A', accentColor: '#EA580C' },
+  { id: 'hal_table_orange_front', label: 'Mesa Poção Mágica', kind: 'table', x: 80, y: 72, collidable: true, collisionRadius: 6, primaryColor: '#27272A', accentColor: '#A855F7' },
+  { id: 'hal_chair_purple', label: 'Poltrona Púrpura Encantada', kind: 'chair', x: 19, y: 80, seatX: 19, seatY: 80, collidable: false, primaryColor: '#7E22CE', accentColor: '#F97316' },
+  { id: 'hal_chair_center', label: 'Assento Jack-o-Lantern', kind: 'chair', x: 58, y: 78, seatX: 58, seatY: 78, collidable: false, primaryColor: '#C2410C', accentColor: '#18181B' },
+  { id: 'hal_pumpkin_decor', label: 'Abóboras de Halloween', kind: 'decor', decorType: 'pumpkin', x: 88, y: 45, collidable: true, collisionRadius: 7, primaryColor: '#EA580C', accentColor: '#15803D' },
+];
+
+export const ILHA_TROPICAL_PROPS: RoomInteractiveProp[] = [
+  { id: 'ilha_beach_chair_1', label: 'Cadeirinha de Praia Madeira 1', kind: 'chair', chairStyle: 'wooden_beach', x: 24, y: 66, seatX: 24, seatY: 66, rotationY: 25, collidable: false, primaryColor: '#A1622B', accentColor: '#F59E0B' },
+  { id: 'ilha_beach_chair_2', label: 'Cadeirinha de Praia Madeira 2', kind: 'chair', chairStyle: 'wooden_beach', x: 35, y: 74, seatX: 35, seatY: 74, rotationY: 12, collidable: false, primaryColor: '#B45309', accentColor: '#38BDF8' },
+  { id: 'ilha_beach_chair_3', label: 'Cadeirinha de Praia Madeira 3', kind: 'chair', chairStyle: 'wooden_beach', x: 50, y: 78, seatX: 50, seatY: 78, rotationY: 0, collidable: false, primaryColor: '#92400E', accentColor: '#10B981' },
+  { id: 'ilha_beach_chair_4', label: 'Cadeirinha de Praia Madeira 4', kind: 'chair', chairStyle: 'wooden_beach', x: 65, y: 74, seatX: 65, seatY: 74, rotationY: 348, collidable: false, primaryColor: '#B45309', accentColor: '#F43F5E' },
+  { id: 'ilha_beach_chair_5', label: 'Cadeirinha de Praia Madeira 5', kind: 'chair', chairStyle: 'wooden_beach', x: 76, y: 66, seatX: 76, seatY: 66, rotationY: 335, collidable: false, primaryColor: '#A1622B', accentColor: '#FACC15' },
+  { id: 'ilha_beach_chair_6', label: 'Cadeirinha de Praia Madeira 6', kind: 'chair', chairStyle: 'wooden_beach', x: 28, y: 84, seatX: 28, seatY: 84, rotationY: 35, collidable: false, primaryColor: '#92400E', accentColor: '#0EA5E9' },
+  { id: 'ilha_beach_chair_7', label: 'Cadeirinha de Praia Madeira 7', kind: 'chair', chairStyle: 'wooden_beach', x: 72, y: 84, seatX: 72, seatY: 84, rotationY: 325, collidable: false, primaryColor: '#92400E', accentColor: '#F59E0B' },
+  { id: 'ilha_table_wood_1', label: 'Mesa de Madeira Tropical Oeste', kind: 'table', x: 30, y: 69, collidable: true, collisionRadius: 5, primaryColor: '#92400E', accentColor: '#F59E0B' },
+  { id: 'ilha_table_wood_2', label: 'Mesa de Madeira Tropical Leste', kind: 'table', x: 70, y: 69, collidable: true, collisionRadius: 5, primaryColor: '#92400E', accentColor: '#38BDF8' },
 ];
 
 /**
  * Salas Principais Oficiais do Starlight Atelier:
- * Apenas "Lounge Party", identificada como criada pelo Starlight Atelier com emblema Oficial.
+ * Lounge Party e Ilhas Tropicais (BR / ES / EN) identificadas com emblema Oficial.
  */
 export const GLOBAL_ROOMS: RoomDef[] = [
   {
     id: 'lounge_party',
-    name: 'Lounge Party',
-    subtitle: 'Salão principal oficial 3D com pista iluminada, lounges VIP e Cabine de DJ ao vivo · Criada pelo Starlight Atelier',
+    name: 'Lounge Party (BR)',
+    subtitle: 'Salão principal oficial 3D com pista iluminada, lounges VIP e Cabine de DJ ao vivo · Criada pelo Nocturne Vale Club',
     backdropTheme: 'lounge_party',
     walkMinY: 54,
     walkMaxY: 88,
     visibility: 'public',
     serverRegion: 'BR',
     ownerId: 'acc_admin_owner',
-    creatorUsername: 'Starlight Atelier',
+    creatorUsername: 'Nocturne Vale Club',
     isOfficial: true,
     interactiveProps: LOUNGE_PARTY_PROPS,
+  },
+  {
+    id: 'ilha_brasil',
+    name: 'Ilha Brasil',
+    subtitle: 'Ilha tropical oficial cercada pelo mar com cadeirinhas de madeira, coqueiros, peixes saltando e 3 Cabines de DJ · Nocturne Vale Club',
+    backdropTheme: 'ilha_tropical',
+    walkMinY: 48,
+    walkMaxY: 88,
+    visibility: 'public',
+    serverRegion: 'BR',
+    ownerId: 'acc_admin_owner',
+    creatorUsername: 'Nocturne Vale Club',
+    isOfficial: true,
+    interactiveProps: ILHA_TROPICAL_PROPS,
+  },
+  {
+    id: 'lounge_party_es',
+    name: 'Lounge Party (ES)',
+    subtitle: 'Salón principal oficial 3D con pista iluminada, zona VIP y Cabina de DJ · Nocturne Vale Club',
+    backdropTheme: 'lounge_party',
+    walkMinY: 54,
+    walkMaxY: 88,
+    visibility: 'public',
+    serverRegion: 'ES',
+    ownerId: 'acc_admin_owner',
+    creatorUsername: 'Nocturne Vale Club',
+    isOfficial: true,
+    interactiveProps: LOUNGE_PARTY_PROPS,
+  },
+  {
+    id: 'ilha_spanish',
+    name: 'Ilha Spanish',
+    subtitle: 'Isla tropical oficial rodeada de agua con sillas de playa de madera, palmeras, peces saltando y 3 Cabinas de DJ · Nocturne Vale Club',
+    backdropTheme: 'ilha_tropical',
+    walkMinY: 48,
+    walkMaxY: 88,
+    visibility: 'public',
+    serverRegion: 'ES',
+    ownerId: 'acc_admin_owner',
+    creatorUsername: 'Nocturne Vale Club',
+    isOfficial: true,
+    interactiveProps: ILHA_TROPICAL_PROPS,
+  },
+  {
+    id: 'lounge_party_en',
+    name: 'Lounge Party (EN)',
+    subtitle: 'Official 3D rooftop lounge with illuminated dancefloor, VIP booths & live DJ booth · Nocturne Vale Club',
+    backdropTheme: 'lounge_party',
+    walkMinY: 54,
+    walkMaxY: 88,
+    visibility: 'public',
+    serverRegion: 'EN',
+    ownerId: 'acc_admin_owner',
+    creatorUsername: 'Nocturne Vale Club',
+    isOfficial: true,
+    interactiveProps: LOUNGE_PARTY_PROPS,
+  },
+  {
+    id: 'ilha_english',
+    name: 'Ilha English',
+    subtitle: 'Official tropical island surrounded by ocean with wooden beach chairs, coconut palms, jumping fish & 3 DJ Booths · Nocturne Vale Club',
+    backdropTheme: 'ilha_tropical',
+    walkMinY: 48,
+    walkMaxY: 88,
+    visibility: 'public',
+    serverRegion: 'EN',
+    ownerId: 'acc_admin_owner',
+    creatorUsername: 'Nocturne Vale Club',
+    isOfficial: true,
+    interactiveProps: ILHA_TROPICAL_PROPS,
   },
 ];
 
@@ -1317,11 +880,46 @@ export const ACCOUNT_COUNTRIES: Array<{
     ipPrefix: '172.58',
   },
   {
+    code: 'GB',
+    name: 'Reino Unido',
+    cityLabel: 'Londres/GB',
+    timezone: 'Europe/London',
+    ipPrefix: '81.149',
+  },
+  {
     code: 'FR',
     name: 'França',
     cityLabel: 'Paris/FR',
     timezone: 'Europe/Paris',
     ipPrefix: '176.158',
+  },
+  {
+    code: 'IT',
+    name: 'Itália',
+    cityLabel: 'Milão/IT',
+    timezone: 'Europe/Rome',
+    ipPrefix: '93.44',
+  },
+  {
+    code: 'DE',
+    name: 'Alemanha',
+    cityLabel: 'Berlim/DE',
+    timezone: 'Europe/Berlin',
+    ipPrefix: '91.64',
+  },
+  {
+    code: 'MX',
+    name: 'México',
+    cityLabel: 'Cidade do México/MX',
+    timezone: 'America/Mexico_City',
+    ipPrefix: '187.188',
+  },
+  {
+    code: 'CA',
+    name: 'Canadá',
+    cityLabel: 'Toronto/CA',
+    timezone: 'America/Toronto',
+    ipPrefix: '99.224',
   },
   {
     code: 'JP',
@@ -1332,74 +930,5 @@ export const ACCOUNT_COUNTRIES: Array<{
   },
 ];
 
-/** Notícias editoriais iniciais do Starlight Atelier */
-export const INITIAL_NEWS_POSTS: NewsPost[] = [
-  {
-    id: 'news_seed_1',
-    title: 'Streetwear SoHo & Tendências Y2K chegam à Starplaza!',
-    summary:
-      'A coleção inspirada na juventude americana acaba de aterrissar nas araras: hoodies varsity, jeans baggy skater e sneakers chunky com visual contemporâneo.',
-    body:
-      'Olá estilistas do Servidor BR! Nosso ateliê recebeu peças assinadas com inspiração direta nas ruas de Nova York e Los Angeles. Aproveitem para caminhar pelas salas clicando livremente no piso e testar combinações Streetwear, Y2K e Casual Chic com seus amigos. Lembrem-se sempre de manter o respeito no chat público!',
-    imageUrl: newsStreetwearUsImg,
-    imageCaption: 'Lookbook Streetwear & Y2K · Edição Nova York & Los Angeles',
-    category: 'Lançamentos',
-    serverRegion: 'BR',
-    authorAccountId: 'acc_admin_owner',
-    authorUsername: 'vitor',
-    authorDisplayName: 'Vitor',
-    authorRoleTier: 'admin',
-    createdAt: Date.now() - 1000 * 60 * 65,
-  },
-  {
-    id: 'news_seed_2',
-    title: 'Coleción Lendária VIP: Coroas, Cetros e Joias de Alta Costura',
-    summary:
-      'Peças de altíssimo luxo como a Tiara Soberana Safira, Cetro Real Ouro & Diamante e Cronógrafo 24k já podem ser visualizadas na Boutique VIP.',
-    body:
-      '¡Bienvenidos estilistas del Servidor ES! Presentamos los artículos Lendários VIP diseñados para quienes brillan en cada pasarela. Todos pueden inspeccionar los detalles de cada pieza en la Starplaza, y los miembros VIP ya pueden equiparlas en sus avatares. ¡Participen con respeto y compartan sus looks en el Salón Principal ES!',
-    imageUrl: newsVipLegendaryImg,
-    imageCaption: 'Vitrine Alta Costura · Joias Lendárias Maison Royale VIP',
-    category: 'Coleção VIP',
-    serverRegion: 'ES',
-    authorAccountId: 'acc_admin_owner',
-    authorUsername: 'vitor',
-    authorDisplayName: 'Vitor',
-    authorRoleTier: 'admin',
-    createdAt: Date.now() - 1000 * 60 * 140,
-  },
-  {
-    id: 'news_seed_3',
-    title: 'Smooth Point-and-Click Walking & Real-Time Community Guidelines',
-    summary:
-      'Explore Public Lounges and Suites by clicking anywhere on the floor. Plus: curated VIP drops and community etiquette reminders for EN Server stylists.',
-    body:
-      'Hey stylists on the English Server! You can now walk effortlessly across every public room and personal suite simply by clicking on the floor. Keep conversations welcoming, open a Ticket whenever you need Community Manager assistance, and report any misconduct via /report.',
-    imageUrl: newsRunwayEventImg,
-    imageCaption: 'Evening Rooftop Fashion Meetup · Global Community Spotlight',
-    category: 'Comunidade & Conduta',
-    serverRegion: 'EN',
-    authorAccountId: 'acc_admin_owner',
-    authorUsername: 'vitor',
-    authorDisplayName: 'Vitor',
-    authorRoleTier: 'admin',
-    createdAt: Date.now() - 1000 * 60 * 220,
-  },
-  {
-    id: 'news_seed_4',
-    title: 'Anatomia Modular & Novos Móveis de Suíte',
-    summary:
-      'O estúdio garante encaixe perfeito entre silhuetas feminina, masculina e neutra, além de novas peças de decoração exclusivas na Starplaza.',
-    body:
-      'Para garantir que todo estilista brilhe com peças perfeitamente ajustadas nas salas, nosso departamento de design prepara novos vestuários e mobiliários para sua Suíte 2D. Confira também a nova aba Loja Premium para adquirir moedas AM e status VIP!',
-    imageUrl: newsAtelierFurnitureImg,
-    imageCaption: 'Atelier de Arquitetura 2D · Interiores & Estilo Impecável',
-    category: 'Atualizações',
-    serverRegion: 'BR',
-    authorAccountId: 'acc_admin_owner',
-    authorUsername: 'vitor',
-    authorDisplayName: 'Vitor',
-    authorRoleTier: 'admin',
-    createdAt: Date.now() - 1000 * 60 * 310,
-  },
-];
+/** Notícias editoriais iniciais do Nocturne Vale Club (vazio por padrão) */
+export const INITIAL_NEWS_POSTS: NewsPost[] = [];

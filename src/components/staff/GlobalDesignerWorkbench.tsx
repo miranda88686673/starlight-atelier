@@ -3,6 +3,7 @@ import {
   Camera,
   CheckCircle2,
   Layers,
+  Loader2,
   Palette,
   Sparkles,
   Upload,
@@ -24,8 +25,9 @@ import {
   UserAccount,
 } from '../../types/game';
 import { resolveCoreStaffRole } from '../../core/security/RoleGuard';
-import { MeDollSvg } from '../svg/MeDollSvg';
-import { FurnitureSvg } from '../svg/FurnitureSvg';
+import { LEGENDARY_AVAILABILITY_MS } from '../../data/catalog';
+import { Avatar3DViewport } from '../three/Avatar3DViewport';
+import { ThreeFurnitureThumbnail } from '../three/ThreeItemThumbnail';
 
 interface GlobalDesignerWorkbenchProps {
   currentUser: UserAccount;
@@ -69,6 +71,7 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
   const [pieceGender, setPieceGender] = useState<'feminino' | 'masculino' | 'unissex'>('unissex');
   const [piecePrice, setPiecePrice] = useState(320);
   const [pieceVip, setPieceVip] = useState(false);
+  const [pieceLegendary, setPieceLegendary] = useState(false);
   const [pieceTemplateId, setPieceTemplateId] = useState('tpl_camisa');
   const [pieceColor, setPieceColor] = useState('#C8235D');
   const [pieceSecondary, setPieceSecondary] = useState('#1C1917');
@@ -101,8 +104,17 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
 
   const role = resolveCoreStaffRole(currentUser) || 'designer';
 
-  const previewClothingItem = useMemo<ClothingItem>(
-    () => ({
+  const previewClothingItem = useMemo<ClothingItem>(() => {
+    const resolvedFinish = pieceLegendary
+      ? 'crystal'
+      : piecePattern === 'sequin'
+        ? 'sequin'
+        : piecePattern === 'denim'
+          ? 'denim'
+          : pieceVip
+            ? 'silk'
+            : 'cotton';
+    return {
       id: 'designer_workbench_preview',
       name: pieceName.trim() || 'Peça em Calibração',
       brand: pieceBrand.trim() || 'Atelier Global',
@@ -110,6 +122,8 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
       price: piecePrice,
       vip: pieceVip,
       isVipOnly: pieceVip,
+      isLegendary: pieceLegendary,
+      itemClass: pieceLegendary ? 'legendary' : pieceVip ? 'vip' : 'am',
       swatchColor: pieceColor,
       secondaryColor: pieceSecondary,
       accentColor: pieceAccent,
@@ -121,25 +135,50 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
       layerOffsetX,
       layerOffsetY,
       layerScale,
-    }),
-    [
-      layerOffsetX,
-      layerOffsetY,
-      layerScale,
-      pieceAccent,
-      pieceBrand,
-      pieceCategory,
-      pieceColor,
-      pieceGender,
-      pieceName,
-      piecePattern,
-      piecePrice,
-      pieceSecondary,
-      pieceTemplateId,
-      pieceVip,
-      pngLayerUrl,
-    ],
-  );
+      threeSpec: {
+        finish: resolvedFinish,
+        metallicTrim: pieceLegendary || pieceVip,
+        emissiveIntensity: pieceLegendary ? 0.42 : undefined,
+        garmentSilhouette:
+          pieceTemplateId === 'tpl_coroa'
+            ? 'acc_crown'
+            : pieceTemplateId === 'tpl_jaqueta'
+              ? 'blazer'
+              : pieceTemplateId === 'tpl_vestido'
+                ? 'dress_ballgown'
+                : pieceTemplateId === 'tpl_saia'
+                  ? 'skirt_pleated'
+                  : pieceTemplateId === 'tpl_calca'
+                    ? 'pants_tailored'
+                    : pieceTemplateId === 'tpl_tenis'
+                      ? 'shoe_sneakers'
+                      : pieceTemplateId === 'tpl_bota'
+                        ? 'shoe_boots'
+                        : pieceTemplateId === 'tpl_bolsa'
+                          ? 'acc_bag'
+                          : pieceTemplateId === 'tpl_oculos'
+                            ? 'acc_sunglasses'
+                            : undefined,
+      },
+    };
+  }, [
+    layerOffsetX,
+    layerOffsetY,
+    layerScale,
+    pieceAccent,
+    pieceBrand,
+    pieceCategory,
+    pieceColor,
+    pieceGender,
+    pieceLegendary,
+    pieceName,
+    piecePattern,
+    piecePrice,
+    pieceSecondary,
+    pieceTemplateId,
+    pieceVip,
+    pngLayerUrl,
+  ]);
 
   const handleUploadPngLayer = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -227,17 +266,28 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
   const handlePublishClothingZeroDowntime = (e: React.FormEvent) => {
     e.preventDefault();
     if (!onCreateCustomClothing) return;
-    const finalName = pieceName.trim() || `Criação ${CATEGORY_LABELS[pieceCategory]} #${Date.now().toString().slice(-3)}`;
+    const now = Date.now();
+    const finalName = pieceName.trim() || `Criação ${CATEGORY_LABELS[pieceCategory]} #${now.toString().slice(-3)}`;
     const item: ClothingItem = {
       ...previewClothingItem,
-      id: `design_layer_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      id: `custom_3d_${now}_${Math.random().toString(36).slice(2, 5)}`,
       name: finalName,
-      customCreatedAt: Date.now(),
+      customCreatedAt: now,
+      launchedAt: pieceLegendary ? now : undefined,
+      legendaryExpiresAt: pieceLegendary ? now + LEGENDARY_AVAILABILITY_MS : undefined,
       createdBy: currentUser.displayName || currentUser.username,
-      badge: pngLayerUrl ? 'Camada PNG 2D' : 'Designer Global',
+      badge: pieceLegendary
+        ? 'Lendário 24h'
+        : pngLayerUrl
+          ? 'Camada 3D'
+          : 'Designer Global 3D',
     };
     onCreateCustomClothing(item);
-    setFeedback(`"${item.name}" publicada na Starplaza com Zero-Downtime! Todos os jogadores já podem testar.`);
+    setFeedback(
+      pieceLegendary
+        ? `"${item.name}" lançada como Item Lendário por 24 horas reais na Starplaza!`
+        : `"${item.name}" publicada na Starplaza com Zero-Downtime! Todos os jogadores já podem testar.`,
+    );
     setPieceName('');
     setPngLayerUrl('');
     setLayerOffsetX(0);
@@ -494,20 +544,36 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
               <input
                 type="number"
                 min={50}
-                max={5000}
+                max={100000}
                 value={piecePrice}
                 onChange={(e) => setPiecePrice(Number(e.target.value))}
                 className="mt-1 w-full px-2.5 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
               />
             </label>
-            <label className="flex items-center gap-2 text-xs font-semibold text-[#44403C] pt-4 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={pieceVip}
-                onChange={(e) => setPieceVip(e.target.checked)}
-              />
-              Peça VIP
-            </label>
+            <div className="space-y-1.5 pt-2">
+              <label className="flex items-center gap-2 text-xs font-semibold text-[#44403C] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pieceVip}
+                  onChange={(e) => {
+                    setPieceVip(e.target.checked);
+                    if (e.target.checked) setPieceLegendary(false);
+                  }}
+                />
+                Peça VIP
+              </label>
+              <label className="flex items-center gap-2 text-xs font-semibold text-purple-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pieceLegendary}
+                  onChange={(e) => {
+                    setPieceLegendary(e.target.checked);
+                    if (e.target.checked) setPieceVip(false);
+                  }}
+                />
+                Lendário (24h na loja)
+              </label>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -577,20 +643,22 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
             </div>
           </div>
 
-          <div className="my-4 w-52 h-80 bg-[#FAF8F5] rounded-xl border border-[#EFEAE3] flex items-center justify-center p-2">
-            <MeDollSvg
+          <div className="my-4 w-full">
+            <Avatar3DViewport
               equipped={{ [pieceCategory]: previewClothingItem.id }}
               skinTone={mannequinSkin}
               avatarGender={mannequinGender}
-              extraItems={[previewClothingItem]}
-              enableIdle={false}
+              catalog={[previewClothingItem]}
+              showControls
+              heightClassName="h-[320px]"
+              backgroundHex="#FAF8F5"
             />
           </div>
 
           <div className="w-full flex items-center justify-between text-[11px] text-[#6B645D]">
             <span>Pele do manequim:</span>
             <div className="flex gap-1.5">
-              {(['porcelana', 'mel', 'bronze', 'ebano'] as SkinToneId[]).map((st) => (
+              {(['porcelana', 'pessego', 'mel', 'cacau'] as SkinToneId[]).map((st) => (
                 <button
                   key={st}
                   type="button"
@@ -663,10 +731,9 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
                 </select>
               </div>
             </div>
-            <div className="h-28 rounded-xl bg-[#FAF8F5] border border-[#EFEAE3] flex items-center justify-center p-2">
-              <FurnitureSvg
-                furnitureId="custom_preview"
-                furnitureDef={{
+            <div className="h-28 rounded-xl bg-[#FAF8F5] border border-[#EFEAE3] flex items-center justify-center p-2 overflow-hidden">
+              <ThreeFurnitureThumbnail
+                def={{
                   id: 'custom_preview',
                   name: furnName || 'Prévia',
                   category: 'Decoração',
@@ -680,6 +747,7 @@ export const GlobalDesignerWorkbench: React.FC<GlobalDesignerWorkbenchProps> = (
                   accentColor: '#D4A853',
                   templateId: furnTemplate,
                 }}
+                className="w-full h-full object-contain"
               />
             </div>
           </div>

@@ -47,7 +47,7 @@ import {
 } from '../utils/storage';
 import { useGlobalState } from '../core/state/GlobalStateManager';
 import { ProfileAvatar } from './ProfileAvatar';
-import { MeDollSvg } from './svg/MeDollSvg';
+import { Avatar3DViewport } from './three/Avatar3DViewport';
 
 export const ALL_STAFF_ROLE_TIERS: StaffRoleTier[] = [
   'admin',
@@ -292,12 +292,7 @@ const DEFAULT_BOT_DRAFT: StaffBotEditorPayload = {
   presenceStatus: 'online',
   avatarGender: 'feminino',
   skinTone: 'pessego',
-  equipped: {
-    cabelo: 'hair_ondas_mel',
-    blusas: 'top_camisa_seda',
-    calcas: 'bottom_saia_midi',
-    sapatos: 'shoes_scarpin_preto',
-  },
+  equipped: {},
   customAvatarUrl: undefined,
   avatarDisplayMode: 'medoll',
   botAiSpecialty: 'hybrid',
@@ -1121,12 +1116,15 @@ export const StaffDirectory: React.FC<StaffDirectoryProps> = ({
                     />
                   </div>
 
-                  <div className="w-[156px] h-[270px] my-1">
-                    <MeDollSvg
+                  <div className="w-full my-1">
+                    <Avatar3DViewport
                       equipped={editorDraft.equipped}
                       skinTone={editorDraft.skinTone}
                       avatarGender={editorDraft.avatarGender}
-                      deletedItemIds={deletedItemIds}
+                      catalog={activeCatalog}
+                      showControls={false}
+                      heightClassName="h-[260px]"
+                      backgroundHex="#FAF8F5"
                     />
                   </div>
 

@@ -1,5 +1,6 @@
 import { GLOBAL_ROOMS, NEWS_PHOTO_ASSETS } from '../data/catalog';
 import {
+  AccessoryBodySlot,
   AiMaintenanceLogEntry,
   BotAiSpecialty,
   ClothingCategory,
@@ -36,6 +37,7 @@ import {
   publishNewsPostToWorld,
   savePlayerProgress,
   saveWorldState,
+  toggleItemInEquippedOutfit,
 } from './storage';
 import { SharedRoomsSnapshot } from './realtime';
 
@@ -402,9 +404,19 @@ export function runAiMaintenanceScan(options?: {
           const fixedEquipped = { ...parsed.equipped };
           let outfitFixed = 0;
 
-          (Object.keys(fixedEquipped) as ClothingCategory[]).forEach((slot) => {
+          (
+            [
+              'cabelo',
+              'blusas',
+              'casacos',
+              'vestidos',
+              'calcas',
+              'sapatos',
+              'acessorios',
+            ] as ClothingCategory[]
+          ).forEach((slot) => {
             const itemId = fixedEquipped[slot];
-            if (!itemId) return;
+            if (!itemId || typeof itemId !== 'string') return;
             const catalogItem = fullCatalogMap.get(itemId);
             if (
               !catalogItem ||
@@ -417,6 +429,33 @@ export function runAiMaintenanceScan(options?: {
               outfitFixed += 1;
             }
           });
+          if (fixedEquipped.acessoriosSlots && typeof fixedEquipped.acessoriosSlots === 'object') {
+            const cleanedSlots: typeof fixedEquipped.acessoriosSlots = {};
+            (
+              Object.entries(fixedEquipped.acessoriosSlots) as Array<
+                [AccessoryBodySlot, string | undefined]
+              >
+            ).forEach(([sub, subId]) => {
+              if (!subId) return;
+              const catalogItem = fullCatalogMap.get(subId);
+              if (
+                catalogItem &&
+                isItemCompatibleWithGender(
+                  catalogItem.gender ?? catalogItem.genderStyle,
+                  bodyGender,
+                )
+              ) {
+                cleanedSlots[sub] = subId;
+              } else {
+                outfitFixed += 1;
+              }
+            });
+            if (Object.keys(cleanedSlots).length > 0) {
+              fixedEquipped.acessoriosSlots = cleanedSlots;
+            } else {
+              delete fixedEquipped.acessoriosSlots;
+            }
+          }
 
           if (outfitFixed > 0) {
             parsed.equipped = fixedEquipped;
@@ -495,11 +534,10 @@ export function runAiMaintenanceScan(options?: {
           playerIdsRepaired.push(accountId);
         }
       } catch {
-        window.localStorage.removeItem(key);
-        playerIdsRepaired.push(accountId);
+        // Nunca apaga dados salvos de jogadores em caso de erro temporário de leitura
         findings.push({
-          issue: `JSON corrompido detectado no progresso de ${ownerLabel}.`,
-          action: 'Estrutura inválida limpa e conta preparada para reconstrução segura.',
+          issue: `Leitura protegida no progresso de ${ownerLabel}.`,
+          action: 'Dados locais preservados sem remoção.',
         });
       }
     }
@@ -566,13 +604,13 @@ export function runAiMaintenanceScan(options?: {
           const badX =
             typeof fixedPresence.x !== 'number' ||
             Number.isNaN(fixedPresence.x) ||
-            fixedPresence.x < 8 ||
-            fixedPresence.x > 92;
+            fixedPresence.x < 0 ||
+            fixedPresence.x > 100;
           const badY =
             typeof fixedPresence.y !== 'number' ||
             Number.isNaN(fixedPresence.y) ||
-            fixedPresence.y < minY ||
-            fixedPresence.y > maxY;
+            fixedPresence.y < 0 ||
+            fixedPresence.y > 100;
           const badRoom = !roomDef;
 
           if (badX || badY || badRoom) {
@@ -582,7 +620,7 @@ export function runAiMaintenanceScan(options?: {
               ...fixedPresence,
               roomId: badRoom ? 'lounge_party' : fixedPresence.roomId,
               x: badX ? 50 : fixedPresence.x,
-              y: badY ? Math.round((minY + maxY) / 2) : fixedPresence.y,
+              y: badY ? 68 : fixedPresence.y,
             };
           }
 
@@ -590,7 +628,17 @@ export function runAiMaintenanceScan(options?: {
           if (fixedPresence.equipped) {
             const fixedEq = { ...fixedPresence.equipped };
             let eqChanged = false;
-            (Object.keys(fixedEq) as ClothingCategory[]).forEach((slot) => {
+            (
+              [
+                'cabelo',
+                'blusas',
+                'casacos',
+                'vestidos',
+                'calcas',
+                'sapatos',
+                'acessorios',
+              ] as ClothingCategory[]
+            ).forEach((slot) => {
               const id = fixedEq[slot];
               if (!id) return;
               const item = fullCatalogMap.get(id);
@@ -605,6 +653,31 @@ export function runAiMaintenanceScan(options?: {
                 eqChanged = true;
               }
             });
+            if (fixedEq.acessoriosSlots) {
+              const nextSubSlots: Partial<Record<AccessoryBodySlot, string>> = {};
+              (Object.entries(fixedEq.acessoriosSlots) as Array<[AccessoryBodySlot, string | undefined]>).forEach(
+                ([sub, id]) => {
+                  if (!id) return;
+                  const item = fullCatalogMap.get(id);
+                  if (
+                    item &&
+                    isItemCompatibleWithGender(
+                      item.gender ?? item.genderStyle,
+                      fixedPresence.avatarGender,
+                    )
+                  ) {
+                    nextSubSlots[sub] = id;
+                  } else {
+                    eqChanged = true;
+                  }
+                },
+              );
+              if (Object.keys(nextSubSlots).length > 0) {
+                fixedEq.acessoriosSlots = nextSubSlots;
+              } else {
+                delete fixedEq.acessoriosSlots;
+              }
+            }
             if (eqChanged) {
               roomOutfitFixed += 1;
               snapDirty = true;
@@ -650,16 +723,17 @@ export function runAiMaintenanceScan(options?: {
             messagesByRoom: snap.messagesByRoom ?? {},
             customRooms: cleanCustomRooms,
             kicks: Array.isArray(snap.kicks) ? snap.kicks : [],
+            djTracksByRoom: snap.djTracksByRoom ?? {},
+            officialOverrides: snap.officialOverrides ?? {},
           };
           window.localStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(repairedSnap));
           broadcastRoomsSync(repairedSnap);
         }
       } catch {
-        window.localStorage.removeItem(ROOMS_STORAGE_KEY);
-        roomsRepaired = true;
+        // Nunca apaga salas personalizadas ou configurações em erro de parse
         findings.push({
-          issue: 'Snapshot de salas multiplayer corrompido no localStorage.',
-          action: 'Snapshot reinicializado e salas estabilizadas automaticamente.',
+          issue: 'Leitura protegida do snapshot de salas no localStorage.',
+          action: 'Salas criadas e configurações oficiais mantidas intactas.',
         });
       }
     }
@@ -1346,7 +1420,17 @@ function sanitizeEquippedOutfit(
   const nextEquipped: EquippedOutfit = { ...equipped };
   const fixedIssues: string[] = [];
 
-  (Object.keys(nextEquipped) as ClothingCategory[]).forEach((slot) => {
+  (
+    [
+      'cabelo',
+      'blusas',
+      'casacos',
+      'vestidos',
+      'calcas',
+      'sapatos',
+      'acessorios',
+    ] as ClothingCategory[]
+  ).forEach((slot) => {
     const id = nextEquipped[slot];
     if (!id) return;
     const item = catalogMap.get(id);
@@ -1365,6 +1449,34 @@ function sanitizeEquippedOutfit(
       fixedIssues.push(`peça VIP sem assinatura ativa (${item.name})`);
     }
   });
+
+  if (nextEquipped.acessoriosSlots) {
+    const cleanSubSlots: Partial<Record<AccessoryBodySlot, string>> = {};
+    (Object.entries(nextEquipped.acessoriosSlots) as Array<[AccessoryBodySlot, string | undefined]>).forEach(
+      ([sub, id]) => {
+        if (!id) return;
+        const item = catalogMap.get(id);
+        if (!item || deletedItemIds.has(id)) {
+          fixedIssues.push(`acessório removido/inexistente (${sub})`);
+          return;
+        }
+        if (!isItemCompatibleWithGender(item.gender ?? item.genderStyle, bodyGender)) {
+          fixedIssues.push(`acessório incompatível (${item.name})`);
+          return;
+        }
+        if (item.isVipOnly && !hasVipAccess) {
+          fixedIssues.push(`acessório VIP sem assinatura (${item.name})`);
+          return;
+        }
+        cleanSubSlots[sub] = id;
+      },
+    );
+    if (Object.keys(cleanSubSlots).length > 0) {
+      nextEquipped.acessoriosSlots = cleanSubSlots;
+    } else {
+      delete nextEquipped.acessoriosSlots;
+    }
+  }
 
   // Regra anatômica de camadas: vestidos não podem sobrepor blusas ou calças simultaneamente
   if (nextEquipped.vestidos && (nextEquipped.blusas || nextEquipped.calcas)) {
@@ -1652,16 +1764,12 @@ export function runBotAutonomousLifeTick(options?: {
       ? pool[Math.floor(Math.random() * pool.length)]
       : pool.find((r) => r.id === existing.roomId) ?? pool[0];
 
-    const workDeskAnchor = null;
-
-    const nextX = workDeskAnchor
-      ? Math.max(10, Math.min(90, Math.round(workDeskAnchor.x + (Math.random() * 6 - 3))))
-      : existing && existing.roomId === chosenRoom.id
+    const nextX =
+      existing && existing.roomId === chosenRoom.id
         ? Math.max(12, Math.min(88, Math.round(existing.x + (Math.random() * 22 - 11))))
         : Math.round(24 + Math.random() * 52);
-    const nextY = workDeskAnchor
-      ? Math.max(chosenRoom.walkMinY + 2, Math.min(chosenRoom.walkMaxY - 2, Math.round(workDeskAnchor.y + (Math.random() * 4 - 2))))
-      : existing && existing.roomId === chosenRoom.id
+    const nextY =
+      existing && existing.roomId === chosenRoom.id
         ? Math.max(
             chosenRoom.walkMinY + 2,
             Math.min(
@@ -1684,14 +1792,11 @@ export function runBotAutonomousLifeTick(options?: {
         const pickItem = compatible[Math.floor(Math.random() * compatible.length)];
         const alreadyOwned = botProgress.ownedItemIds.includes(pickItem.id);
         if (alreadyOwned || botProgress.starcoins >= pickItem.price) {
-          const nextEquipped = { ...botProgress.equipped };
-          if (pickItem.category === 'vestidos') {
-            delete nextEquipped.blusas;
-            delete nextEquipped.calcas;
-          } else if (pickItem.category === 'blusas' || pickItem.category === 'calcas') {
-            delete nextEquipped.vestidos;
-          }
-          nextEquipped[pickItem.category] = pickItem.id;
+          const nextEquipped = toggleItemInEquippedOutfit(
+            botProgress.equipped,
+            pickItem,
+            fullCatalog,
+          );
 
           updatedProgress = {
             ...botProgress,

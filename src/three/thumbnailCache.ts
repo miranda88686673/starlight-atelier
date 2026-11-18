@@ -1,14 +1,23 @@
 import * as THREE from 'three';
-import type { AvatarGender, ClothingItem, FurnitureDef } from '../types/game';
+import type {
+  AvatarGender,
+  ClothingItem,
+  FurnitureDef,
+  PurchasableWallpaperItem,
+  RoomBackdropTheme,
+} from '../types/game';
 import { createStudioLighting, createStudioRenderer, disposeObject3D, flushSoftwareFrame, type StudioRendererBundle } from './studioEngine';
 import { buildStandaloneItem3D } from './clothing3d';
 import { buildFurniture3D } from './furniture3d';
+import { buildRoomStage3D } from './roomScenes3d';
 
 const dataUrlCache = new Map<string, string>();
 const listeners = new Map<string, Array<(url: string) => void>>();
 
 interface QueueJob {
   key: string;
+  mode?: 'item' | 'room';
+  backgroundHex?: string;
   build: () => THREE.Object3D;
 }
 
@@ -36,36 +45,59 @@ function ensureSnapshotRig() {
     sharedScene.environment = sharedBundle.envTarget.texture;
     createStudioLighting(sharedScene, { isSoftware: sharedBundle.isSoftware, intensityScale: 1.05 });
 
-    sharedCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 20);
+    sharedCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 90);
   }
   return { bundle: sharedBundle, scene: sharedScene!, camera: sharedCamera! };
 }
 
-function frameAndRender(obj: THREE.Object3D): string {
+function frameAndRender(
+  obj: THREE.Object3D,
+  mode: 'item' | 'room' = 'item',
+  backgroundHex?: string,
+): string {
   const { bundle, scene, camera } = ensureSnapshotRig();
 
-  // Centraliza objeto pela bounding box
-  const box = new THREE.Box3().setFromObject(obj);
-  const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
-  box.getSize(size);
-  box.getCenter(center);
+  const prevBg = scene.background;
+  if (mode === 'room' && backgroundHex) {
+    scene.background = new THREE.Color(backgroundHex);
+  } else {
+    scene.background = null;
+  }
 
-  obj.position.sub(center);
   const holder = new THREE.Group();
-  holder.add(obj);
-  holder.rotation.y = 0.35;
-  scene.add(holder);
+  if (mode === 'room') {
+    holder.add(obj);
+    scene.add(holder);
+    camera.fov = 42;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 4.1, 8.2);
+    camera.lookAt(0, 0.9, -0.8);
+  } else {
+    // Centraliza objeto pela bounding box
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
 
-  const maxDim = Math.max(size.x, size.y, size.z, 0.28);
-  const dist = (maxDim / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.48;
-  camera.position.set(0, maxDim * 0.14, dist);
-  camera.lookAt(0, 0, 0);
+    obj.position.sub(center);
+    holder.add(obj);
+    holder.rotation.y = 0.35;
+    scene.add(holder);
+
+    camera.fov = 34;
+    camera.updateProjectionMatrix();
+    const maxDim = Math.max(size.x, size.y, size.z, 0.28);
+    const dist = (maxDim / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.48;
+    camera.position.set(0, maxDim * 0.14, dist);
+    camera.lookAt(0, 0, 0);
+  }
 
   bundle.renderer.render(scene, camera);
   flushSoftwareFrame(bundle.renderer, bundle.isSoftware);
   const dataUrl = bundle.renderer.domElement.toDataURL('image/png');
 
+  scene.background = prevBg;
   scene.remove(holder);
   disposeObject3D(holder);
   return dataUrl;
@@ -82,7 +114,7 @@ function processQueue() {
       queuedKeys.delete(next.key);
       if (!dataUrlCache.has(next.key)) {
         const obj = next.build();
-        const url = frameAndRender(obj);
+        const url = frameAndRender(obj, next.mode ?? 'item', next.backgroundHex);
         dataUrlCache.set(next.key, url);
         const cbs = listeners.get(next.key);
         if (cbs) {
@@ -162,6 +194,65 @@ export function requestFurnitureThumbnail(
     jobQueue.push({
       key,
       build: () => buildFurniture3D(def),
+    });
+    processQueue();
+  }
+
+  return () => {
+    const arr = listeners.get(key);
+    if (!arr) return;
+    const filtered = arr.filter((fn) => fn !== onReady);
+    if (filtered.length === 0) {
+      listeners.delete(key);
+    } else {
+      listeners.set(key, filtered);
+    }
+  };
+}
+
+export function requestRoomStageThumbnail(
+  theme: RoomBackdropTheme,
+  wallpaper: PurchasableWallpaperItem | undefined,
+  onReady: (url: string) => void
+): () => void {
+  const key = `room_${theme}_${wallpaper?.id || 'base'}`;
+  const hit = dataUrlCache.get(key);
+  if (hit) {
+    onReady(hit);
+    return () => {};
+  }
+
+  const list = listeners.get(key) || [];
+  list.push(onReady);
+  listeners.set(key, list);
+
+  if (!queuedKeys.has(key)) {
+    queuedKeys.add(key);
+    const bgHex =
+      theme === 'floresta_piquenique'
+        ? '#7DD3FC'
+        : theme === 'ilha_coqueiro' || theme === 'ilha_tropical'
+          ? '#38BDF8'
+          : theme === 'boate_neon'
+            ? '#07040F'
+            : theme === 'chao_plano_custom'
+              ? '#E2E8F0'
+              : undefined;
+    jobQueue.push({
+      key,
+      mode: 'room',
+      backgroundHex: bgHex,
+      build: () =>
+        buildRoomStage3D({
+          theme,
+          wallpaper,
+          includeDjBooth:
+            theme === 'lounge_party' ||
+            theme === 'boate_neon' ||
+            theme === 'ilha_tropical' ||
+            theme === 'ilha_coqueiro' ||
+            theme === 'floresta_piquenique',
+        }).group,
     });
     processQueue();
   }

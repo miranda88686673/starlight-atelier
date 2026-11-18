@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Clock, Send, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Clock, Loader2, Mic, Send, ShieldAlert, ShieldCheck, Square, X } from 'lucide-react';
 import {
   ChatSenderAvatar,
   RoomAvatarPresence,
@@ -50,7 +50,14 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
   const [draft, setDraft] = useState('');
   const [warning, setWarning] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const shouldSendOnStopRef = useRef<boolean>(true);
+  const recordTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -64,6 +71,32 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
     return () => window.clearInterval(timer);
   }, [mutedUntil]);
 
+  const stopStreamResources = () => {
+    if (recordTimerRef.current !== null) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      shouldSendOnStopRef.current = false;
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch {
+        // Silencioso
+      }
+      stopStreamResources();
+    };
+  }, []);
+
   const muteRemainingSec =
     mutedUntil && mutedUntil > nowTs
       ? Math.max(1, Math.ceil((mutedUntil - nowTs) / 1000))
@@ -71,6 +104,181 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
   const isMutedNow = muteRemainingSec > 0;
   const muteMin = Math.floor(muteRemainingSec / 60);
   const muteSec = muteRemainingSec % 60;
+
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Falha ao converter áudio gravado.'));
+        }
+      };
+      reader.onerror = () => reject(new Error('Erro ao ler áudio do microfone.'));
+      reader.readAsDataURL(blob);
+    });
+
+  const stopRecordingAndSend = (sendAfterStop = true) => {
+    shouldSendOnStopRef.current = sendAfterStop;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop();
+      } catch {
+        stopStreamResources();
+        setVoiceStatus('idle');
+      }
+    } else {
+      stopStreamResources();
+      setVoiceStatus('idle');
+    }
+  };
+
+  const handleToggleMicrophone = async () => {
+    if (voiceStatus === 'transcribing') return;
+
+    if (voiceStatus === 'recording') {
+      stopRecordingAndSend(true);
+      return;
+    }
+
+    setWarning(null);
+
+    if (isMutedNow) {
+      setWarning(
+        `Você está temporariamente silenciada (${muteMin}:${String(muteSec).padStart(2, '0')} restantes).`,
+      );
+      return;
+    }
+
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      setWarning('Seu navegador não oferece suporte à captura de microfone neste ambiente.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      mediaStreamRef.current = stream;
+
+      const candidateMimes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg',
+      ];
+      const chosenMime =
+        typeof MediaRecorder !== 'undefined'
+          ? candidateMimes.find((m) => MediaRecorder.isTypeSupported(m))
+          : undefined;
+
+      const recorder = chosenMime
+        ? new MediaRecorder(stream, { mimeType: chosenMime })
+        : new MediaRecorder(stream);
+
+      audioChunksRef.current = [];
+      shouldSendOnStopRef.current = true;
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          audioChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const shouldSend = shouldSendOnStopRef.current;
+        const mimeType = recorder.mimeType || chosenMime || 'audio/webm';
+        const chunks = audioChunksRef.current;
+        stopStreamResources();
+        setRecordingSeconds(0);
+
+        if (!shouldSend) {
+          setVoiceStatus('idle');
+          return;
+        }
+
+        const audioBlob = new Blob(chunks, { type: mimeType });
+        if (audioBlob.size < 350) {
+          setVoiceStatus('idle');
+          setWarning('Áudio muito curto. Fale um pouco mais ao usar o microfone.');
+          return;
+        }
+
+        setVoiceStatus('transcribing');
+        try {
+          const audioBase64 = await blobToBase64(audioBlob);
+          const response = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audioBase64, mimeType }),
+          });
+          const payload = (await response.json()) as {
+            ok?: boolean;
+            text?: string;
+            error?: string;
+          };
+
+          if (!response.ok || !payload.ok) {
+            setWarning(payload.error || 'Não foi possível transcrever sua fala.');
+            setVoiceStatus('idle');
+            return;
+          }
+
+          const spokenText = (payload.text ?? '').trim().slice(0, 180);
+          if (!spokenText) {
+            setWarning('Nenhuma fala detectada no microfone. Tente falar mais perto.');
+            setVoiceStatus('idle');
+            return;
+          }
+
+          const sendRes = onSendMessage(spokenText);
+          if (sendRes && sendRes.blocked) {
+            setWarning(
+              sendRes.reason ?? 'Mensagem falada bloqueada pela moderação da sala.',
+            );
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Erro ao processar áudio.';
+          setWarning(msg);
+        } finally {
+          setVoiceStatus('idle');
+        }
+      };
+
+      recorder.start(250);
+      setRecordingSeconds(0);
+      setVoiceStatus('recording');
+
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((prev) => {
+          const next = prev + 1;
+          if (next >= 20) {
+            stopRecordingAndSend(true);
+          }
+          return next;
+        });
+      }, 1000);
+    } catch (err) {
+      stopStreamResources();
+      setVoiceStatus('idle');
+      const msg =
+        err instanceof Error && err.name === 'NotAllowedError'
+          ? 'Permissão de microfone negada. Libere o microfone no navegador para falar no chat.'
+          : 'Não foi possível acessar o microfone agora.';
+      setWarning(msg);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,7 +485,41 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
         onSubmit={handleSubmit}
         className="p-3 border-t border-[#EFEAE3] bg-white rounded-b-xl space-y-1.5"
       >
-        <div className="flex items-center gap-2">
+        {voiceStatus !== 'idle' && (
+          <div
+            role="status"
+            className={`px-2.5 py-1.5 rounded-lg text-[11px] flex items-center justify-between gap-2 border ${
+              voiceStatus === 'recording'
+                ? 'bg-[#FEF2F2] border-[#FCA5A5] text-[#B91C1C]'
+                : 'bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {voiceStatus === 'recording' ? (
+                <span className="w-2 h-2 rounded-full bg-[#DC2626] animate-ping shrink-0" />
+              ) : (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              )}
+              <span className="truncate font-medium">
+                {voiceStatus === 'recording'
+                  ? `Gravando microfone (${recordingSeconds}s/20s) · Clique no quadrado para enviar`
+                  : 'Convertendo sua fala para o balão do avatar...'}
+              </span>
+            </div>
+            {voiceStatus === 'recording' && (
+              <button
+                type="button"
+                onClick={() => stopRecordingAndSend(false)}
+                title="Cancelar gravação"
+                className="p-0.5 rounded hover:bg-[#FEE2E2] text-[#991B1B] cursor-pointer shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1.5">
           <input
             type="text"
             maxLength={180}
@@ -286,18 +528,52 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
             placeholder={
               isMutedNow
                 ? 'Chat bloqueado temporariamente (mute ativo)...'
-                : modCapability === 'admin'
-                  ? 'Escreva ou use /aviso, /evento, /ban, /limpar...'
-                  : modCapability === 'ban_only'
-                    ? 'Escreva ou use /ban usuario...'
-                    : 'Escreva aqui ou use /report usuario motivo...'
+                : voiceStatus === 'recording'
+                  ? 'Falando no microfone...'
+                  : modCapability === 'admin'
+                    ? 'Escreva, use microfone ou /aviso, /evento, /ban...'
+                    : modCapability === 'ban_only'
+                      ? 'Escreva, use microfone ou /ban usuario...'
+                      : 'Escreva aqui, use microfone ou /report...'
             }
-            className="flex-1 px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+            className="flex-1 min-w-0 px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
           />
+          <button
+            type="button"
+            onClick={handleToggleMicrophone}
+            disabled={voiceStatus === 'transcribing'}
+            title={
+              voiceStatus === 'recording'
+                ? 'Parar e falar no chat'
+                : voiceStatus === 'transcribing'
+                  ? 'Transcrevendo fala...'
+                  : 'Falar no chat pelo microfone'
+            }
+            aria-label={
+              voiceStatus === 'recording'
+                ? 'Parar gravação e enviar fala'
+                : 'Usar microfone para falar no jogo'
+            }
+            className={`px-2.5 py-2 text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center shrink-0 cursor-pointer border ${
+              voiceStatus === 'recording'
+                ? 'bg-[#DC2626] hover:bg-[#B91C1C] text-white border-[#DC2626] animate-pulse'
+                : voiceStatus === 'transcribing'
+                  ? 'bg-[#F5F2EC] text-[#78716C] border-[#E6E0D8] cursor-wait'
+                  : 'bg-[#FAF8F5] hover:bg-[#FCE8EF] text-[#1C1917] hover:text-[#C8235D] border-[#E6E0D8]'
+            }`}
+          >
+            {voiceStatus === 'recording' ? (
+              <Square className="w-3.5 h-3.5 fill-white" />
+            ) : voiceStatus === 'transcribing' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Mic className="w-3.5 h-3.5" />
+            )}
+          </button>
           <button
             type="submit"
             aria-label="Enviar mensagem"
-            className="px-3.5 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] rounded-lg transition-colors inline-flex items-center gap-1 shrink-0 cursor-pointer"
+            className="px-3 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] rounded-lg transition-colors inline-flex items-center gap-1 shrink-0 cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
             Enviar

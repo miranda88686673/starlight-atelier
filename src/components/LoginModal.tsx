@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -10,12 +10,15 @@ import {
   LogIn,
   Mail,
   MessageCircle,
+  Moon,
   PlusCircle,
   RefreshCw,
   Send,
   ShieldCheck,
   User,
   UserPlus,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import couplePortraitImg from '../assets/images/atelier_couple_portrait_1794768226559.jpg';
 import floralCrestImg from '../assets/images/atelier_floral_crest_1794768226415.jpg';
@@ -28,6 +31,7 @@ import {
   UserAccount,
 } from '../types/game';
 import { soundEngine } from '../utils/sound';
+import type { LoginXpAwardResult } from '../utils/levelSystem';
 import {
   ADMIN_OWNER_EMAIL,
   loginAccount,
@@ -36,7 +40,10 @@ import {
 } from '../utils/storage';
 
 interface LoginModalProps {
-  onAuthenticated: (account: UserAccount) => void;
+  onAuthenticated: (
+    account: UserAccount,
+    loginXpAward?: LoginXpAwardResult,
+  ) => void;
 }
 
 const AVATAR_OPTIONS: Array<{
@@ -143,6 +150,88 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Instrumental de música eletrônica procedural (Web Audio API)
+  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const musicIntervalRef = useRef<number | null>(null);
+
+  const toggleElectronicMusic = () => {
+    if (isPlayingMusic) {
+      if (musicIntervalRef.current) {
+        window.clearInterval(musicIntervalRef.current);
+        musicIntervalRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+      setIsPlayingMusic(false);
+    } else {
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const ctx = new AudioCtx();
+        audioCtxRef.current = ctx;
+
+        const notes = [110, 164.81, 220, 329.63, 440, 329.63, 220, 164.81];
+        let step = 0;
+
+        const playStep = () => {
+          if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') return;
+          const t = ctx.currentTime;
+
+          const oscBass = ctx.createOscillator();
+          const gainBass = ctx.createGain();
+          const filter = ctx.createBiquadFilter();
+          
+          oscBass.type = 'sawtooth';
+          oscBass.frequency.setValueAtTime(step % 2 === 0 ? 55 : 82.5, t);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(600, t);
+          filter.frequency.exponentialRampToValueAtTime(120, t + 0.2);
+
+          gainBass.gain.setValueAtTime(0.15, t);
+          gainBass.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+          oscBass.connect(filter);
+          filter.connect(gainBass);
+          gainBass.connect(ctx.destination);
+
+          oscBass.start(t);
+          oscBass.stop(t + 0.25);
+
+          const oscArp = ctx.createOscillator();
+          const gainArp = ctx.createGain();
+          oscArp.type = 'square';
+          oscArp.frequency.setValueAtTime(notes[step % notes.length], t);
+
+          gainArp.gain.setValueAtTime(0.08, t);
+          gainArp.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+          oscArp.connect(gainArp);
+          gainArp.connect(ctx.destination);
+
+          oscArp.start(t);
+          oscArp.stop(t + 0.2);
+
+          step++;
+        };
+
+        musicIntervalRef.current = window.setInterval(playStep, 230);
+        setIsPlayingMusic(true);
+      } catch (err) {
+        console.error('AudioContext error:', err);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (musicIntervalRef.current) clearInterval(musicIntervalRef.current);
+      if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
+    };
+  }, []);
 
   // Recuperação de senha
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -337,6 +426,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         error?: string;
         account?: UserAccount;
         progress?: Parameters<typeof syncAccountAndProgressFromServer>[0]['progress'];
+        loginXpAward?: LoginXpAwardResult;
         accounts?: UserAccount[];
         worldState?: Parameters<
           typeof syncAccountAndProgressFromServer
@@ -350,11 +440,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
           worldState: data.worldState,
         });
         soundEngine.playPurchase();
-        onAuthenticated(data.account);
+        onAuthenticated(data.account, data.loginXpAward);
         return;
       }
       if (res.status === 401 || res.status === 400) {
-        setErrorMsg(data.error || 'E-mail, nome do avatar ou senha inválidos.');
+        setErrorMsg(data.error || 'E-mail, nome do personagem ou senha inválidos.');
         soundEngine.playModAction();
         return;
       }
@@ -374,7 +464,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
       return;
     }
     soundEngine.playPurchase();
-    onAuthenticated(fallback.account);
+    onAuthenticated(fallback.account, fallback.loginXpAward);
   };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -444,109 +534,100 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
   };
 
   return (
-    <div
-      className="min-h-screen w-full relative overflow-hidden flex items-center justify-center px-4 py-8 sm:px-6 lg:px-10 text-[#2E2520]"
-      style={{
-        backgroundColor: '#E8DFD3',
-        backgroundImage:
-          'radial-gradient(circle at 22% 24%, rgba(255,252,247,0.72) 0%, rgba(232,223,211,0.35) 48%, rgba(214,200,183,0.68) 100%), repeating-linear-gradient(0deg, rgba(130,112,92,0.03) 0px, rgba(130,112,92,0.03) 1px, transparent 1px, transparent 4px), repeating-linear-gradient(90deg, rgba(130,112,92,0.025) 0px, rgba(130,112,92,0.025) 1px, transparent 1px, transparent 4px)',
-      }}
-    >
-      {/* Ornamentos botânicos vintage nos cantos do fundo em linho */}
-      <BackdropBotanicalCorner className="fixed -bottom-10 -left-10 w-72 h-72 sm:w-96 sm:h-96 opacity-80" />
-      <BackdropBotanicalCorner className="fixed -top-10 -right-10 w-72 h-72 sm:w-96 sm:h-96 rotate-180 opacity-80" />
-      <BackdropBotanicalCorner className="fixed -bottom-16 -right-10 w-64 h-64 sm:w-80 sm:h-80 -scale-x-100 opacity-65" />
+    <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-center px-4 py-8 sm:px-6 lg:px-10 text-white bg-[#050505]">
+      {/* Luzes brilhantes espelhadas varrendo toda a tela preta (roxo, verde e amarelo) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-10 left-[-10%] w-[600px] h-[600px] bg-purple-600/35 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '6s' }} />
+        <div className="absolute bottom-10 left-[20%] w-[550px] h-[550px] bg-emerald-500/30 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '7s' }} />
+        <div className="absolute top-1/3 left-[40%] w-[500px] h-[500px] bg-yellow-500/30 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '5s' }} />
 
-      {/* Container principal com os dois cartões editoriais */}
-      <div className="relative z-10 w-full max-w-[1060px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-7 items-stretch">
-        {/* CARTÃO ESQUERDO: Apresentação / Boutique */}
-        <section className="lg:col-span-6 bg-[#FCFBF8] rounded-xl p-2.5 shadow-[0_14px_34px_rgba(61,44,31,0.13)] border border-[#D8CBB8] flex flex-col">
-          <div className="relative flex-1 border border-[#C6B18B]/80 rounded-lg px-6 py-7 sm:px-8 sm:py-8 flex flex-col justify-between bg-[#FCFBF8]">
-            {/* Cantos com filigrana dourada */}
-            <GoldCornerFiligree className="absolute top-1.5 left-1.5" />
-            <GoldCornerFiligree className="absolute top-1.5 right-1.5 -scale-x-100" />
-            <GoldCornerFiligree className="absolute bottom-1.5 left-1.5 -scale-y-100" />
-            <GoldCornerFiligree className="absolute bottom-1.5 right-1.5 rotate-180" />
+        {/* Luzes espelhadas no lado oposto para varrer toda a tela */}
+        <div className="absolute top-20 right-[-10%] w-[600px] h-[600px] bg-emerald-500/30 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute bottom-20 right-[20%] w-[550px] h-[550px] bg-purple-600/35 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '6s' }} />
+        <div className="absolute top-1/2 right-[40%] w-[500px] h-[500px] bg-yellow-500/30 rounded-full blur-[160px] animate-pulse" style={{ animationDuration: '9s' }} />
+      </div>
 
-            {/* Cabeçalho centralizado com emblema floral + título serifado */}
-            <header className="flex items-center justify-center gap-3.5 pt-1 pb-4">
-              <div className="w-16 h-16 sm:w-[70px] sm:h-[70px] shrink-0 flex items-center justify-center">
-                <img
-                  src={floralCrestImg}
-                  alt="Emblema Floral Starlight Atelier"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain mix-blend-multiply"
-                />
+      {/* Botão de Música Eletrônica no Topo Direito */}
+      <div className="absolute top-6 right-6 z-30">
+        <button
+          type="button"
+          onClick={toggleElectronicMusic}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-black/80 border border-purple-500/50 text-purple-200 hover:text-white hover:border-purple-400 text-xs font-semibold backdrop-blur-md shadow-[0_0_20px_rgba(168,85,247,0.35)] transition-all cursor-pointer"
+        >
+          {isPlayingMusic ? (
+            <Volume2 className="w-4 h-4 text-green-400 animate-bounce" />
+          ) : (
+            <VolumeX className="w-4 h-4 text-purple-400" />
+          )}
+          <span>{isPlayingMusic ? 'Música Eletrônica (Tocando)' : 'Ativar Música Eletrônica'}</span>
+        </button>
+      </div>
+
+      {/* Container principal com os dois cartões editoriais estilo vidro fosco */}
+      <div className="relative z-10 w-full max-w-[1080px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-7 items-stretch">
+        {/* CARTÃO ESQUERDO: Apresentação / Mundo Virtual & Social */}
+        <section className="lg:col-span-6 bg-white/85 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between">
+          <div>
+            {/* Topo: Logo Nocturne Vale Club */}
+            <div className="flex items-center gap-3.5 pb-4 border-b border-gray-200/80">
+              <div className="w-12 h-12 rounded-xl bg-[#761334]/10 flex items-center justify-center shrink-0">
+                <Moon className="w-6 h-6 text-[#761334]" />
               </div>
-              <div className="text-left">
-                <h1 className="font-display text-[32px] sm:text-[38px] font-semibold text-[#3C2F28] tracking-tight leading-none">
-                  Starlight Atelier
+              <div>
+                <h1 className="font-display text-2xl sm:text-[28px] font-bold text-[#1C1917] tracking-tight">
+                  Nocturne Vale Club
                 </h1>
-                <p className="text-xs sm:text-[13px] text-[#7A6D63] tracking-wide mt-1 text-center sm:text-left">
-                  Floral-pattern boutique
+                <p className="text-xs text-[#5C5149] font-medium">
+                  Mundo Virtual &amp; Social
                 </p>
               </div>
-            </header>
+            </div>
 
-            {/* Corpo intermediário: texto à esquerda e moldura do casal à direita */}
-            <div className="my-4 grid grid-cols-1 sm:grid-cols-12 gap-5 items-center">
-              <div className="sm:col-span-6 flex flex-col justify-center">
-                <p className="text-[13px] sm:text-sm font-medium tracking-[0.07em] uppercase text-[#6E5F53] text-center">
-                  BOUTIQUE &amp; SUÍTE 2D
-                </p>
-
-                {/* Linha ornamental com losango central */}
-                <div
-                  className="flex items-center justify-center gap-2 my-3"
-                  aria-hidden="true"
-                >
-                  <span className="h-[1px] flex-1 bg-gradient-to-r from-transparent to-[#C3AC84]" />
-                  <span className="w-1.5 h-1.5 rotate-45 bg-[#B7965B]" />
-                  <span className="h-[1px] flex-1 bg-gradient-to-l from-transparent to-[#C3AC84]" />
-                </div>
-
-                <p className="font-display text-[17px] sm:text-[18px] text-[#2D231E] leading-[1.48] tracking-[-0.005em] text-left">
-                  Crie sua boneca em camadas com traços realistas, conquiste
-                  coleções exclusivas na Starplaza, decore sua Suíte 2D e
-                  explore salas temáticas com estilistas do mundo todo.
+            {/* Texto Descritivo e Polaroid */}
+            <div className="my-5 grid grid-cols-1 sm:grid-cols-12 gap-5 items-center">
+              <div className="sm:col-span-7 space-y-3">
+                <span className="inline-block px-3 py-1 rounded-full bg-[#761334]/10 text-[#761334] text-[11px] font-semibold tracking-wider uppercase">
+                  MUNDO VIRTUAL &amp; SOCIAL
+                </span>
+                <p className="font-display text-[15px] sm:text-[16px] text-[#2C231E] leading-relaxed">
+                  Crie seu personagem, participe de festas incríveis com seus amigos na cobertura, decore suas salas e explore um mundo de possibilidades com jogadores do mundo todo!
                 </p>
               </div>
 
-              {/* Moldura Clássica Ornamentada com Ilustração do Casal */}
-              <div className="sm:col-span-6 flex justify-center">
-                <div className="relative p-2 bg-[#F7F1E6] rounded-xl border border-[#C6AF88] shadow-[0_6px_18px_rgba(61,44,31,0.12)] w-full max-w-[235px]">
-                  <GoldCornerFiligree className="w-6 h-6 absolute -top-1 -left-1 z-10" />
-                  <GoldCornerFiligree className="w-6 h-6 absolute -top-1 -right-1 -scale-x-100 z-10" />
-                  <GoldCornerFiligree className="w-6 h-6 absolute -bottom-1 -left-1 -scale-y-100 z-10" />
-                  <GoldCornerFiligree className="w-6 h-6 absolute -bottom-1 -right-1 rotate-180 z-10" />
-                  <div className="rounded-lg overflow-hidden border border-[#B59763]/70 bg-[#2C201B] aspect-[3/4]">
+              {/* Polaroid Photo Frame */}
+              <div className="sm:col-span-5 flex justify-center">
+                <div className="bg-white p-2.5 pb-6 rounded-lg shadow-xl border border-gray-200 rotate-2 hover:rotate-0 transition-transform w-full max-w-[170px]">
+                  <div className="rounded overflow-hidden bg-gray-900 aspect-[3/4]">
                     <img
                       src={couplePortraitImg}
-                      alt="Casal elegante no Starlight Atelier"
+                      alt="Avatar Selfie no Nocturne Vale Club"
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover object-top"
                     />
                   </div>
+                  <p className="text-[11px] font-display text-center text-gray-700 mt-2">
+                    Nocturne Selfie
+                  </p>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Rodapé do cartão esquerdo com os dois destaques */}
-            <div className="pt-4 flex flex-wrap items-center justify-center sm:justify-between gap-2.5">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#EFECE6] border border-[#CCC3B7] text-xs font-medium text-[#2E2520] whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-                <Layers className="w-3.5 h-3.5 text-[#3C2F28] shrink-0" />
-                <span>Moda em Camadas · Servidores BR, ES &amp; EN</span>
-              </div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#EFECE6] border border-[#CCC3B7] text-xs font-medium text-[#2E2520] font-mono-num whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-                <Coins className="w-3.5 h-3.5 text-[#3C2F28] shrink-0" />
-                <span>1.200 AM iniciais</span>
-              </div>
+          {/* Rodapé do cartão esquerdo */}
+          <div className="pt-4 border-t border-gray-200/80 flex flex-wrap items-center justify-between gap-2.5">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gray-100/90 border border-gray-200 text-xs font-medium text-[#2E2520]">
+              <Layers className="w-3.5 h-3.5 text-[#761334] shrink-0" />
+              <span>Moda, Amigos &amp; Festas · Servidores BR, ES &amp; EN</span>
+            </div>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gray-100/90 border border-gray-200 text-xs font-medium text-[#2E2520]">
+              <Coins className="w-3.5 h-3.5 text-[#761334] shrink-0" />
+              <span>Comece agora!</span>
             </div>
           </div>
         </section>
 
         {/* CARTÃO DIREITO: Fichário de Login / Criar Nova Conta */}
-        <section className="lg:col-span-6 bg-[#EAE1D5] rounded-xl p-5 sm:p-7 border border-[#D4C7B6] shadow-[0_14px_34px_rgba(61,44,31,0.13)] flex flex-col justify-between">
+        <section className="lg:col-span-6 bg-white/90 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between">
           <div className="flex-1 flex flex-col">
             {/* Abas superiores em estilo fichário conectado ao corpo */}
             <div
@@ -603,18 +684,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   <div className="text-center pb-1">
                     <h2 className="font-display text-3xl sm:text-[34px] font-semibold text-[#1E1815] leading-tight">
-                      Acessar seu Atelier
+                      Acessar seu Avatar
                     </h2>
                     <p className="text-xs sm:text-[13px] text-[#4A3F38] mt-1.5 leading-relaxed max-w-sm mx-auto">
-                      Entre com seu E-mail ou Nome do Avatar para sincronizar seu
-                      guarda-roupa e Suíte em tempo real.
+                      Entre com seu E-mail ou Nome do Personagem para sincronizar seu
+                      guarda-roupa, nível e sala em tempo real.
                     </p>
                   </div>
 
                   {/* Campo Email/Nome */}
                   <div className="pt-1">
                     <label htmlFor="login-identifier" className="sr-only">
-                      Email/Nome
+                      E-mail ou Nome do Personagem
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-[#736961] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -625,7 +706,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         autoComplete="username"
                         value={loginUsername}
                         onChange={(e) => setLoginUsername(e.target.value)}
-                        placeholder="Email/Nome"
+                        placeholder="E-mail ou Nome do Personagem"
                         className="w-full pl-10 pr-4 py-3 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] focus:bg-[#F3F0EB] transition-colors"
                       />
                     </div>
@@ -710,24 +791,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                       Criar Nova Conta
                     </h2>
                     <p className="text-xs text-[#4A3F38] mt-1">
-                      Você começa com 1.200 AM iniciais para personalizar sua
-                      MeDoll e Suíte.
+                      Comece no Nível 1 com 1.200 AM · Nome próprio exclusivo e 1 conta por e-mail.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="block">
                       <span className="text-xs font-medium text-[#443933]">
-                        Nome de usuário
+                        Nome do Personagem (único)
                       </span>
                       <div className="relative mt-1">
                         <User className="w-4 h-4 text-[#736961] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
                           type="text"
                           required
+                          minLength={3}
+                          maxLength={24}
                           value={regUsername}
                           onChange={(e) => setRegUsername(e.target.value)}
-                          placeholder="ex: sofia_style"
+                          placeholder="ex: SofiaStyle"
                           className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </div>
@@ -847,10 +929,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
             </div>
           </div>
 
-          <p className="text-xs text-[#4A3F38] text-center leading-relaxed mt-5 px-2">
-            Suas contas, looks da MeDoll e posições da Suíte são sincronizados
-            em tempo real no servidor multiplayer centralizado do Starlight
-            Atelier.
+          <p className="text-xs text-[#5C5149] text-center leading-relaxed mt-5 px-2">
+            Suas contas, looks e posições da sala são sincronizados
+            em tempo real no servidor multiplayer centralizado do Nocturne Vale Club.
           </p>
         </section>
       </div>

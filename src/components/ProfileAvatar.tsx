@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   AvatarDisplayMode,
+  AvatarFaceCustomization,
   AvatarGender,
   EquippedOutfit,
   SkinToneId,
@@ -12,6 +13,7 @@ interface ProfileAvatarProps {
   equipped: EquippedOutfit;
   skinTone: SkinToneId;
   avatarGender: AvatarGender;
+  faceCustomization?: AvatarFaceCustomization;
   profilePic?: string;
   customAvatarUrl?: string;
   avatarDisplayMode?: AvatarDisplayMode;
@@ -30,6 +32,7 @@ export const ProfileAvatar: React.FC<ProfileAvatarProps> = ({
   equipped,
   skinTone,
   avatarGender,
+  faceCustomization,
   profilePic,
   customAvatarUrl,
   avatarDisplayMode = 'medoll',
@@ -73,6 +76,7 @@ export const ProfileAvatar: React.FC<ProfileAvatarProps> = ({
           equipped={equipped}
           skinTone={skinTone}
           avatarGender={avatarGender}
+          faceCustomization={faceCustomization}
           deletedItemIds={deletedItemIds}
         />
       </svg>

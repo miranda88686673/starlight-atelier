@@ -67,6 +67,7 @@ export const CLOTHING_TO_STRICT_LAYER: Record<ClothingCategory, AvatarStrictLaye
   sapatos: AVATAR_STRICT_LAYER_ORDER.SHOES,
   blusas: AVATAR_STRICT_LAYER_ORDER.TOPS,
   vestidos: AVATAR_STRICT_LAYER_ORDER.TOPS,
+  casacos: AVATAR_STRICT_LAYER_ORDER.TOPS,
   cabelo: AVATAR_STRICT_LAYER_ORDER.HAIR,
   acessorios: AVATAR_STRICT_LAYER_ORDER.ACCESSORIES,
 };
@@ -202,6 +203,9 @@ export function resolveLightingModeFromBackdrop(
       return 'warm_atelier';
     case 'lounge_principal':
     case 'casa_estar_moderna':
+    case 'floresta_piquenique':
+    case 'ilha_coqueiro':
+    case 'ilha_tropical':
     default:
       return 'daylight_plaza';
   }

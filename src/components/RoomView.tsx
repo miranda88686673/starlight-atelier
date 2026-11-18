@@ -1,17 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Armchair,
   Ban,
   Crown,
   Disc3,
   DoorOpen,
   Globe,
+  ImagePlus,
   KeyRound,
   Lock,
+  LogOut,
   MapPin,
   Megaphone,
   Music,
+  Move,
+  Palette,
   Plus,
+  RotateCw,
   ShieldCheck,
+  Shirt,
   Sparkles,
   Trash2,
   UserMinus,
@@ -20,11 +27,20 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { GLOBAL_ROOMS } from '../data/catalog';
+import {
+  FURNITURE_CATALOG,
+  GLOBAL_ROOMS,
+  LOUNGE_PARTY_HALLOWEEN_PROPS,
+  LOUNGE_PARTY_NATAL_PROPS,
+  LOUNGE_PARTY_PROPS,
+} from '../data/catalog';
 import {
   AvatarDisplayMode,
   AvatarGender,
+  ClothingCategory,
+  ClothingItem,
   EquippedOutfit,
+  FurnitureDef,
   MockUser,
   PlayerProgressState,
   PurchasableRoomItem,
@@ -50,14 +66,19 @@ import {
   createRealtimeChannel,
   deleteCustomRoom,
   getSavedCurrentRoomId,
+  getSavedExitedRoomsMode,
   getTabClientId,
   kickAvatarFromRoom,
   readRoomsSnapshot,
   removeAvatarPresence,
   saveCurrentRoomId,
   setRoomDjTrack,
+  setSavedExitedRoomsMode,
   SharedRoomsSnapshot,
+  updateCustomRoomBackground,
   updateCustomRoomNotice,
+  updateCustomRoomProps,
+  updateOfficialRoomSettings,
   upsertAvatarPresence,
 } from '../utils/realtime';
 import {
@@ -67,12 +88,15 @@ import {
 } from '../utils/aiBots';
 import { soundEngine } from '../utils/sound';
 import {
+  DEFAULT_STAFF_ROLE_TITLES,
   SERVER_REGION_META,
   getAccountByIdOrUsername,
+  getFullClothingCatalog,
   getFullRoomCatalog,
   getFullWallpaperCatalog,
   getModeratorServer,
   inferServerRegionFromCountry,
+  isClothingItemEquipped,
   isPrimaryAdminAccount,
   isVipAccount,
   normalizeUsername,
@@ -83,13 +107,21 @@ import { StaffRoleBadge, VipBadge } from './StaffDirectory';
 import { MeDollSvg } from './svg/MeDollSvg';
 import { RoomBackdropSvg } from './svg/RoomBackdropSvg';
 import { DjBoothModal } from './DjBoothModal';
-import { DJMediaSyncController } from '../core/media/DJMediaSyncController';
+import {
+  DJMediaSyncController,
+  type DjPlaybackStatus,
+} from '../core/media/DJMediaSyncController';
 import { StarlightEngine } from '../core/engine';
 import {
   emitRoomTelemetryPing,
   subscribeRemoteSync,
 } from '../core/state/socketBridge';
 import { resolveCoreStaffRole } from '../core/security/RoleGuard';
+import {
+  Room3DViewport,
+  type ProjectedDjScreenRect,
+} from './three/Room3DViewport';
+import { ThreeRoomThumbnail } from './three/ThreeItemThumbnail';
 
 export interface PublicProfileFallback {
   equipped?: EquippedOutfit;
@@ -132,6 +164,9 @@ interface RoomViewProps {
   }) => void;
   onReportFiled?: () => void;
   onOpenStaffDesk?: (tab: 'overview' | 'cm' | 'moderation' | 'designer') => void;
+  clothingCatalog?: ClothingItem[];
+  furnitureCatalog?: FurnitureDef[];
+  onToggleEquip?: (item: ClothingItem) => void;
   onOpenPublicProfile: (
     username: string,
     fallbackAppearance?: PublicProfileFallback,
@@ -186,17 +221,73 @@ const BACKDROP_META: Record<
     label: 'Estúdio 3D Designer',
     desc: 'Passarela 3D de alta moda com holofotes cênicos, piso reflexivo e cabine de som',
   },
+  lounge_party: {
+    label: 'Lounge Party (Oficial)',
+    desc: 'Terraço de prédio de luxo com piso de madeira, paredes de vidro, aquários com peixes e vista urbana',
+  },
+  lounge_party_natal: {
+    label: 'Lounge Natalino Oficial',
+    desc: 'Noite festiva de Natal com Árvore decorada, estrela de Belém e mobília natalina',
+  },
+  lounge_party_halloween: {
+    label: 'Lounge de Halloween Oficial',
+    desc: 'Noite macabra de Halloween com lua mística, abóboras Jack-o\'-Lantern e mobília gótica',
+  },
+  ilha_tropical: {
+    label: 'Ilha Tropical Oficial',
+    desc: 'Ilha cercada pelo mar com cadeirinhas de madeira, coqueiros com cocos, peixes saltando e 3 Cabines de DJ',
+  },
+  floresta_piquenique: {
+    label: 'Floresta do Laguinho & Piquenique',
+    desc: 'Floresta com laguinho de peixes saltando, coelhos pelo gramado, árvores, toalhas de piquenique e 1 Cabine de DJ',
+  },
+  ilha_coqueiro: {
+    label: 'Ilha do Coqueiro & Mar',
+    desc: 'Ilha cercada pelo mar com 1 coqueiro, 1 Cabine de DJ funcional e peixes saltando na água',
+  },
+  chao_plano_custom: {
+    label: 'Chão Plano (Fundo do PC)',
+    desc: 'Piso plano livre com plano de fundo ajustável com imagem enviada do seu PC',
+  },
 };
 
-
 const FREE_BASE_BACKDROPS: RoomBackdropTheme[] = [
-  'quarto_cozy',
-  'lounge_principal',
-  'estudio_3d_designer',
-  'cafe_starlight',
-  'festa_cobertura',
-  'atelier_rosa',
+  'chao_plano_custom',
 ];
+
+async function compressRoomBgImageFile(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Falha ao ler arquivo'));
+    };
+    reader.onerror = () => reject(new Error('Erro ao carregar imagem'));
+    reader.readAsDataURL(file);
+  });
+
+  return new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 1280;
+      const scale = img.width > maxW ? maxW / img.width : 1;
+      const targetW = Math.max(1, Math.round(img.width * scale));
+      const targetH = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
 
 /**
  * Módulo 5: Salas Globais Multiplayer em Tempo Real (RoomView.tsx).
@@ -216,6 +307,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
   wallpaperCatalog,
   ownedRoomTemplateIds,
   ownedWallpaperIds,
+  clothingCatalog,
+  furnitureCatalog,
+  onToggleEquip,
   onGoToShop,
   onStaffNotice,
   onUpdateServerNotice,
@@ -241,16 +335,42 @@ export const RoomView: React.FC<RoomViewProps> = ({
     readRoomsSnapshot(),
   );
 
+  const initialPendingPrivateRoom = useMemo(() => {
+    const savedId = getSavedCurrentRoomId(currentUser.id);
+    if (!savedId) return null;
+    const found = snapshot.customRooms.find((r) => r.id === savedId);
+    if (!found || found.visibility !== 'private') return null;
+    const isCreator =
+      Boolean(found.creatorUsername) &&
+      normalizeUsername(found.creatorUsername ?? '') ===
+        normalizeUsername(currentUser.username);
+    if (isCreator || isPrimaryAdmin) return null;
+    return found;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const resolvedInitialRoom = useMemo(() => {
     const savedId = getSavedCurrentRoomId(currentUser.id);
-    const availableRooms = [...GLOBAL_ROOMS, ...snapshot.customRooms];
+    const mergedGlobals = GLOBAL_ROOMS.map((g) => {
+      const override = snapshot.officialOverrides?.[g.id];
+      return override ? { ...g, ...override } : g;
+    });
+    const availableRooms = [...mergedGlobals, ...snapshot.customRooms];
     if (savedId) {
       const found = availableRooms.find((r) => r.id === savedId);
-      if (found) return found;
+      if (found) {
+        const isCreator =
+          Boolean(found.creatorUsername) &&
+          normalizeUsername(found.creatorUsername ?? '') ===
+            normalizeUsername(currentUser.username);
+        if (found.visibility !== 'private' || isCreator || isPrimaryAdmin) {
+          return found;
+        }
+      }
     }
     return (
-      GLOBAL_ROOMS.find((r) => (r.serverRegion ?? 'BR') === initialServer) ??
-      GLOBAL_ROOMS[0]
+      mergedGlobals.find((r) => (r.serverRegion ?? 'BR') === initialServer) ??
+      mergedGlobals[0]
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -260,6 +380,12 @@ export const RoomView: React.FC<RoomViewProps> = ({
     [currentUser],
   );
 
+  const [hasExitedRoom, setHasExitedRoom] = useState<boolean>(() =>
+    getSavedExitedRoomsMode(currentUser.id),
+  );
+  const hasExitedRoomRef = useRef<boolean>(hasExitedRoom);
+  hasExitedRoomRef.current = hasExitedRoom;
+
   const [activeServer, setActiveServer] = useState<ServerRegion>(
     () => resolvedInitialRoom.serverRegion ?? initialServer,
   );
@@ -268,12 +394,13 @@ export const RoomView: React.FC<RoomViewProps> = ({
   );
 
   useEffect(() => {
+    if (hasExitedRoom) return;
     emitRoomTelemetryPing(activeRoomId, 24);
     const t = window.setInterval(() => {
       emitRoomTelemetryPing(activeRoomId, Math.round(20 + Math.random() * 14));
     }, 15_000);
     return () => window.clearInterval(t);
-  }, [activeRoomId]);
+  }, [activeRoomId, hasExitedRoom]);
   const [myPos, setMyPos] = useState<{ x: number; y: number; facing: 'left' | 'right' }>(() => ({
     x: 48,
     y: Math.round((resolvedInitialRoom.walkMinY + resolvedInitialRoom.walkMaxY) / 2),
@@ -293,12 +420,21 @@ export const RoomView: React.FC<RoomViewProps> = ({
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [roomAlert, setRoomAlert] = useState<string | null>(null);
   const [banFeedback, setBanFeedback] = useState<string | null>(null);
+  const [stageViewMode, setStageViewMode] = useState<'3d' | '2d'>('3d');
+  const myLastSpeechRef = useRef<{ text: string; at: number } | null>(null);
 
-  // Estado da Cabine de DJ e Áudio da Sala (sincronizado via YouTube IFrame API)
+  // Estado da Cabine de DJ e Áudio/Vídeo da Sala (sincronizado via YouTube IFrame API)
   const [showDjModal, setShowDjModal] = useState(false);
   const [isDjAudioMuted, setIsDjAudioMuted] = useState(false);
   const [djVolume, setDjVolume] = useState(80);
+  const [djPlaybackStatus, setDjPlaybackStatus] = useState<DjPlaybackStatus>({
+    state: 'idle',
+    needsAudioUnlock: false,
+  });
+  const [djScreenDockMode, setDjScreenDockMode] = useState<'booth' | 'corner'>('booth');
   const djAudioHostRef = useRef<HTMLDivElement | null>(null);
+  const djScreenFrameRef = useRef<HTMLDivElement | null>(null);
+  const djProjectedRectRef = useRef<ProjectedDjScreenRect | null>(null);
   const djControllerRef = useRef<DJMediaSyncController | null>(null);
   const starlightCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const starlightEngineRef = useRef<StarlightEngine | null>(null);
@@ -309,8 +445,10 @@ export const RoomView: React.FC<RoomViewProps> = ({
   const [newRoomSubtitle, setNewRoomSubtitle] = useState('');
   const [newRoomNotice, setNewRoomNotice] = useState('');
   const [newRoomBackdrop, setNewRoomBackdrop] =
-    useState<RoomBackdropTheme>('quarto_cozy');
+    useState<RoomBackdropTheme>('chao_plano_custom');
   const [newRoomWallpaperId, setNewRoomWallpaperId] = useState<string>('');
+  const [newRoomCustomBgUrl, setNewRoomCustomBgUrl] = useState<string>('');
+  const [bgUploadError, setBgUploadError] = useState<string | null>(null);
   const [newRoomVisibility, setNewRoomVisibility] = useState<'public' | 'private'>(
     'public',
   );
@@ -319,6 +457,54 @@ export const RoomView: React.FC<RoomViewProps> = ({
   const [lobbyFilter, setLobbyFilter] = useState<'todas' | 'public' | 'private' | 'minhas'>(
     'todas',
   );
+
+  // Estado de Administração das Salas Oficiais (Temáticas)
+  const [showAdminThemeModal, setShowAdminThemeModal] = useState(false);
+  const [adminThemeScope, setAdminThemeScope] = useState<'all' | 'current'>('all');
+  const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
+
+  // Estado da Barra Inferior (Dock): Roupas e Móveis Adquiridos
+  const [showWardrobeDrawer, setShowWardrobeDrawer] = useState(false);
+  const [showFurnitureDrawer, setShowFurnitureDrawer] = useState(false);
+  const [wardrobeCategoryFilter, setWardrobeCategoryFilter] =
+    useState<'todos' | ClothingCategory>('todos');
+  const [furnitureCategoryFilter, setFurnitureCategoryFilter] =
+    useState<'todos' | 'Assentos' | 'Superfícies' | 'Decoração'>('todos');
+
+  const resolvedClothingCatalog = useMemo(() => {
+    return clothingCatalog && clothingCatalog.length > 0
+      ? clothingCatalog
+      : getFullClothingCatalog();
+  }, [clothingCatalog]);
+
+  const resolvedFurnitureCatalog = useMemo(() => {
+    return furnitureCatalog && furnitureCatalog.length > 0
+      ? furnitureCatalog
+      : FURNITURE_CATALOG;
+  }, [furnitureCatalog]);
+
+  const ownedClothes = useMemo(() => {
+    const ownedIds = new Set(playerState.ownedItemIds ?? []);
+    const deletedIds = new Set(deletedItemIds ?? []);
+    return resolvedClothingCatalog.filter(
+      (item) => ownedIds.has(item.id) && !deletedIds.has(item.id),
+    );
+  }, [resolvedClothingCatalog, playerState.ownedItemIds, deletedItemIds]);
+
+  const filteredOwnedClothes = useMemo(() => {
+    if (wardrobeCategoryFilter === 'todos') return ownedClothes;
+    return ownedClothes.filter((item) => item.category === wardrobeCategoryFilter);
+  }, [ownedClothes, wardrobeCategoryFilter]);
+
+  const ownedFurniture = useMemo(() => {
+    const ownedIds = new Set(playerState.ownedFurnitureIds ?? []);
+    return resolvedFurnitureCatalog.filter((f) => ownedIds.has(f.id));
+  }, [resolvedFurnitureCatalog, playerState.ownedFurnitureIds]);
+
+  const filteredOwnedFurniture = useMemo(() => {
+    if (furnitureCategoryFilter === 'todos') return ownedFurniture;
+    return ownedFurniture.filter((f) => f.category === furnitureCategoryFilter);
+  }, [ownedFurniture, furnitureCategoryFilter]);
 
   const resolvedRoomCatalog = useMemo(
     () => roomCatalog ?? getFullRoomCatalog(),
@@ -350,10 +536,26 @@ export const RoomView: React.FC<RoomViewProps> = ({
     const ownedThemes = resolvedRoomCatalog
       .filter((r) => ownedRoomSet.has(r.id))
       .map((r) => r.backdropTheme);
-    return Array.from(new Set<RoomBackdropTheme>([...FREE_BASE_BACKDROPS, ...ownedThemes]));
+    return Array.from(
+      new Set<RoomBackdropTheme>([...FREE_BASE_BACKDROPS, ...ownedThemes]),
+    ).filter(
+      (theme) =>
+        theme !== 'lounge_party' &&
+        theme !== 'lounge_party_natal' &&
+        theme !== 'lounge_party_halloween' &&
+        theme !== 'ilha_tropical',
+    );
   }, [resolvedRoomCatalog, ownedRoomSet]);
   const lockedStarplazaRooms = useMemo(
-    () => resolvedRoomCatalog.filter((r) => !ownedRoomSet.has(r.id)),
+    () =>
+      resolvedRoomCatalog.filter(
+        (r) =>
+          !ownedRoomSet.has(r.id) &&
+          r.backdropTheme !== 'lounge_party' &&
+          r.backdropTheme !== 'lounge_party_natal' &&
+          r.backdropTheme !== 'lounge_party_halloween' &&
+          r.backdropTheme !== 'ilha_tropical',
+      ),
     [resolvedRoomCatalog, ownedRoomSet],
   );
   const ownedWallpapersList = useMemo(
@@ -366,19 +568,35 @@ export const RoomView: React.FC<RoomViewProps> = ({
   const [confirmCloseRoom, setConfirmCloseRoom] = useState(false);
 
   // Estado do Portão de Senha para entrar em salas Privadas
-  const [pendingPrivateRoom, setPendingPrivateRoom] = useState<RoomDef | null>(null);
+  const [pendingPrivateRoom, setPendingPrivateRoom] = useState<RoomDef | null>(
+    () => initialPendingPrivateRoom,
+  );
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [unlockedRoomIds, setUnlockedRoomIds] = useState<string[]>([]);
 
-  const allRooms = useMemo(
-    () => [...GLOBAL_ROOMS, ...snapshot.customRooms],
-    [snapshot.customRooms],
-  );
+  const allRooms = useMemo(() => {
+    const mergedGlobals = GLOBAL_ROOMS.map((g) => {
+      const override = snapshot.officialOverrides?.[g.id];
+      return override ? { ...g, ...override } : g;
+    });
+    return [...mergedGlobals, ...snapshot.customRooms];
+  }, [snapshot.customRooms, snapshot.officialOverrides]);
 
   const activeRoom =
     allRooms.find((r) => r.id === activeRoomId) ?? GLOBAL_ROOMS[0];
   const activeRoomServer: ServerRegion = activeRoom.serverRegion ?? 'BR';
+
+  const canManageOfficialRooms =
+    isPrimaryAdmin || currentUser.role === 'admin';
+  const isCurrentRoomOfficial =
+    Boolean(activeRoom.isOfficial) ||
+    activeRoom.id === 'lounge_party' ||
+    activeRoom.id === 'lounge_party_es' ||
+    activeRoom.id === 'lounge_party_en' ||
+    activeRoom.id === 'ilha_brasil' ||
+    activeRoom.id === 'ilha_spanish' ||
+    activeRoom.id === 'ilha_english';
 
   const hasRoomModJurisdiction =
     isPrimaryAdmin || (modServer !== null && modServer === activeRoomServer);
@@ -393,8 +611,19 @@ export const RoomView: React.FC<RoomViewProps> = ({
       ? `Moderador (${activeRoomServer})`
       : undefined;
 
+  const roomCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allRooms.forEach((r) => {
+      counts[r.id] = 0;
+    });
+    Object.values(snapshot.presences).forEach((p) => {
+      counts[p.roomId] = (counts[p.roomId] ?? 0) + 1;
+    });
+    return counts;
+  }, [allRooms, snapshot.presences]);
+
   const filteredLobbyRooms = useMemo(() => {
-    return allRooms.filter((room) => {
+    const regionalRooms = allRooms.filter((room) => {
       if ((room.serverRegion ?? 'BR') !== activeServer) return false;
       if (lobbyFilter === 'public') return room.visibility === 'public';
       if (lobbyFilter === 'private') return room.visibility === 'private';
@@ -407,7 +636,25 @@ export const RoomView: React.FC<RoomViewProps> = ({
       }
       return true;
     });
-  }, [allRooms, activeServer, lobbyFilter, currentUser.username]);
+
+    // Salas Oficiais (Lounge Party / Ilha BR/ES/EN / isOfficial) sempre fixadas no topo
+    const isOfficialRoomId = (id: string) =>
+      id === 'lounge_party' ||
+      id === 'lounge_party_es' ||
+      id === 'lounge_party_en' ||
+      id === 'ilha_brasil' ||
+      id === 'ilha_spanish' ||
+      id === 'ilha_english';
+    const officialRooms = regionalRooms.filter(
+      (r) => Boolean(r.isOfficial) || isOfficialRoomId(r.id),
+    );
+    // Salas de jogadores ordenadas da mais cheia para a mais vazia
+    const playerRooms = regionalRooms
+      .filter((r) => !r.isOfficial && !isOfficialRoomId(r.id))
+      .sort((a, b) => (roomCounts[b.id] ?? 0) - (roomCounts[a.id] ?? 0));
+
+    return [...officialRooms, ...playerRooms];
+  }, [allRooms, activeServer, lobbyFilter, currentUser.username, roomCounts]);
 
   // Sincroniza rascunho de aviso local ao trocar de sala
   useEffect(() => {
@@ -441,11 +688,22 @@ export const RoomView: React.FC<RoomViewProps> = ({
   ): RoomAvatarPresence => {
     const user = currentUserRef.current;
     const pState = playerStateRef.current;
+    const activeSpeech =
+      myLastSpeechRef.current && Date.now() - myLastSpeechRef.current.at < 8500
+        ? myLastSpeechRef.current
+        : null;
+    const officialRoleLabel =
+      user.staffRoleTitle?.trim() ||
+      (user.staffRoleTier ? DEFAULT_STAFF_ROLE_TITLES[user.staffRoleTier as keyof typeof DEFAULT_STAFF_ROLE_TITLES] : undefined) ||
+      (user.role === 'admin' ? 'Administrador Geral' : undefined);
+
     return {
       clientId,
       username: user.username,
       role: user.role,
       staffRoleTier: user.staffRoleTier,
+      officialRoleLabel,
+      level: pState.level ?? 1,
       isVip: isVipAccount(user),
       roomId,
       x: pos.x,
@@ -455,9 +713,12 @@ export const RoomView: React.FC<RoomViewProps> = ({
       equipped: pState.equipped,
       skinTone: pState.skinTone,
       avatarGender: pState.avatarGender,
+      faceCustomization: pState.faceCustomization,
       customAvatarUrl: pState.customAvatarUrl,
       avatarDisplayMode: pState.avatarDisplayMode,
       lastSeen: Date.now(),
+      lastMessage: activeSpeech?.text,
+      lastMessageAt: activeSpeech?.at,
     };
   };
 
@@ -465,9 +726,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
   useEffect(() => {
     const roomStillExists = allRooms.some((r) => r.id === activeRoomId);
     if (!roomStillExists) {
-      activeRoomIdRef.current = 'lounge_principal';
-      saveCurrentRoomId(currentUser.id, 'lounge_principal');
-      setActiveRoomId('lounge_principal');
+      activeRoomIdRef.current = 'lounge_party';
+      saveCurrentRoomId(currentUser.id, 'lounge_party');
+      setActiveRoomId('lounge_party');
       setRoomAlert('A sala anterior foi encerrada pelo anfitrião.');
       return;
     }
@@ -479,9 +740,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
         Date.now() - k.at < 15_000,
     );
     if (latestKick) {
-      activeRoomIdRef.current = 'lounge_principal';
-      saveCurrentRoomId(currentUser.id, 'lounge_principal');
-      setActiveRoomId('lounge_principal');
+      activeRoomIdRef.current = 'lounge_party';
+      saveCurrentRoomId(currentUser.id, 'lounge_party');
+      setActiveRoomId('lounge_party');
       setRoomAlert(
         `Você foi removida da sala pelo anfitrião ${latestKick.byUsername}.`,
       );
@@ -493,7 +754,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
     const channel = createRealtimeChannel();
     channelRef.current = channel;
 
-    const initialSnap = upsertAvatarPresence(buildMyPresence(), channel);
+    const initialSnap = hasExitedRoomRef.current
+      ? removeAvatarPresence(clientId, channel)
+      : upsertAvatarPresence(buildMyPresence(), channel);
     setSnapshot(initialSnap);
 
     if (channel) {
@@ -513,6 +776,10 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
     const interval = window.setInterval(() => {
       setNowTs(Date.now());
+      if (hasExitedRoomRef.current) {
+        setSnapshot(readRoomsSnapshot());
+        return;
+      }
       const refreshed = upsertAvatarPresence(buildMyPresence(), channelRef.current);
       setSnapshot(refreshed);
     }, 4000);
@@ -529,6 +796,10 @@ export const RoomView: React.FC<RoomViewProps> = ({
     const handleVisibilityOrFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         setNowTs(Date.now());
+        if (hasExitedRoomRef.current) {
+          setSnapshot(readRoomsSnapshot());
+          return;
+        }
         const refreshed = upsertAvatarPresence(buildMyPresence(), channelRef.current);
         setSnapshot(refreshed);
       }
@@ -602,6 +873,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   // Sincroniza visual oficial (MeDoll ou Foto) e posição com throttling leve durante caminhada
   useEffect(() => {
+    if (hasExitedRoomRef.current) return;
     const now = Date.now();
     if (isMyWalking && now - lastBroadcastPosAtRef.current < 220) {
       return;
@@ -620,6 +892,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
     playerState.equipped,
     playerState.skinTone,
     playerState.avatarGender,
+    playerState.faceCustomization,
     playerState.customAvatarUrl,
     playerState.avatarDisplayMode,
     currentUser.username,
@@ -631,11 +904,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
     rawY: number,
     ignoreSeatCollision = false,
   ): { x: number; y: number } => {
-    let x = Math.max(8, Math.min(92, Number(rawX.toFixed(1))));
-    let y = Math.max(
-      activeRoom.walkMinY,
-      Math.min(activeRoom.walkMaxY, Number(rawY.toFixed(1))),
-    );
+    let x = Math.max(1, Math.min(99, Number(rawX.toFixed(1))));
+    let y = Math.max(1, Math.min(99, Number(rawY.toFixed(1))));
     if (!ignoreSeatCollision && Array.isArray(activeRoom.interactiveProps)) {
       for (const prop of activeRoom.interactiveProps) {
         if (!prop.collidable) continue;
@@ -645,11 +915,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
         const dist = Math.hypot(dx, dy);
         if (dist < radius) {
           const angle = dist > 0.01 ? Math.atan2(dy, dx) : Math.PI / 2;
-          x = Math.max(8, Math.min(92, Number((prop.x + Math.cos(angle) * (radius + 0.8)).toFixed(1))));
-          y = Math.max(
-            activeRoom.walkMinY,
-            Math.min(activeRoom.walkMaxY, Number((prop.y + Math.sin(angle) * (radius + 0.8)).toFixed(1))),
-          );
+          x = Math.max(1, Math.min(99, Number((prop.x + Math.cos(angle) * (radius + 0.8)).toFixed(1))));
+          y = Math.max(1, Math.min(99, Number((prop.y + Math.sin(angle) * (radius + 0.8)).toFixed(1))));
         }
       }
     }
@@ -687,17 +954,6 @@ export const RoomView: React.FC<RoomViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeRoom.walkMinY, activeRoom.walkMaxY, activeRoom.interactiveProps]);
 
-  const roomCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    allRooms.forEach((r) => {
-      counts[r.id] = 0;
-    });
-    Object.values(snapshot.presences).forEach((p) => {
-      counts[p.roomId] = (counts[p.roomId] ?? 0) + 1;
-    });
-    return counts;
-  }, [allRooms, snapshot.presences]);
-
   const avatarsInRoom = useMemo(() => {
     return Object.values(snapshot.presences)
       .filter((p) => p.roomId === activeRoomId)
@@ -722,9 +978,26 @@ export const RoomView: React.FC<RoomViewProps> = ({
     setIsMyWalking(false);
   };
 
+  const handleExitRoom = () => {
+    cancelWalkAnimation();
+    setIsMySeated(false);
+    setShowDjModal(false);
+    setShowWardrobeDrawer(false);
+    setShowFurnitureDrawer(false);
+    hasExitedRoomRef.current = true;
+    setHasExitedRoom(true);
+    setSavedExitedRoomsMode(currentUser.id, true);
+    soundEngine.playEquip();
+    const updatedSnap = removeAvatarPresence(clientId, channelRef.current);
+    setSnapshot(updatedSnap);
+  };
+
   const enterRoomDirectly = (room: RoomDef) => {
     cancelWalkAnimation();
     setIsMySeated(false);
+    hasExitedRoomRef.current = false;
+    setHasExitedRoom(false);
+    setSavedExitedRoomsMode(currentUser.id, false);
     soundEngine.playEquip();
     setRoomAlert(null);
     const nextPos: { x: number; y: number; facing: 'left' | 'right' } = {
@@ -746,7 +1019,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
   };
 
   const handleSelectRoom = (room: RoomDef) => {
-    if (room.id === activeRoomId) return;
+    if (room.id === activeRoomId && !hasExitedRoom) return;
 
     const isCreator =
       Boolean(room.creatorUsername) &&
@@ -806,8 +1079,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
         newRoomSubtitle.trim() || `Ambiente exclusivo criado por ${currentUser.username}`,
       backdropTheme: newRoomBackdrop,
       wallpaperId: newRoomWallpaperId || undefined,
-      walkMinY: 56,
-      walkMaxY: 88,
+      customBackgroundImageUrl: newRoomCustomBgUrl || undefined,
+      walkMinY: 2,
+      walkMaxY: 98,
       visibility: newRoomVisibility,
       serverRegion: newRoomServer,
       password: newRoomVisibility === 'private' ? newRoomPassword.trim() : undefined,
@@ -826,8 +1100,60 @@ export const RoomView: React.FC<RoomViewProps> = ({
     setNewRoomNotice('');
     setNewRoomPassword('');
     setNewRoomWallpaperId('');
+    setNewRoomCustomBgUrl('');
+    setBgUploadError(null);
+    setNewRoomBackdrop('chao_plano_custom');
     setNewRoomVisibility('public');
     enterRoomDirectly(created);
+  };
+
+  const handleUploadNewRoomBg = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBgUploadError(null);
+    if (!file.type.startsWith('image/')) {
+      setBgUploadError('Selecione um arquivo de imagem válido (PNG, JPG ou WEBP).');
+      return;
+    }
+    try {
+      const compressed = await compressRoomBgImageFile(file);
+      setNewRoomCustomBgUrl(compressed);
+    } catch {
+      setBgUploadError('Não foi possível processar esta imagem do PC.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleUpdateActiveRoomBg = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeRoom.isCustom) return;
+    if (!file.type.startsWith('image/')) return;
+    try {
+      const compressed = await compressRoomBgImageFile(file);
+      const nextSnap = updateCustomRoomBackground(
+        activeRoom.id,
+        compressed,
+        channelRef.current,
+      );
+      setSnapshot(nextSnap);
+      soundEngine.playEquip();
+    } catch {
+      // ignore error
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleClearActiveRoomBg = () => {
+    if (!activeRoom.isCustom) return;
+    const nextSnap = updateCustomRoomBackground(
+      activeRoom.id,
+      undefined,
+      channelRef.current,
+    );
+    setSnapshot(nextSnap);
+    soundEngine.playModAction();
   };
 
   const handleSaveRoomNotice = (e: React.FormEvent) => {
@@ -860,34 +1186,204 @@ export const RoomView: React.FC<RoomViewProps> = ({
     soundEngine.playModAction();
     const nextSnap = deleteCustomRoom(activeRoom.id, channelRef.current);
     setConfirmCloseRoom(false);
-    activeRoomIdRef.current = 'lounge_principal';
-    saveCurrentRoomId(currentUser.id, 'lounge_principal');
+    activeRoomIdRef.current = 'lounge_party';
+    saveCurrentRoomId(currentUser.id, 'lounge_party');
     const updatedSnap = upsertAvatarPresence(
-      buildMyPresence(myPosRef.current, 'lounge_principal'),
+      buildMyPresence(myPosRef.current, 'lounge_party'),
       channelRef.current,
     );
     setSnapshot({ ...nextSnap, presences: updatedSnap.presences });
   };
 
-  const currentRoomDjTrack = snapshot.djTracksByRoom?.[activeRoomId];
+  // Permissões e Handlers de Movimentação e Rotação de Objetos via Cursor do Mouse
+  const isCustomOwner = Boolean(
+    activeRoom.isCustom &&
+      activeRoom.creatorUsername &&
+      normalizeUsername(activeRoom.creatorUsername) === normalizeUsername(currentUser.username),
+  );
+  const canEditCurrentRoomProps = Boolean(
+    (canManageOfficialRooms && isCurrentRoomOfficial) ||
+      isCustomOwner ||
+      currentUser.role === 'admin',
+  );
 
-  // Controlador oficial YouTube IFrame API (DJMediaSyncController) sincronizado por segundo exato
+  const handlePropMoved = (propId: string, xPct: number, yPct: number) => {
+    if (!canEditCurrentRoomProps) return;
+    const currentProps = activeRoom.interactiveProps ? [...activeRoom.interactiveProps] : [];
+    const idx = currentProps.findIndex((p) => p.id === propId);
+    if (idx === -1) return;
+    currentProps[idx] = {
+      ...currentProps[idx],
+      x: xPct,
+      y: yPct,
+      seatX: currentProps[idx].seatX !== undefined ? xPct : undefined,
+      seatY: currentProps[idx].seatY !== undefined ? yPct : undefined,
+    };
+
+    if (isCurrentRoomOfficial && canManageOfficialRooms) {
+      updateOfficialRoomSettings([activeRoom.id], { interactiveProps: currentProps }, channelRef.current);
+    } else if (activeRoom.isCustom) {
+      updateCustomRoomProps(activeRoom.id, currentProps, channelRef.current);
+    }
+    setSnapshot(readRoomsSnapshot());
+  };
+
+  const handlePropRotated = (propId: string, rotationY: number) => {
+    if (!canEditCurrentRoomProps) return;
+    const currentProps = activeRoom.interactiveProps ? [...activeRoom.interactiveProps] : [];
+    const idx = currentProps.findIndex((p) => p.id === propId);
+    if (idx === -1) return;
+    currentProps[idx] = {
+      ...currentProps[idx],
+      rotationY: ((rotationY % 360) + 360) % 360,
+    };
+
+    if (isCurrentRoomOfficial && canManageOfficialRooms) {
+      updateOfficialRoomSettings([activeRoom.id], { interactiveProps: currentProps }, channelRef.current);
+    } else if (activeRoom.isCustom) {
+      updateCustomRoomProps(activeRoom.id, currentProps, channelRef.current);
+    }
+    setSnapshot(readRoomsSnapshot());
+  };
+
+  const handlePropDeleted = (propId: string) => {
+    if (!canEditCurrentRoomProps) return;
+    const currentProps = (activeRoom.interactiveProps || []).filter((p) => p.id !== propId);
+    if (isCurrentRoomOfficial && canManageOfficialRooms) {
+      updateOfficialRoomSettings([activeRoom.id], { interactiveProps: currentProps }, channelRef.current);
+    } else if (activeRoom.isCustom) {
+      updateCustomRoomProps(activeRoom.id, currentProps, channelRef.current);
+    }
+    setSnapshot(readRoomsSnapshot());
+    if (selectedPropId === propId) {
+      setSelectedPropId(null);
+    }
+    soundEngine.playModAction();
+  };
+
+  const handleSpawnFurnitureIntoRoom = (furniture: FurnitureDef) => {
+    if (!canEditCurrentRoomProps) return;
+    const newId = `prop_${furniture.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    let kind: 'sofa' | 'table' | 'chair' | 'decor' = 'decor';
+    const n = furniture.name.toLowerCase();
+    if (furniture.category === 'Assentos') {
+      kind = (n.includes('sofá') || n.includes('sofa') || n.includes('banco') || n.includes('poltrona')) ? 'sofa' : 'chair';
+    } else if (furniture.category === 'Superfícies') {
+      kind = 'table';
+    }
+
+    const spawnX = Math.round(Math.max(2, Math.min(98, myPos.x)));
+    const spawnY = Math.round(Math.max(2, Math.min(98, myPos.y)));
+
+    const newProp: RoomInteractiveProp = {
+      id: newId,
+      kind,
+      label: furniture.name,
+      x: spawnX,
+      y: spawnY,
+      rotationY: 0,
+      seatX: kind === 'chair' || kind === 'sofa' ? spawnX : undefined,
+      seatY: kind === 'chair' || kind === 'sofa' ? spawnY : undefined,
+      primaryColor: furniture.swatchColor || '#8B5CF6',
+      accentColor: furniture.accentColor || '#D4AF37',
+      collisionRadius: kind === 'sofa' ? 7.5 : kind === 'table' ? 5.5 : 4.5,
+    };
+
+    const currentProps = activeRoom.interactiveProps ? [...activeRoom.interactiveProps] : [];
+    currentProps.push(newProp);
+
+    if (isCurrentRoomOfficial && canManageOfficialRooms) {
+      updateOfficialRoomSettings([activeRoom.id], { interactiveProps: currentProps }, channelRef.current);
+    } else if (activeRoom.isCustom) {
+      updateCustomRoomProps(activeRoom.id, currentProps, channelRef.current);
+    }
+
+    setSnapshot(readRoomsSnapshot());
+    setSelectedPropId(newId);
+    soundEngine.playPlaceFurniture();
+  };
+
+  const handleWardrobeToggleEquip = (item: ClothingItem) => {
+    if (onToggleEquip) {
+      onToggleEquip(item);
+    }
+    soundEngine.playEquip();
+  };
+
+  const handleApplyOfficialTheme = (
+    theme: RoomBackdropTheme,
+    thematicProps: RoomInteractiveProp[],
+    applyProps: boolean = true,
+  ) => {
+    if (!canManageOfficialRooms) return;
+    const targetRoomIds: RoomId[] =
+      adminThemeScope === 'all'
+        ? ['lounge_party', 'lounge_party_es', 'lounge_party_en']
+        : [activeRoom.id];
+
+    const patch: Partial<RoomDef> = {
+      backdropTheme: theme,
+      ...(applyProps ? { interactiveProps: thematicProps } : {}),
+    };
+
+    updateOfficialRoomSettings(targetRoomIds, patch, channelRef.current);
+    setSnapshot(readRoomsSnapshot());
+    setShowAdminThemeModal(false);
+    soundEngine.playPurchase();
+  };
+
+  const handleResetOfficialProps = () => {
+    if (!canManageOfficialRooms) return;
+    const theme = activeRoom.backdropTheme;
+    const defaultProps =
+      theme === 'lounge_party_natal'
+        ? LOUNGE_PARTY_NATAL_PROPS
+        : theme === 'lounge_party_halloween'
+          ? LOUNGE_PARTY_HALLOWEEN_PROPS
+          : LOUNGE_PARTY_PROPS;
+
+    updateOfficialRoomSettings([activeRoom.id], { interactiveProps: defaultProps }, channelRef.current);
+    setSnapshot(readRoomsSnapshot());
+    soundEngine.playPurchase();
+  };
+
+  const currentRoomDjTrack = snapshot.djTracksByRoom?.[activeRoomId];
+  const hasActiveDjVideo = Boolean(currentRoomDjTrack?.videoId);
+
+  // Controlador oficial YouTube IFrame API (DJMediaSyncController) montado enquanto o usuário estiver dentro de uma sala
   useEffect(() => {
+    if (hasExitedRoom) return;
     const host = djAudioHostRef.current;
     if (!host) return;
     const controller = new DJMediaSyncController();
+    controller.setOnStatusChange((status) => {
+      setDjPlaybackStatus(status);
+    });
     djControllerRef.current = controller;
     void controller.mount(host).catch(() => undefined);
 
     return () => {
+      controller.setOnStatusChange(undefined);
       controller.destroy();
       djControllerRef.current = null;
     };
-  }, []);
+  }, [hasExitedRoom]);
+
+  // Atenuação sonora espacial suave baseada na distância do jogador até a Cabine de DJ
+  useEffect(() => {
+    const controller = djControllerRef.current;
+    if (!controller || hasExitedRoom) return;
+    const boothX = stageViewMode === '3d' ? 50 : 84;
+    const boothY = stageViewMode === '3d' ? 28 : 64;
+    const dist = Math.hypot(myPos.x - boothX, myPos.y - boothY);
+    const spatialGain = Math.max(0.6, Math.min(1, 1.04 - dist / 165));
+    controller.setSpatialGain(spatialGain);
+  }, [myPos.x, myPos.y, stageViewMode, hasExitedRoom]);
 
   useEffect(() => {
     const controller = djControllerRef.current;
-    if (!controller) return;
+    if (!controller || hasExitedRoom) return;
     controller.setMuted(isDjAudioMuted);
     controller.setVolume(djVolume);
     if (currentRoomDjTrack?.videoId) {
@@ -905,10 +1401,68 @@ export const RoomView: React.FC<RoomViewProps> = ({
     currentRoomDjTrack?.isPlaying,
     isDjAudioMuted,
     djVolume,
+    hasExitedRoom,
   ]);
+
+  const syncDjScreenBoxStyle = (
+    rect: ProjectedDjScreenRect | null = djProjectedRectRef.current,
+  ) => {
+    const frameEl = djScreenFrameRef.current;
+    if (!frameEl) return;
+
+    if (!hasActiveDjVideo) {
+      frameEl.style.left = '-9999px';
+      frameEl.style.right = 'auto';
+      frameEl.style.top = '0px';
+      frameEl.style.width = '240px';
+      frameEl.style.height = '135px';
+      frameEl.style.opacity = '0';
+      frameEl.style.pointerEvents = 'none';
+      return;
+    }
+
+    frameEl.style.opacity = '1';
+    frameEl.style.pointerEvents = 'auto';
+
+    if (stageViewMode === '2d' || djScreenDockMode === 'corner') {
+      frameEl.style.left = 'auto';
+      frameEl.style.right = '14px';
+      frameEl.style.top = '14px';
+      frameEl.style.width = stageViewMode === '2d' ? '272px' : '256px';
+      frameEl.style.height = stageViewMode === '2d' ? '153px' : '144px';
+      return;
+    }
+
+    if (rect && rect.visible) {
+      frameEl.style.left = `${Math.round(rect.left)}px`;
+      frameEl.style.top = `${Math.round(rect.top)}px`;
+      frameEl.style.right = 'auto';
+      frameEl.style.width = `${Math.round(rect.width)}px`;
+      frameEl.style.height = `${Math.round(rect.height)}px`;
+    } else {
+      frameEl.style.left = 'auto';
+      frameEl.style.right = '12px';
+      frameEl.style.top = '12px';
+      frameEl.style.width = '240px';
+      frameEl.style.height = '135px';
+    }
+  };
+
+  useEffect(() => {
+    syncDjScreenBoxStyle(djProjectedRectRef.current);
+  }, [hasActiveDjVideo, stageViewMode, djScreenDockMode]);
+
+  const applyProjectedDjScreen = (rect: ProjectedDjScreenRect | null) => {
+    djProjectedRectRef.current = rect;
+    if (!hasActiveDjVideo || stageViewMode !== '3d' || djScreenDockMode !== 'booth') {
+      return;
+    }
+    syncDjScreenBoxStyle(rect);
+  };
 
   // Motor Gráfico StarlightEngine (60 FPS FXPipeline: Iluminação Ambiente, Partículas & Pulsos DJ)
   useEffect(() => {
+    if (hasExitedRoom) return;
     const canvas = starlightCanvasRef.current;
     if (!canvas) return;
     const engine = new StarlightEngine(canvas, {
@@ -924,7 +1478,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
       engine.destroy();
       starlightEngineRef.current = null;
     };
-  }, [clientId]);
+  }, [clientId, hasExitedRoom]);
 
   useEffect(() => {
     const engine = starlightEngineRef.current;
@@ -936,6 +1490,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   const handlePlayDjTrack = (newTrack: RoomDjTrack) => {
     soundEngine.playEquip();
+    if (isDjAudioMuted) setIsDjAudioMuted(false);
+    djControllerRef.current?.unlockAudio();
     const nextSnap = setRoomDjTrack(activeRoomId, newTrack, channelRef.current);
     setSnapshot(nextSnap);
 
@@ -1226,18 +1782,21 @@ export const RoomView: React.FC<RoomViewProps> = ({
       }
     }
 
+    const nowTime = Date.now();
+    myLastSpeechRef.current = { text, at: nowTime };
+
     soundEngine.playEquip();
     let nextSnap = appendRoomMessage(
       activeRoomId,
       {
-        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        id: `msg_${nowTime}_${Math.random().toString(36).slice(2, 5)}`,
         roomId: activeRoomId,
         senderUsername: currentUser.username,
         senderRole: currentUser.role,
         senderStaffTier: currentUser.staffRoleTier,
         senderIsVip: isVipAccount(currentUser),
         text,
-        createdAt: Date.now(),
+        createdAt: nowTime,
         senderAvatar: {
           equipped: playerState.equipped,
           skinTone: playerState.skinTone,
@@ -1249,6 +1808,20 @@ export const RoomView: React.FC<RoomViewProps> = ({
       clientId,
       channelRef.current,
     );
+
+    if (nextSnap.presences[clientId]) {
+      nextSnap = {
+        ...nextSnap,
+        presences: {
+          ...nextSnap.presences,
+          [clientId]: {
+            ...nextSnap.presences[clientId],
+            lastMessage: text,
+            lastMessageAt: nowTime,
+          },
+        },
+      };
+    }
 
     setSnapshot(nextSnap);
     return { blocked: false };
@@ -1481,6 +2054,18 @@ export const RoomView: React.FC<RoomViewProps> = ({
               {Object.keys(snapshot.presences).length} avatares online
             </span>
 
+            {!hasExitedRoom && (
+              <button
+                type="button"
+                onClick={handleExitRoom}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-[#B91C1C] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] rounded-lg shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                title="Sair da sala pública atual e permanecer fora das salas"
+              >
+                <LogOut className="w-4 h-4" />
+                Sair
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
@@ -1568,10 +2153,21 @@ export const RoomView: React.FC<RoomViewProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
             {filteredLobbyRooms.map((room) => {
-              const isSelected = room.id === activeRoomId;
+              const isSelected = !hasExitedRoom && room.id === activeRoomId;
               const count = roomCounts[room.id] ?? 0;
               const roomSrv = room.serverRegion ?? 'BR';
               const srvMeta = SERVER_REGION_META[roomSrv];
+              const isOfficial =
+                Boolean(room.isOfficial) ||
+                room.id === 'lounge_party' ||
+                room.id === 'lounge_party_es' ||
+                room.id === 'lounge_party_en' ||
+                room.id === 'ilha_brasil' ||
+                room.id === 'ilha_spanish' ||
+                room.id === 'ilha_english';
+              const creatorDisplayName = isOfficial
+                ? 'Starlight Atelier'
+                : room.creatorUsername || 'Avatar';
 
               return (
                 <button
@@ -1581,7 +2177,9 @@ export const RoomView: React.FC<RoomViewProps> = ({
                   className={`text-left rounded-xl border p-4 transition-all cursor-pointer flex flex-col justify-between ${
                     isSelected
                       ? 'border-[#C8235D] bg-[#C8235D]/[0.04]'
-                      : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2] hover:bg-white'
+                      : isOfficial
+                        ? 'border-amber-400/80 bg-gradient-to-br from-amber-50/40 via-white to-amber-50/20 hover:border-amber-500'
+                        : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2] hover:bg-white'
                   }`}
                 >
                   <div>
@@ -1602,9 +2200,17 @@ export const RoomView: React.FC<RoomViewProps> = ({
                           <span className="truncate">{room.name}</span>
                         </h3>
                       </div>
-                      <span className="font-mono-num text-xs font-semibold text-[#C8235D] shrink-0">
-                        {count} {count === 1 ? 'avatar' : 'avatares'}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {isOfficial && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-800 border border-amber-500/40 text-[10px] font-bold shadow-2xs">
+                            <Crown className="w-3 h-3 text-amber-600" />
+                            Oficial
+                          </span>
+                        )}
+                        <span className="font-mono-num text-xs font-semibold text-[#C8235D] shrink-0">
+                          {count} {count === 1 ? 'avatar' : 'avatares'}
+                        </span>
+                      </div>
                     </div>
                     <p className="text-xs text-[#6B645D] mt-1.5 leading-relaxed line-clamp-2">
                       {room.subtitle}
@@ -1629,10 +2235,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
                         <span>{srvMeta.flagEmoji}</span>
                         <span>{roomSrv}</span>
                       </span>
-                      <span className="truncate">
-                        {room.creatorUsername
-                          ? `por ${room.creatorUsername}`
-                          : BACKDROP_META[room.backdropTheme]?.label ?? 'Sala Oficial'}
+                      <span className="truncate font-medium text-[#44403C]">
+                        Criada por {creatorDisplayName}
                       </span>
                     </span>
                   </div>
@@ -1750,8 +2354,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
                             : 'border-[#E6E0D8] bg-[#FAF8F5] text-[#57534E] hover:border-[#C7BEB2]'
                         }`}
                       >
-                        <div className="h-14 relative rounded overflow-hidden border border-[#E6E0D8] mb-1.5">
-                          <RoomBackdropSvg theme={themeKey} />
+                        <div className="h-14 relative rounded overflow-hidden border border-[#E6E0D8] mb-1.5 bg-[#1D162B]">
+                          <ThreeRoomThumbnail theme={themeKey} alt={meta.label} className="w-full h-full object-cover" />
                         </div>
                         <p className="text-xs font-semibold text-[#1C1917] leading-tight">
                           {meta.label}
@@ -1823,6 +2427,53 @@ export const RoomView: React.FC<RoomViewProps> = ({
                   ))}
                 </select>
               </label>
+
+              {/* Plano de fundo ajustável com imagem do PC */}
+              <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E6E0D8] space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-[#1C1917] flex items-center gap-1.5">
+                      <ImagePlus className="w-3.5 h-3.5 text-[#C8235D]" />
+                      Imagem de Plano de Fundo do PC
+                    </p>
+                    <p className="text-[11px] text-[#6B645D]">
+                      Ideal para o Chão Plano: escolha qualquer imagem do seu computador para o cenário de fundo.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="px-3 py-1.5 rounded-lg bg-[#1C1917] hover:bg-[#332E2B] text-white text-[11px] font-semibold cursor-pointer transition-colors">
+                      {newRoomCustomBgUrl ? 'Trocar Imagem' : 'Escolher do PC'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadNewRoomBg}
+                        className="hidden"
+                      />
+                    </label>
+                    {newRoomCustomBgUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setNewRoomCustomBgUrl('')}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-[#E6E0D8] text-[11px] font-medium text-[#B91C1C] hover:bg-[#FEF2F2] cursor-pointer"
+                      >
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {bgUploadError && (
+                  <p className="text-[11px] text-[#B91C1C] font-medium">{bgUploadError}</p>
+                )}
+                {newRoomCustomBgUrl && (
+                  <div className="h-24 w-full rounded-lg overflow-hidden border border-[#DFD8CE] bg-black/10">
+                    <img
+                      src={newRoomCustomBgUrl}
+                      alt="Prévia do plano de fundo da sala"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+              </div>
 
               <div>
                 <span className="block text-xs font-semibold text-[#44403C] mb-1.5">
@@ -1970,7 +2621,30 @@ export const RoomView: React.FC<RoomViewProps> = ({
         </div>
       )}
 
-      {/* 2. Palco 2D da Sala Multiplayer + 3. Chat Lateral */}
+      {/* 2. Palco da Sala Multiplayer + 3. Chat Lateral (ou estado fora das salas) */}
+      {hasExitedRoom ? (
+        <section className="bg-white border border-[#E6E0D8] rounded-xl p-8 text-center flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-[#FAF8F5] border border-[#E6E0D8] flex items-center justify-center text-[#C8235D]">
+            <DoorOpen className="w-6 h-6" />
+          </div>
+          <h3 className="font-display text-xl font-bold text-[#1C1917]">
+            Você saiu da sala
+          </h3>
+          <p className="text-xs text-[#6B645D] max-w-md leading-relaxed">
+            Seu avatar está fora das salas públicas no momento e não aparece dentro de nenhum ambiente. Você pode permanecer fora das salas o tempo que quiser ou clicar em qualquer sala do Lobby acima para entrar novamente.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => enterRoomDirectly(activeRoom)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] rounded-lg transition-colors cursor-pointer"
+            >
+              <DoorOpen className="w-4 h-4" />
+              Entrar em {activeRoom.name}
+            </button>
+          </div>
+        </section>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* Palco da Sala (8 colunas) */}
         <section className="lg:col-span-8 bg-white border border-[#E6E0D8] rounded-xl p-5 flex flex-col justify-between">
@@ -2011,6 +2685,40 @@ export const RoomView: React.FC<RoomViewProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Botões exclusivos do Administrador para gerenciar temática e mobília das Salas Oficiais */}
+              {canManageOfficialRooms && (
+                <button
+                  type="button"
+                  onClick={() => setShowAdminThemeModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#701A75] bg-[#FDF4FF] hover:bg-[#FAE8FF] border border-[#F0ABFC] rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title="Somente Administradores: Mudar temática das salas oficiais (Padrão, Natal, Halloween)"
+                >
+                  <Palette className="w-3.5 h-3.5 text-[#A21CAF]" />
+                  <span>Temática Oficial</span>
+                  <span className="text-[10px] px-1.5 py-0.2 bg-[#F472B6]/25 text-[#86198F] rounded font-extrabold uppercase">
+                    Admin
+                  </span>
+                </button>
+              )}
+
+
+
+              {activeRoom.isCustom && isCustomOwner && (
+                <label
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1C1917] bg-[#FAF8F5] hover:bg-[#EFEAE3] border border-[#D6CFC7] rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title="Ajustar imagem de plano de fundo da sala direto do seu PC"
+                >
+                  <ImagePlus className="w-3.5 h-3.5 text-[#C8235D]" />
+                  <span>{activeRoom.customBackgroundImageUrl ? 'Trocar Fundo (PC)' : 'Fundo do PC'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUpdateActiveRoomBg}
+                    className="hidden"
+                  />
+                </label>
+              )}
+
               <button
                 type="button"
                 onClick={() => setShowDjModal(true)}
@@ -2023,8 +2731,17 @@ export const RoomView: React.FC<RoomViewProps> = ({
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                 )}
               </button>
+              <button
+                type="button"
+                onClick={handleExitRoom}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#B91C1C] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] rounded-lg shadow-2xs transition-colors cursor-pointer"
+                title="Sair desta sala e permanecer fora das salas públicas"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sair</span>
+              </button>
               <p className="text-xs text-[#6B645D] hidden sm:block">
-                Clique no chão para caminhar ou no avatar para ver perfil
+                Clique no chão para caminhar livremente ou arraste com o botão direito para ajustar a câmera
               </p>
             </div>
           </div>
@@ -2051,12 +2768,159 @@ export const RoomView: React.FC<RoomViewProps> = ({
             </div>
           )}
 
+          {/* Barra Ao Vivo de Áudio e Vídeo da Cabine de DJ (visível em 3D e 2D quando há música) */}
+          {hasActiveDjVideo && currentRoomDjTrack && (
+            <div className="mt-3 px-3 py-2 rounded-xl bg-[#1C1917] border border-[#F59E0B]/45 text-white flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <Disc3
+                  className={`w-4 h-4 text-[#F59E0B] shrink-0 ${
+                    currentRoomDjTrack.isPlaying ? 'animate-spin' : ''
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-[#FDE68A] truncate">
+                    {currentRoomDjTrack.title}
+                  </p>
+                  <p className="text-[10px] text-[#D6D3D1] truncate">
+                    Tocando da Cabine de DJ · escolhida por{' '}
+                    <strong>{currentRoomDjTrack.addedBy}</strong>
+                    {(currentRoomDjTrack.queue?.length ?? 0) > 0
+                      ? ` · +${currentRoomDjTrack.queue?.length} na fila`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(djPlaybackStatus.needsAudioUnlock ||
+                  djPlaybackStatus.state === 'blocked') &&
+                  !isDjAudioMuted && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDjAudioMuted(false);
+                        djControllerRef.current?.unlockAudio();
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold text-[#1C1917] bg-[#F59E0B] hover:bg-[#FBBF24] rounded-lg animate-pulse cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      Ativar Som da Cabine
+                    </button>
+                  )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextMuted = !isDjAudioMuted;
+                    setIsDjAudioMuted(nextMuted);
+                    if (!nextMuted) {
+                      djControllerRef.current?.unlockAudio();
+                    }
+                  }}
+                  className="p-1.5 text-[#FDE68A] hover:text-white bg-white/10 hover:bg-white/15 rounded-lg transition-colors cursor-pointer"
+                  title={isDjAudioMuted ? 'Desmutar som da Cabine de DJ' : 'Mutar som'}
+                >
+                  {isDjAudioMuted || djVolume === 0 ? (
+                    <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
+
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={isDjAudioMuted ? 0 : djVolume}
+                  onChange={(e) => {
+                    const nextVol = Number(e.target.value);
+                    setDjVolume(nextVol);
+                    if (nextVol > 0 && isDjAudioMuted) {
+                      setIsDjAudioMuted(false);
+                      djControllerRef.current?.unlockAudio();
+                    }
+                  }}
+                  title={`Volume da Cabine de DJ: ${isDjAudioMuted ? 0 : djVolume}%`}
+                  aria-label="Volume do som da Cabine de DJ"
+                  className="w-20 accent-[#F59E0B] cursor-pointer"
+                />
+
+                {stageViewMode === '3d' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDjScreenDockMode((m) => (m === 'booth' ? 'corner' : 'booth'))
+                    }
+                    className="px-2 py-1 text-[10px] font-semibold text-[#E2E8F0] bg-white/10 hover:bg-white/20 rounded-lg transition-colors cursor-pointer"
+                    title="Alternar vídeo entre a tela 3D da cabine ou canto do palco"
+                  >
+                    {djScreenDockMode === 'booth' ? 'Fixar TV no Canto' : 'Tela na Cabine 3D'}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowDjModal(true)}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-[#F59E0B] hover:bg-[#D97706] text-[#1C1917] rounded-lg transition-colors cursor-pointer"
+                >
+                  Trocar Música
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="mt-4 relative w-full overflow-hidden rounded-xl border border-[#DFD8CE]">
-            <div
-              ref={stageRef}
-              onClick={handleStageClick}
-              className="relative w-full aspect-[16/10] select-none cursor-pointer overflow-hidden"
-            >
+            {stageViewMode === '3d' ? (
+              <Room3DViewport
+                room={activeRoom}
+                wallpaper={
+                  activeRoom.wallpaperId
+                    ? resolvedWallpaperCatalog.find((w) => w.id === activeRoom.wallpaperId)
+                    : undefined
+                }
+                presences={avatarsInRoom}
+                currentClientId={clientId}
+                clothingCatalog={resolvedClothingCatalog}
+                djPlaying={Boolean(currentRoomDjTrack?.isPlaying)}
+                djHasTrack={hasActiveDjVideo}
+                canEditProps={canEditCurrentRoomProps}
+                onPropMoved={handlePropMoved}
+                onPropRotated={handlePropRotated}
+                onPropDeleted={handlePropDeleted}
+                onProjectDjScreen={applyProjectedDjScreen}
+                onWalkTo={(xPct, yPct) => {
+                  setIsMySeated(false);
+                  walkAvatarToTarget(xPct, yPct, false);
+                }}
+                onClickProp={(prop) => {
+                  soundEngine.playEquip();
+                  if (canEditCurrentRoomProps) {
+                    setSelectedPropId(prop.id);
+                  }
+                  if (prop.kind === 'chair' || prop.kind === 'sofa') {
+                    walkAvatarToTarget(prop.seatX ?? prop.x, prop.seatY ?? prop.y, true);
+                  } else {
+                    walkAvatarToTarget(prop.x, prop.y + (prop.collisionRadius ?? 6.5) + 1.5, false);
+                  }
+                }}
+                onClickDjBooth={() => setShowDjModal(true)}
+                onClickAvatar={(av) => {
+                  onOpenPublicProfile(av.username, {
+                    equipped: av.equipped,
+                    skinTone: av.skinTone,
+                    avatarGender: av.avatarGender,
+                    customAvatarUrl: av.customAvatarUrl,
+                    avatarDisplayMode: av.avatarDisplayMode,
+                    role: av.role,
+                  });
+                }}
+              />
+            ) : (
+              <div
+                ref={stageRef}
+                onClick={handleStageClick}
+                className="relative w-full aspect-[16/10] select-none cursor-pointer overflow-hidden"
+              >
               <RoomBackdropSvg
                 theme={activeRoom.backdropTheme}
                 wallpaper={
@@ -2072,67 +2936,6 @@ export const RoomView: React.FC<RoomViewProps> = ({
               <canvas
                 ref={starlightCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none z-15"
-                aria-hidden="true"
-              />
-
-              {/* Mini-player flutuante da Cabine de DJ quando há música tocando */}
-              {currentRoomDjTrack?.isPlaying && currentRoomDjTrack.videoId && (
-                <div
-                  className="absolute top-3 right-3 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1C1917]/90 backdrop-blur-md border border-[#F59E0B]/50 text-white shadow-xl pointer-events-auto"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Disc3 className="w-4 h-4 text-[#F59E0B] animate-spin shrink-0" />
-                  <div className="flex flex-col max-w-[115px] sm:max-w-[165px]">
-                    <span className="text-[11px] font-bold text-[#FDE68A] truncate">
-                      {currentRoomDjTrack.title}
-                    </span>
-                    <span className="text-[9px] text-[#D6D3D1] truncate">
-                      por {currentRoomDjTrack.addedBy}
-                      {(currentRoomDjTrack.queue?.length ?? 0) > 0
-                        ? ` · +${currentRoomDjTrack.queue?.length} na fila`
-                        : ''}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsDjAudioMuted((m) => !m)}
-                    className="p-1 text-[#FDE68A] hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
-                    title={isDjAudioMuted ? 'Desmutar som do DJ' : 'Mutar som do DJ'}
-                  >
-                    {isDjAudioMuted || djVolume === 0 ? (
-                      <VolumeX className="w-3.5 h-3.5 text-rose-400" />
-                    ) : (
-                      <Volume2 className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={isDjAudioMuted ? 0 : djVolume}
-                    onChange={(e) => {
-                      const nextVol = Number(e.target.value);
-                      setDjVolume(nextVol);
-                      if (nextVol > 0 && isDjAudioMuted) setIsDjAudioMuted(false);
-                    }}
-                    title={`Volume individual: ${isDjAudioMuted ? 0 : djVolume}%`}
-                    aria-label="Volume individual da sala"
-                    className="w-14 sm:w-16 accent-[#F59E0B] cursor-pointer"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowDjModal(true)}
-                    className="px-2 py-0.5 text-[10px] font-bold bg-[#F59E0B] hover:bg-[#D97706] text-[#1C1917] rounded-md transition-colors cursor-pointer"
-                  >
-                    DJ
-                  </button>
-                </div>
-              )}
-
-              {/* Contêiner oculto gerenciado pelo DJMediaSyncController (YouTube IFrame API) */}
-              <div
-                ref={djAudioHostRef}
-                className="w-0 h-0 opacity-0 pointer-events-none absolute overflow-hidden"
                 aria-hidden="true"
               />
 
@@ -2406,10 +3209,14 @@ export const RoomView: React.FC<RoomViewProps> = ({
                 const displayY = isSelf ? myPos.y : avatar.y;
                 const displayFacing = isSelf ? myPos.facing : avatar.facing;
                 const walkingThisAvatar = isSelf && isMyWalking;
+                const isStaff =
+                  avatar.role === 'admin' ||
+                  (avatar.role as string) === 'moderator' ||
+                  Boolean(avatar.staffRoleTier);
                 const showBubble =
                   Boolean(avatar.lastMessage) &&
                   Boolean(avatar.lastMessageAt) &&
-                  nowTs - (avatar.lastMessageAt ?? 0) < 6000;
+                  nowTs - (avatar.lastMessageAt ?? 0) < 8500;
 
                 // 3D Depth Scaling: escala suave de 82% a 108% baseada na profundidade Y
                 const minY = activeRoom.walkMinY;
@@ -2443,9 +3250,28 @@ export const RoomView: React.FC<RoomViewProps> = ({
                         : 'transition-[left,top] duration-500 ease-out'
                     }`}
                   >
-                    {showBubble && (
-                      <div className="mb-1 max-w-[170px] px-2.5 py-1.5 rounded-lg bg-white border border-[#D6CFC7] shadow-sm text-[11px] text-[#1C1917] text-center leading-snug break-words">
-                        {avatar.lastMessage}
+                    {showBubble && avatar.lastMessage && (
+                      <div
+                        className={`relative mb-2 max-w-[220px] sm:max-w-[260px] px-3.5 py-2 rounded-2xl bg-white shadow-xl text-xs font-medium text-[#1C1917] text-center leading-snug break-words pointer-events-auto select-text animate-in fade-in zoom-in-95 duration-200 z-30 ${
+                          isStaff
+                            ? 'border-2 border-orange-500 shadow-[0_4px_18px_rgba(249,115,22,0.35)] ring-1 ring-orange-400/40'
+                            : 'border border-[#D6CFC7]'
+                        }`}
+                      >
+                        {isStaff && (
+                          <span className="block text-[10px] font-bold text-orange-600 uppercase tracking-wider mb-0.5">
+                            Staff
+                          </span>
+                        )}
+                        <span>{avatar.lastMessage}</span>
+                        {/* Ponta do balão apontando para a cabeça */}
+                        <div
+                          className={`absolute left-1/2 -bottom-1.5 -translate-x-1/2 w-2.5 h-2.5 bg-white rotate-45 ${
+                            isStaff
+                              ? 'border-r-2 border-b-2 border-orange-500'
+                              : 'border-r border-b border-[#D6CFC7]'
+                          }`}
+                        />
                       </div>
                     )}
 
@@ -2486,6 +3312,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
                         equipped={avatar.equipped}
                         skinTone={avatar.skinTone}
                         avatarGender={avatar.avatarGender}
+                        faceCustomization={avatar.faceCustomization}
                         deletedItemIds={deletedItemIds}
                         isWalking={walkingThisAvatar}
                       />
@@ -2493,6 +3320,282 @@ export const RoomView: React.FC<RoomViewProps> = ({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Tela Persistente da Cabine de DJ (exibe vídeo real do YouTube em 3D e 2D sem recarregar) */}
+          <div
+            ref={djScreenFrameRef}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute z-25 rounded-lg overflow-hidden border-2 border-[#F59E0B] bg-[#0B0F19] shadow-2xl"
+          >
+            <div ref={djAudioHostRef} className="w-full h-full bg-black" />
+          </div>
+        </div>
+
+          {/* Barra Inferior da Tela (Dock de Roupas e Móveis Comprados para todos os usuários) */}
+          <div className="mt-3 relative">
+            {/* Gaveta de Roupas Adquiridas (Troca de look dentro da sala) */}
+            {showWardrobeDrawer && (
+              <div className="mb-3 p-4 rounded-xl bg-white border border-[#E6E0D8] shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#EFEAE3]">
+                  <div className="flex items-center gap-2">
+                    <Shirt className="w-4 h-4 text-[#C8235D]" />
+                    <h4 className="text-xs font-bold text-[#1C1917]">
+                      Meu Guarda-Roupa na Sala ({ownedClothes.length} peças adquiridas)
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWardrobeDrawer(false)}
+                    className="p-1 text-[#78716C] hover:text-[#1C1917] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 py-2.5">
+                  {(
+                    [
+                      { id: 'todos', label: 'Tudo' },
+                      { id: 'cabelo', label: 'Cabelo' },
+                      { id: 'blusas', label: 'Blusas' },
+                      { id: 'calcas', label: 'Calças' },
+                      { id: 'vestidos', label: 'Vestidos' },
+                      { id: 'sapatos', label: 'Sapatos' },
+                      { id: 'acessorios', label: 'Acessórios' },
+                    ] as const
+                  ).map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setWardrobeCategoryFilter(cat.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                        wardrobeCategoryFilter === cat.id
+                          ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                          : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8] hover:border-[#C8235D]'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                {filteredOwnedClothes.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-[#78716C] bg-[#FAF8F5] rounded-lg border border-dashed border-[#DFD8CE]">
+                    Você ainda não possui roupas nesta categoria. Visite a{' '}
+                    {onGoToShop && (
+                      <button
+                        type="button"
+                        onClick={onGoToShop}
+                        className="font-bold text-[#C8235D] hover:underline cursor-pointer"
+                      >
+                        Starplaza
+                      </button>
+                    )}{' '}
+                    para adquirir peças!
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredOwnedClothes.map((item) => {
+                      const isEquipped = isClothingItemEquipped(playerState.equipped, item);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => handleWardrobeToggleEquip(item)}
+                          className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                            isEquipped
+                              ? 'border-[#C8235D] bg-[#FDF2F5] ring-1 ring-[#C8235D]/30'
+                              : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2] hover:bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span
+                              className="w-5 h-5 rounded-md border border-black/15 shrink-0"
+                              style={{ backgroundColor: item.swatchColor }}
+                            />
+                            {isEquipped && (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-[#C8235D] text-white">
+                                Vestido
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-bold text-[#1C1917] line-clamp-1">
+                              {item.name}
+                            </p>
+                            <p className="text-[9px] text-[#78716C] capitalize">
+                              {item.category}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Gaveta de Móveis Comprados (Para construir e decorar salas próprias) */}
+            {showFurnitureDrawer && (
+              <div className="mb-3 p-4 rounded-xl bg-white border border-[#E6E0D8] shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#EFEAE3]">
+                  <div className="flex items-center gap-2">
+                    <Armchair className="w-4 h-4 text-[#B45309]" />
+                    <h4 className="text-xs font-bold text-[#1C1917]">
+                      Meus Móveis Adquiridos ({ownedFurniture.length} móveis)
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFurnitureDrawer(false)}
+                    className="p-1 text-[#78716C] hover:text-[#1C1917] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {!canEditCurrentRoomProps && (
+                  <div className="mt-2.5 p-2.5 rounded-lg bg-[#FEF3C7] border border-[#FCD34D] text-[11px] text-[#92400E] flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      Para posicionar e girar seus móveis com o mouse, entre em uma sala criada por você ou abra uma Nova Sala!
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFurnitureDrawer(false);
+                        setShowCreateModal(true);
+                      }}
+                      className="px-2.5 py-1 rounded bg-[#92400E] text-white font-bold text-[10px] hover:bg-[#78350F] cursor-pointer"
+                    >
+                      Criar Minha Sala
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-1.5 py-2.5">
+                  {(['todos', 'Assentos', 'Superfícies', 'Decoração'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setFurnitureCategoryFilter(cat)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                        furnitureCategoryFilter === cat
+                          ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                          : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8] hover:border-[#B45309]'
+                      }`}
+                    >
+                      {cat === 'todos' ? 'Todos' : cat}
+                    </button>
+                  ))}
+                </div>
+
+                {filteredOwnedFurniture.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-[#78716C] bg-[#FAF8F5] rounded-lg border border-dashed border-[#DFD8CE]">
+                    Você ainda não comprou móveis nesta categoria. Visite a{' '}
+                    {onGoToShop && (
+                      <button
+                        type="button"
+                        onClick={onGoToShop}
+                        className="font-bold text-[#C8235D] hover:underline cursor-pointer"
+                      >
+                        Starplaza
+                      </button>
+                    )}{' '}
+                    para comprar móveis!
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredOwnedFurniture.map((furn) => (
+                      <button
+                        key={furn.id}
+                        type="button"
+                        disabled={!canEditCurrentRoomProps}
+                        onClick={() => handleSpawnFurnitureIntoRoom(furn)}
+                        className={`p-2 rounded-xl border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                          canEditCurrentRoomProps
+                            ? 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#B45309] hover:bg-amber-50/40 cursor-pointer'
+                            : 'border-[#E6E0D8] bg-[#FAF8F5]/60 opacity-60 cursor-not-allowed'
+                        }`}
+                        title={
+                          canEditCurrentRoomProps
+                            ? 'Clique para colocar este móvel na sala e mova com o mouse'
+                            : 'Entre na sua própria sala para posicionar móveis'
+                        }
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span
+                            className="w-5 h-5 rounded-md border border-black/15 shrink-0"
+                            style={{ backgroundColor: furn.swatchColor || '#8B5CF6' }}
+                          />
+                          {canEditCurrentRoomProps && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">
+                              + Colocar
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold text-[#1C1917] line-clamp-1">
+                            {furn.name}
+                          </p>
+                          <p className="text-[9px] text-[#78716C]">{furn.category}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Dock Fixo Inferior com Ícones de Roupa e Cadeira */}
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-[#1C1917] text-white border border-[#332E2B] shadow-lg">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWardrobeDrawer((prev) => !prev);
+                    setShowFurnitureDrawer(false);
+                  }}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    showWardrobeDrawer
+                      ? 'bg-[#C8235D] text-white shadow-md'
+                      : 'bg-white/10 hover:bg-white/20 text-white'
+                  }`}
+                  title="Abrir roupas compradas e trocar de roupa na sala"
+                >
+                  <Shirt className="w-4 h-4" />
+                  <span>Roupas ({ownedClothes.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFurnitureDrawer((prev) => !prev);
+                    setShowWardrobeDrawer(false);
+                  }}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    showFurnitureDrawer
+                      ? 'bg-[#F59E0B] text-[#1C1917] shadow-md'
+                      : 'bg-white/10 hover:bg-white/20 text-white'
+                  }`}
+                  title="Abrir móveis comprados para decorar salas"
+                >
+                  <Armchair className="w-4 h-4" />
+                  <span>Móveis ({ownedFurniture.length})</span>
+                </button>
+              </div>
+
+              <div className="text-[11px] text-stone-300 flex items-center gap-2">
+                {canEditCurrentRoomProps ? (
+                  <span className="inline-flex items-center gap-1 text-amber-300 font-semibold">
+                    <Move className="w-3.5 h-3.5" />
+                    Arraste objetos com o mouse para mover ou clique para girar 360°
+                  </span>
+                ) : (
+                  <span>Clique no chão para caminhar ou nas cadeiras para sentar</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2649,27 +3752,56 @@ export const RoomView: React.FC<RoomViewProps> = ({
                 )}
               </div>
 
-              {/* Alterar aviso da sala */}
+              {/* Alterar aviso e plano de fundo da sala */}
               {activeRoom.isCustom && (
-                <form
-                  onSubmit={handleSaveRoomNotice}
-                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
-                >
-                  <input
-                    type="text"
-                    maxLength={100}
-                    value={roomNoticeDraft}
-                    onChange={(e) => setRoomNoticeDraft(e.target.value)}
-                    placeholder="Alterar aviso fixo desta sala para visitantes..."
-                    className="flex-1 px-3 py-1.5 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
-                  />
-                  <button
-                    type="submit"
-                    className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                <div className="space-y-2">
+                  <form
+                    onSubmit={handleSaveRoomNotice}
+                    className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
                   >
-                    Salvar Aviso da Sala
-                  </button>
-                </form>
+                    <input
+                      type="text"
+                      maxLength={100}
+                      value={roomNoticeDraft}
+                      onChange={(e) => setRoomNoticeDraft(e.target.value)}
+                      placeholder="Alterar aviso fixo desta sala para visitantes..."
+                      className="flex-1 px-3 py-1.5 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Salvar Aviso da Sala
+                    </button>
+                  </form>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white border border-[#E6E0D8]">
+                    <span className="text-[11px] font-semibold text-[#44403C] flex items-center gap-1.5">
+                      <ImagePlus className="w-3.5 h-3.5 text-[#C8235D]" />
+                      Plano de Fundo Personalizado (PC):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <label className="px-2.5 py-1 rounded bg-[#1C1917] hover:bg-[#332E2B] text-white text-[11px] font-semibold cursor-pointer">
+                        {activeRoom.customBackgroundImageUrl ? 'Trocar Imagem' : 'Enviar Imagem'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleUpdateActiveRoomBg}
+                          className="hidden"
+                        />
+                      </label>
+                      {activeRoom.customBackgroundImageUrl && (
+                        <button
+                          type="button"
+                          onClick={handleClearActiveRoomBg}
+                          className="px-2.5 py-1 rounded bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA] text-[11px] font-semibold cursor-pointer"
+                        >
+                          Remover Fundo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
 
               {/* Expulsar jogadores indesejados presentes na sala */}
@@ -2724,6 +3856,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
           />
         </div>
       </div>
+      )}
 
       {/* Modal Interativo da Cabine de DJ (YouTube, Fila Sincronizada e Volume Individual) */}
       {showDjModal && (
@@ -2748,6 +3881,251 @@ export const RoomView: React.FC<RoomViewProps> = ({
           onClearTrack={handleStopDjTrack}
         />
       )}
+
+      {/* Modal 1: Mudar Temática das Salas Oficiais (Apenas Administrador) */}
+      {showAdminThemeModal && canManageOfficialRooms && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-[#DFD8CE] overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-6 py-4 bg-gradient-to-r from-[#2A0845] to-[#6441A5] text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <Palette className="w-5 h-5 text-[#F59E0B]" />
+                <div>
+                  <h3 className="text-base font-bold flex items-center gap-2">
+                    <span>Temática das Salas Oficiais</span>
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 bg-[#F59E0B] text-[#1C1917] rounded-full uppercase tracking-wider">
+                      Admin
+                    </span>
+                  </h3>
+                  <p className="text-xs text-purple-200">
+                    Alterne o cenário 3D e a mobília das salas oficiais em tempo real para todos os jogadores.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdminThemeModal(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Seletor de Escopo de Aplicação */}
+              <div className="p-3.5 bg-[#FAF8F5] rounded-xl border border-[#E6E0D8]">
+                <label className="block text-xs font-bold text-[#1C1917] mb-2">
+                  Escopo de Aplicação da Temática:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdminThemeScope('all')}
+                    className={`flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                      adminThemeScope === 'all'
+                        ? 'bg-[#1C1917] text-white border-[#1C1917] shadow-xs'
+                        : 'bg-white text-[#57534E] border-[#D6D3D1] hover:bg-[#F5F5F4]'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4 shrink-0 text-[#F59E0B]" />
+                    <span className="text-left leading-tight">
+                      Todas as Salas Oficiais
+                      <span className="block text-[10px] opacity-75 font-normal">
+                        Servidores BR, ES e EN
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAdminThemeScope('current')}
+                    className={`flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                      adminThemeScope === 'current'
+                        ? 'bg-[#1C1917] text-white border-[#1C1917] shadow-xs'
+                        : 'bg-white text-[#57534E] border-[#D6D3D1] hover:bg-[#F5F5F4]'
+                    }`}
+                  >
+                    <MapPin className="w-4 h-4 shrink-0 text-[#38BDF8]" />
+                    <span className="text-left leading-tight">
+                      Apenas Sala Atual
+                      <span className="block text-[10px] opacity-75 font-normal">
+                        {activeRoom.name}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista dos 3 Temas Oficiais */}
+              <div className="space-y-3.5">
+                {/* 1. Padrão Diurno (Céu Azul Limpo) */}
+                <div
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    activeRoom.backdropTheme === 'lounge_party'
+                      ? 'border-[#0284C7] bg-[#F0F9FF]'
+                      : 'border-[#E6E0D8] bg-white hover:border-[#BAE6FD]'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl p-2 bg-[#E0F2FE] rounded-xl shrink-0">☀️</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-[#0369A1]">
+                            Terraço de Luxo (Padrão Diurno)
+                          </h4>
+                          {activeRoom.backdropTheme === 'lounge_party' && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-[#0284C7] text-white rounded-full">
+                              Em Uso
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#0C4A6E] mt-0.5 leading-relaxed">
+                          Céu azul límpido e ensolarado, horizonte com arranha-céus iluminados, aquários integrados com peixes tropicais, piso em deck de madeira nobre e mobília VIP padrão.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party', LOUNGE_PARTY_PROPS, true)
+                        }
+                        className="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-bold text-white bg-[#0284C7] hover:bg-[#0369A1] rounded-lg transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
+                      >
+                        Aplicar Tema Completo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party', activeRoom.interactiveProps || [], false)
+                        }
+                        className="flex-1 sm:flex-initial px-2.5 py-1 text-[11px] font-semibold text-[#0369A1] bg-white hover:bg-[#E0F2FE] border border-[#BAE6FD] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Apenas Cenário
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Lounge Natalino (Natal) */}
+                <div
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    activeRoom.backdropTheme === 'lounge_party_natal'
+                      ? 'border-[#16A34A] bg-[#F0FDF4]'
+                      : 'border-[#E6E0D8] bg-white hover:border-[#BBF7D0]'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl p-2 bg-[#DCFCE7] rounded-xl shrink-0">🎄</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-[#15803D]">
+                            Lounge Festivo de Natal
+                          </h4>
+                          {activeRoom.backdropTheme === 'lounge_party_natal' && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-[#16A34A] text-white rounded-full">
+                              Em Uso
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#14532D] mt-0.5 leading-relaxed">
+                          Noite estrelada com lua mágica, Árvore de Natal com estrela radiante de Belém, mobília temática com sofás reais aveludados vermelhos e verdes, banquetas douradas e caixas de presentes.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party_natal', LOUNGE_PARTY_NATAL_PROPS, true)
+                        }
+                        className="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-bold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
+                      >
+                        Aplicar Tema de Natal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party_natal', activeRoom.interactiveProps || [], false)
+                        }
+                        className="flex-1 sm:flex-initial px-2.5 py-1 text-[11px] font-semibold text-[#15803D] bg-white hover:bg-[#DCFCE7] border border-[#BBF7D0] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Apenas Cenário
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Lounge das Bruxas (Halloween) */}
+                <div
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    activeRoom.backdropTheme === 'lounge_party_halloween'
+                      ? 'border-[#EA580C] bg-[#FFF7ED]'
+                      : 'border-[#E6E0D8] bg-white hover:border-[#FED7AA]'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl p-2 bg-[#FFEDD5] rounded-xl shrink-0">🎃</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-[#C2410C]">
+                            Lounge das Bruxas (Halloween)
+                          </h4>
+                          {activeRoom.backdropTheme === 'lounge_party_halloween' && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-[#EA580C] text-white rounded-full">
+                              Em Uso
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#7C2D12] mt-0.5 leading-relaxed">
+                          Lua macabra alaranjada com halo místico púrpura, abóboras Jack-o'-Lantern iluminadas, névoa noturna, sofás góticos e mesas de poções encantadas.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party_halloween', LOUNGE_PARTY_HALLOWEEN_PROPS, true)
+                        }
+                        className="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-bold text-white bg-[#EA580C] hover:bg-[#C2410C] rounded-lg transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
+                      >
+                        Aplicar Tema Halloween
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplyOfficialTheme('lounge_party_halloween', activeRoom.interactiveProps || [], false)
+                        }
+                        className="flex-1 sm:flex-initial px-2.5 py-1 text-[11px] font-semibold text-[#C2410C] bg-white hover:bg-[#FFEDD5] border border-[#FED7AA] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Apenas Cenário
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 bg-[#F5F2EC] border-t border-[#E6E0D8] flex items-center justify-between shrink-0">
+              <span className="text-xs text-[#78716C]">
+                As alterações propagam-se para todos os clientes conectados.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAdminThemeModal(false)}
+                className="px-4 py-1.5 text-xs font-semibold text-[#44403C] hover:text-[#1C1917] bg-white hover:bg-[#E7E5E4] border border-[#D6D3D1] rounded-lg transition-colors cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

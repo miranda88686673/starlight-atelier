@@ -22,7 +22,7 @@ import {
 import { useGlobalState } from '../core/state/GlobalStateManager';
 import { soundEngine } from '../utils/sound';
 import { VipBadge } from './StaffDirectory';
-import { ItemPreviewSvg } from './svg/ItemPreviewSvg';
+import { ThreeClothingThumbnail } from './three/ThreeItemThumbnail';
 
 interface VipCoinsStoreViewProps {
   currentUser: UserAccount;
@@ -646,7 +646,9 @@ export const VipCoinsStoreView: React.FC<VipCoinsStoreViewProps> = ({
                 key={item.id}
                 className="rounded-xl border border-[#FCD34D] bg-[#FFFDF7] p-3 flex flex-col items-center text-center"
               >
-                <ItemPreviewSvg item={item} className="w-24 h-28" />
+                <div className="w-24 h-28 flex items-center justify-center">
+                  <ThreeClothingThumbnail item={item} className="w-24 h-28 object-contain" />
+                </div>
                 <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D] text-[10px] font-bold">
                   Lendário VIP
                 </span>

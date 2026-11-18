@@ -5,13 +5,15 @@ import {
   RoomDef,
   RoomDjTrack,
   RoomId,
+  RoomInteractiveProp,
 } from '../types/game';
 import {
   emitDjMediaSyncToServer,
   emitStatePatchToServer,
 } from '../core/state/socketBridge';
+import { normalizeUsername } from './storage';
 
-const ROOMS_STORAGE_KEY = 'starlight_atelier_rooms_v1';
+export const ROOMS_STORAGE_KEY = 'starlight_atelier_rooms_v1';
 const CHANNEL_NAME = 'starlight_atelier_realtime_v1';
 const TAB_CLIENT_KEY = 'starlight_atelier_tab_client_id';
 const PRESENCE_TTL_MS = 60_000;
@@ -30,6 +32,7 @@ export interface SharedRoomsSnapshot {
   customRooms: RoomDef[];
   kicks: RoomKickNotice[];
   djTracksByRoom?: Record<RoomId, RoomDjTrack>;
+  officialOverrides?: Record<string, Partial<RoomDef>>;
 }
 
 /**
@@ -77,6 +80,45 @@ export function saveCurrentRoomId(accountId: string, roomId: RoomId): void {
   }
 }
 
+export function getSavedExitedRoomsMode(accountId: string): boolean {
+  try {
+    const tabId = getTabClientId();
+    const tabVal = window.sessionStorage.getItem(
+      `starlight_exited_room_${tabId}_${accountId}`,
+    );
+    if (tabVal !== null) return tabVal === '1';
+    return window.localStorage.getItem(`starlight_exited_room_${accountId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setSavedExitedRoomsMode(
+  accountId: string,
+  exited: boolean,
+): void {
+  try {
+    const tabId = getTabClientId();
+    const val = exited ? '1' : '0';
+    window.sessionStorage.setItem(
+      `starlight_exited_room_${tabId}_${accountId}`,
+      val,
+    );
+    window.localStorage.setItem(`starlight_exited_room_${accountId}`, val);
+  } catch {
+    // Silencioso em modo restrito
+  }
+}
+
+const OFFICIAL_LOUNGE_ROOM_IDS = [
+  'lounge_party',
+  'lounge_party_es',
+  'lounge_party_en',
+  'ilha_brasil',
+  'ilha_spanish',
+  'ilha_english',
+];
+
 function createInitialRoomsSnapshot(): SharedRoomsSnapshot {
   const presences: Record<string, RoomAvatarPresence> = {};
 
@@ -85,15 +127,72 @@ function createInitialRoomsSnapshot(): SharedRoomsSnapshot {
       {
         id: 'msg_init_lounge_party',
         roomId: 'lounge_party',
-        senderUsername: 'Starlight Atelier',
+        senderUsername: 'Nocturne Vale Club',
         senderRole: 'system',
-        text: 'Bem-vinda à Lounge Party Oficial! Clique no piso 3D para caminhar, nos sofás para sentar ou na Cabine DJ para tocar músicas.',
+        text: 'Bem-vinda ao Terraço Oficial Lounge Party (BR)! Aproveite o deck de madeira, os aquários de luxo e a Cabine DJ.',
+        createdAt: Date.now() - 60_000,
+      },
+    ],
+    lounge_party_es: [
+      {
+        id: 'msg_init_lounge_party_es',
+        roomId: 'lounge_party_es',
+        senderUsername: 'Nocturne Vale Club',
+        senderRole: 'system',
+        text: '¡Bienvenida a Lounge Party Oficial (ES)! Disfruta la terraza de madera, los acuarios de lujo y la Cabina DJ.',
+        createdAt: Date.now() - 60_000,
+      },
+    ],
+    lounge_party_en: [
+      {
+        id: 'msg_init_lounge_party_en',
+        roomId: 'lounge_party_en',
+        senderUsername: 'Nocturne Vale Club',
+        senderRole: 'system',
+        text: 'Welcome to Official Lounge Party (EN)! Enjoy the wooden rooftop deck, luxury fish aquariums & live DJ Booth.',
+        createdAt: Date.now() - 60_000,
+      },
+    ],
+    ilha_brasil: [
+      {
+        id: 'msg_init_ilha_brasil',
+        roomId: 'ilha_brasil',
+        senderUsername: 'Nocturne Vale Club',
+        senderRole: 'system',
+        text: 'Bem-vindo(a) à Ilha Brasil! Curta a praia, as cadeirinhas de madeira, os peixes saltando e as 3 Cabines de DJ ao vivo!',
+        createdAt: Date.now() - 60_000,
+      },
+    ],
+    ilha_spanish: [
+      {
+        id: 'msg_init_ilha_spanish',
+        roomId: 'ilha_spanish',
+        senderUsername: 'Nocturne Vale Club',
+        senderRole: 'system',
+        text: '¡Bienvenido(a) a Ilha Spanish! Disfruta la playa, las sillas de madera, los peces saltando y las 3 Cabinas de DJ!',
+        createdAt: Date.now() - 60_000,
+      },
+    ],
+    ilha_english: [
+      {
+        id: 'msg_init_ilha_english',
+        roomId: 'ilha_english',
+        senderUsername: 'Nocturne Vale Club',
+        senderRole: 'system',
+        text: 'Welcome to Ilha English! Relax on the wooden beach chairs, watch the jumping fish & party at the 3 live DJ Booths!',
         createdAt: Date.now() - 60_000,
       },
     ],
   };
 
-  return { presences, messagesByRoom, customRooms: [], kicks: [], djTracksByRoom: {} };
+  return {
+    presences,
+    messagesByRoom,
+    customRooms: [],
+    kicks: [],
+    djTracksByRoom: {},
+    officialOverrides: {},
+  };
 }
 
 /**
@@ -113,7 +212,10 @@ export function readRoomsSnapshot(): SharedRoomsSnapshot {
     const fallback = createInitialRoomsSnapshot();
 
     const customRooms = Array.isArray(parsed.customRooms) ? parsed.customRooms : [];
-    const validRoomIds = new Set<string>(['lounge_party', ...customRooms.map((r) => r.id)]);
+    const validRoomIds = new Set<string>([
+      ...OFFICIAL_LOUNGE_ROOM_IDS,
+      ...customRooms.map((r) => r.id),
+    ]);
 
     const cleanedPresences: Record<string, RoomAvatarPresence> = {};
     const sourcePresences = parsed.presences ?? {};
@@ -146,6 +248,7 @@ export function readRoomsSnapshot(): SharedRoomsSnapshot {
       ? parsed.kicks.filter((k) => now - k.at < 30_000)
       : [];
     const djTracksByRoom = parsed.djTracksByRoom ?? {};
+    const officialOverrides = parsed.officialOverrides ?? {};
 
     return {
       presences: cleanedPresences,
@@ -153,6 +256,7 @@ export function readRoomsSnapshot(): SharedRoomsSnapshot {
       customRooms,
       kicks,
       djTracksByRoom,
+      officialOverrides,
     };
   } catch {
     return createInitialRoomsSnapshot();
@@ -230,13 +334,26 @@ export function appendRoomMessage(
   const nextRoomMsgs = [...prevRoomMsgs, message].slice(-60);
 
   const nextPresences = { ...current.presences };
-  if (senderClientId && nextPresences[senderClientId] && message.senderRole !== 'system') {
-    nextPresences[senderClientId] = {
-      ...nextPresences[senderClientId],
-      lastMessage: message.text,
-      lastMessageAt: message.createdAt,
-      lastSeen: Date.now(),
-    };
+  if (message.senderRole !== 'system' && message.text) {
+    const normSender = normalizeUsername(message.senderUsername);
+    if (senderClientId && nextPresences[senderClientId]) {
+      nextPresences[senderClientId] = {
+        ...nextPresences[senderClientId],
+        lastMessage: message.text,
+        lastMessageAt: message.createdAt,
+        lastSeen: Date.now(),
+      };
+    }
+    for (const [cid, pres] of Object.entries(nextPresences)) {
+      if (pres && normalizeUsername(pres.username) === normSender) {
+        nextPresences[cid] = {
+          ...pres,
+          lastMessage: message.text,
+          lastMessageAt: message.createdAt,
+          lastSeen: Date.now(),
+        };
+      }
+    }
   }
 
   return writeAndBroadcastSnapshot(
@@ -379,6 +496,25 @@ export function updateCustomRoomNotice(
   );
 }
 
+/** Atualiza ou remove a imagem de fundo do PC aplicada a uma sala customizada */
+export function updateCustomRoomBackground(
+  roomId: RoomId,
+  customBackgroundImageUrl: string | undefined,
+  channel: BroadcastChannel | null,
+): SharedRoomsSnapshot {
+  const current = readRoomsSnapshot();
+  const nextRooms = current.customRooms.map((r) =>
+    r.id === roomId ? { ...r, customBackgroundImageUrl } : r,
+  );
+  return writeAndBroadcastSnapshot(
+    {
+      ...current,
+      customRooms: nextRooms,
+    },
+    channel,
+  );
+}
+
 /** Expulsa um avatar intruso de uma sala para o Lounge Principal (privilégio do criador da sala) */
 export function kickAvatarFromRoom(
   roomId: RoomId,
@@ -502,3 +638,52 @@ export function clearRoomDjTrack(
     channel,
   );
 }
+
+/**
+ * Atualiza configurações e móveis de salas oficiais (privilégio exclusivo de Administrador).
+ */
+export function updateOfficialRoomSettings(
+  roomIds: RoomId | RoomId[],
+  updates: Partial<RoomDef>,
+  channel: BroadcastChannel | null,
+): SharedRoomsSnapshot {
+  const current = readRoomsSnapshot();
+  const prevOverrides = current.officialOverrides ?? {};
+  const ids = Array.isArray(roomIds) ? roomIds : [roomIds];
+  const nextOverrides = { ...prevOverrides };
+  for (const id of ids) {
+    nextOverrides[id] = {
+      ...(nextOverrides[id] ?? {}),
+      ...updates,
+    };
+  }
+  return writeAndBroadcastSnapshot(
+    {
+      ...current,
+      officialOverrides: nextOverrides,
+    },
+    channel,
+  );
+}
+
+/**
+ * Atualiza móveis / adereços interativos de uma sala personalizada do usuário (dono da sala)
+ */
+export function updateCustomRoomProps(
+  roomId: RoomId,
+  interactiveProps: RoomInteractiveProp[],
+  channel: BroadcastChannel | null,
+): SharedRoomsSnapshot {
+  const current = readRoomsSnapshot();
+  const nextRooms = current.customRooms.map((r) =>
+    r.id === roomId ? { ...r, interactiveProps } : r,
+  );
+  return writeAndBroadcastSnapshot(
+    {
+      ...current,
+      customRooms: nextRooms,
+    },
+    channel,
+  );
+}
+

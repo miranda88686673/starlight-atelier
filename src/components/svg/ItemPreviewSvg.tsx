@@ -86,6 +86,8 @@ export const ItemPreviewSvg: React.FC<ItemPreviewSvgProps> = ({
         return { x: 60, y: 14, w: 160, h: 196 };
       case 'blusas':
         return { x: 60, y: 126, w: 160, h: 148 };
+      case 'casacos':
+        return { x: 56, y: 124, w: 168, h: 186 };
       case 'vestidos':
         return { x: 54, y: 126, w: 172, h: 286 };
       case 'calcas':

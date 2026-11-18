@@ -1,17 +1,20 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Armchair,
   Building2,
   Check,
+  Clock,
   Coins,
   Crown,
   DoorOpen,
+  Eye,
   Lock,
   Paintbrush,
   Search,
   Shirt,
   ShoppingBag,
   Sparkles,
+  X,
 } from 'lucide-react';
 import {
   AvatarGender,
@@ -25,11 +28,23 @@ import {
   PurchasableWallpaperItem,
   RoomThemeCategory,
 } from '../types/game';
-import { isItemCompatibleWithGender } from '../utils/storage';
+import {
+  isClothingItemEquipped,
+  isItemCompatibleWithGender,
+  toggleItemInEquippedOutfit,
+} from '../utils/storage';
+import {
+  formatCountdown24h,
+  resolveItemClass,
+  resolveLegendarySaleStatus,
+} from '../data/catalog';
 import { VipBadge } from './StaffDirectory';
-import { FurnitureSvg } from './svg/FurnitureSvg';
-import { ItemPreviewSvg } from './svg/ItemPreviewSvg';
-import { RoomBackdropSvg } from './svg/RoomBackdropSvg';
+import { Avatar3DViewport } from './three/Avatar3DViewport';
+import {
+  ThreeClothingThumbnail,
+  ThreeFurnitureThumbnail,
+  ThreeRoomThumbnail,
+} from './three/ThreeItemThumbnail';
 
 interface StarplazaShopProps {
   catalog: ClothingItem[];
@@ -42,6 +57,8 @@ interface StarplazaShopProps {
   ownedWallpaperIds?: string[];
   equipped: EquippedOutfit;
   deletedItemIds: string[];
+  soldOutItemIds?: string[];
+  legendaryLaunchTimestamps?: Record<string, number>;
   starcoins: number;
   isAccountVip: boolean;
   bodyGender: AvatarGender;
@@ -50,7 +67,6 @@ interface StarplazaShopProps {
   onBuyRoomTemplate?: (roomTpl: PurchasableRoomItem) => void;
   onBuyWallpaper?: (wp: PurchasableWallpaperItem) => void;
   onEquipFromShop: (item: ClothingItem) => void;
-  onClaimAllowance: () => void;
   onGoToVipStore?: () => void;
   onGoToSuite?: () => void;
   onGoToRooms?: () => void;
@@ -58,10 +74,13 @@ interface StarplazaShopProps {
 
 type ShopSection = 'roupas' | 'moveis' | 'salas' | 'papeis';
 
+const AM_PAGE_SIZE = 24;
+
 const SHOP_CATEGORIES: Array<'todas' | ClothingCategory> = [
   'todas',
   'cabelo',
   'blusas',
+  'casacos',
   'vestidos',
   'calcas',
   'sapatos',
@@ -124,6 +143,8 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
   ownedWallpaperIds = [],
   equipped,
   deletedItemIds,
+  soldOutItemIds = [],
+  legendaryLaunchTimestamps,
   starcoins,
   isAccountVip,
   bodyGender,
@@ -132,7 +153,6 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
   onBuyRoomTemplate,
   onBuyWallpaper,
   onEquipFromShop,
-  onClaimAllowance,
   onGoToVipStore,
   onGoToSuite,
   onGoToRooms,
@@ -140,9 +160,25 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
   const [section, setSection] = useState<ShopSection>('roupas');
   const [selectedGender, setSelectedGender] = useState<'todos' | 'compativel' | ItemGenderStyle>('todos');
   const [selectedCategory, setSelectedCategory] = useState<'todas' | ClothingCategory>('todas');
+  const [selectedClass, setSelectedClass] = useState<'todas' | 'am' | 'vip' | 'legendary'>('todas');
   const [themeFilter, setThemeFilter] = useState<'todos' | RoomThemeCategory>('todos');
   const [searchQuery, setSearchQuery] = useState('');
   const [onlyPurchasable, setOnlyPurchasable] = useState(false);
+  const [amPage, setAmPage] = useState(1);
+  const [tryOnItem, setTryOnItem] = useState<ClothingItem | null>(null);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    setAmPage(1);
+  }, [selectedGender, selectedCategory, selectedClass, onlyPurchasable, searchQuery, section]);
+
+  useEffect(() => {
+    if (section !== 'roupas' && !tryOnItem) return;
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [section, tryOnItem]);
 
   const filteredClothing = useMemo(() => {
     return catalog.filter((item) => {
@@ -154,6 +190,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
         return false;
       }
       if (selectedCategory !== 'todas' && item.category !== selectedCategory) return false;
+      if (selectedClass !== 'todas' && resolveItemClass(item) !== selectedClass) return false;
       if (onlyPurchasable && ownedItemIds.includes(item.id)) return false;
       if (
         searchQuery.trim() &&
@@ -170,6 +207,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
     deletedItemIds,
     selectedGender,
     selectedCategory,
+    selectedClass,
     onlyPurchasable,
     ownedItemIds,
     searchQuery,
@@ -225,51 +263,112 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
     });
   }, [wallpaperCatalog, themeFilter, onlyPurchasable, ownedWallpaperIds, searchQuery]);
 
-  const vipItems = useMemo(() => filteredClothing.filter((i) => Boolean(i.isVipOnly)), [filteredClothing]);
-  const regularItems = useMemo(() => filteredClothing.filter((i) => !i.isVipOnly), [filteredClothing]);
+  const legendaryItems = useMemo(
+    () => filteredClothing.filter((i) => resolveItemClass(i) === 'legendary'),
+    [filteredClothing],
+  );
+  const vipItems = useMemo(
+    () => filteredClothing.filter((i) => resolveItemClass(i) === 'vip'),
+    [filteredClothing],
+  );
+  const amFreeItems = useMemo(
+    () => filteredClothing.filter((i) => resolveItemClass(i) === 'am'),
+    [filteredClothing],
+  );
+  const totalAmPages = Math.max(1, Math.ceil(amFreeItems.length / AM_PAGE_SIZE));
+  const safeAmPage = Math.min(amPage, totalAmPages);
+  const paginatedAmFreeItems = useMemo(() => {
+    const start = (safeAmPage - 1) * AM_PAGE_SIZE;
+    return amFreeItems.slice(start, start + AM_PAGE_SIZE);
+  }, [amFreeItems, safeAmPage]);
 
-  const renderClothingCard = (item: ClothingItem, isVipSection: boolean) => {
+  const renderClothingCard = (item: ClothingItem) => {
     const isOwned = ownedItemIds.includes(item.id);
-    const isEquipped = equipped[item.category] === item.id;
+    const isEquipped = isClothingItemEquipped(equipped, item);
+    const saleStatus = resolveLegendarySaleStatus(
+      item,
+      { soldOutItemIds, legendaryLaunchTimestamps },
+      nowMs,
+    );
+    const isSoldOut = saleStatus.isSoldOut;
     const canAfford = starcoins >= item.price;
     const itemGender = item.gender ?? item.genderStyle ?? 'unissex';
     const genderMeta = GENDER_BADGE_STYLES[itemGender];
     const isGenderCompatible = isItemCompatibleWithGender(itemGender, bodyGender);
-    const isVipLocked = Boolean(item.isVipOnly) && !isAccountVip;
+    const itemCls = resolveItemClass(item);
+    const isLegendary = itemCls === 'legendary';
+    const isVip = itemCls === 'vip';
+    const isVipLocked = isVip && !isAccountVip;
 
     return (
       <article
         key={item.id}
-        className={`rounded-xl p-4 flex flex-col justify-between transition-colors ${
-          isVipSection
-            ? 'bg-gradient-to-b from-[#FFFDF7] to-white border-2 border-[#D97706]/55 hover:border-[#D97706]'
-            : 'bg-white border border-[#E6E0D8] hover:border-[#C7BEB2]'
+        className={`rounded-xl p-4 flex flex-col justify-between transition-all ${
+          isLegendary
+            ? 'bg-gradient-to-b from-[#FAF5FF] via-white to-[#F5EEFB] border-2 border-purple-400/80 shadow-[0_4px_18px_rgba(168,85,247,0.18)] hover:border-purple-500'
+            : isVip
+              ? 'bg-gradient-to-b from-[#FFFDF7] to-white border-2 border-[#D97706]/55 hover:border-[#D97706] shadow-sm'
+              : 'bg-white border border-[#E6E0D8] hover:border-[#C7BEB2]'
         }`}
       >
         <div>
           <div
             className={`h-44 rounded-lg border flex items-center justify-center mb-3 p-1.5 overflow-hidden relative ${
-              isVipSection
-                ? 'bg-[#FFFBEB]/60 border-[#FDE68A]'
-                : 'bg-[#FAF8F5] border-[#EFEAE3]'
+              isLegendary
+                ? 'bg-gradient-to-br from-purple-100/60 via-pink-50/40 to-amber-50/50 border-purple-200'
+                : isVip
+                  ? 'bg-[#FFFBEB]/60 border-[#FDE68A]'
+                  : 'bg-[#FAF8F5] border-[#EFEAE3]'
             }`}
           >
-            <ItemPreviewSvg item={item} previewGender={bodyGender} className="w-36 h-40" />
+            <ThreeClothingThumbnail
+              item={item}
+              genderHint={bodyGender}
+              className="w-36 h-40 object-contain drop-shadow-md"
+            />
             <span
               className={`absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-semibold border ${genderMeta.className}`}
             >
               {genderMeta.label}
             </span>
-            {item.isVipOnly && (
+            {isLegendary && (
+              <div className="absolute top-2 left-2 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 text-white shadow-xs flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-200" /> Lendário
+                </span>
+              </div>
+            )}
+            {!isLegendary && isVip && (
               <div className="absolute top-2 left-2 flex flex-wrap items-center gap-1">
                 <VipBadge compact />
               </div>
             )}
-            {item.collectionTag && !item.isVipOnly && (
+            {!isLegendary && !isVip && (
+              <div className="absolute top-2 left-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                  Livre · AM
+                </span>
+              </div>
+            )}
+            {item.collectionTag && (
               <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#1C1917]/85 text-white">
                 {item.collectionTag}
               </span>
             )}
+            {isSoldOut && (
+              <span className="absolute inset-x-2 top-1/2 -translate-y-1/2 text-center px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider bg-[#1C1917]/90 text-[#FDE68A] border border-[#D4AF37]/60 shadow-sm pointer-events-none">
+                {saleStatus.reason === 'expired_24h' ? 'Vendido · 24h Esgotadas' : 'Vendido na Loja'}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setTryOnItem(item)}
+              title="Provar peça em 3D na sua MeDoll"
+              className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-white/95 hover:bg-[#1C1917] text-[#1C1917] hover:text-white border border-[#E6E0D8] shadow-xs transition-colors cursor-pointer"
+            >
+              <Eye className="w-3 h-3" />
+              Provar 3D
+            </button>
           </div>
 
           <p className="text-[11px] text-[#6B645D]">
@@ -278,6 +377,12 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
           <h3 className="text-sm font-semibold text-[#1C1917] mt-0.5 line-clamp-1">
             {item.name}
           </h3>
+          {isLegendary && !isSoldOut && (
+            <p className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-100/90 text-purple-900 border border-purple-200 text-[10px] font-mono-num font-bold">
+              <Clock className="w-3 h-3 text-purple-700" />
+              Tempo limitado: {formatCountdown24h(saleStatus.remainingMs)}
+            </p>
+          )}
           {!isGenderCompatible && (
             <p className="text-[11px] font-medium text-[#B45309] mt-1">
               Compatível apenas com corpo {genderMeta.label}
@@ -287,10 +392,37 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
 
         <div className="mt-4 pt-3 border-t border-[#EFEAE3] flex items-center justify-between gap-2">
           <span className="font-mono-num text-sm font-semibold text-[#1C1917]">
-            {item.price === 0 ? 'Grátis' : `${item.price} AM`}
+            {item.price === 0 ? 'Grátis' : `${item.price.toLocaleString('pt-BR')} AM`}
           </span>
 
-          {isVipLocked ? (
+          {isOwned ? (
+            <button
+              type="button"
+              onClick={() => onEquipFromShop(item)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                isEquipped
+                  ? 'bg-[#1C1917] text-white'
+                  : 'bg-[#F5F2EC] text-[#1C1917] hover:bg-[#EAE4DA]'
+              }`}
+            >
+              <Check className="w-3.5 h-3.5" />
+              {isEquipped ? 'Vestida' : 'Experimentar'}
+            </button>
+          ) : isSoldOut ? (
+            <button
+              type="button"
+              disabled
+              title={
+                saleStatus.reason === 'expired_24h'
+                  ? 'O tempo limitado de 24h deste item lendário terminou · Status: Vendido'
+                  : 'Este item foi marcado como Vendido na loja pelo Administrador'
+              }
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-[#F5F2EC] text-[#78716C] border border-[#DFD8CE] cursor-not-allowed whitespace-nowrap shrink-0"
+            >
+              <Lock className="w-3 h-3" />
+              Vendido
+            </button>
+          ) : isVipLocked ? (
             <button
               type="button"
               onClick={onGoToVipStore}
@@ -309,19 +441,6 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
               <Lock className="w-3 h-3" />
               Corpo {genderMeta.label}
             </button>
-          ) : isOwned ? (
-            <button
-              type="button"
-              onClick={() => onEquipFromShop(item)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                isEquipped
-                  ? 'bg-[#1C1917] text-white'
-                  : 'bg-[#F5F2EC] text-[#1C1917] hover:bg-[#EAE4DA]'
-              }`}
-            >
-              <Check className="w-3.5 h-3.5" />
-              {isEquipped ? 'Vestida' : 'Experimentar'}
-            </button>
           ) : (
             <button
               type="button"
@@ -329,7 +448,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
               onClick={() => onBuyItem(item)}
               className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                 canAfford
-                  ? isVipSection
+                  ? isVip
                     ? 'bg-[#B45309] text-white hover:bg-[#92400E] cursor-pointer'
                     : 'bg-[#C8235D] text-white hover:bg-[#A61B4B] cursor-pointer'
                   : 'bg-[#EFEAE3] text-[#8C8278] cursor-not-allowed'
@@ -344,44 +463,13 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
     );
   };
 
+  const totalClothingCount = useMemo(
+    () => catalog.filter((i) => !deletedItemIds.includes(i.id)).length,
+    [catalog, deletedItemIds]
+  );
+
   return (
     <div className="space-y-6">
-      {/* Cabeçalho editorial da Starplaza */}
-      <section className="bg-white border border-[#E6E0D8] rounded-xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="font-display text-3xl font-bold text-[#1C1917] tracking-tight">
-              Starplaza Boutique &amp; Arquitetura
-            </h2>
-            {isAccountVip && <VipBadge />}
-          </div>
-          <p className="text-sm text-[#57534E] mt-1 max-w-2xl">
-            Adquira coleções de moda, móveis temáticos (Boate, Casa, Bares e Hotel de Luxo), Salas exclusivas e Papéis de Parede personalizados com AM.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <div className="px-4 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E6E0D8] flex items-center gap-2.5">
-            <Coins className="w-4 h-4 text-[#C6922B]" />
-            <div>
-              <p className="text-[11px] text-[#6B645D] leading-none">Saldo disponível</p>
-              <p className="font-mono-num text-base font-semibold text-[#1C1917] mt-0.5">
-                {starcoins.toLocaleString('pt-BR')} AM
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClaimAllowance}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-[#1C1917] bg-[#F5EFE6] hover:bg-[#EAE0D0] border border-[#DFD4C3] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-[#C6922B]" />
-            Resgatar Mesada (+250 AM)
-          </button>
-        </div>
-      </section>
-
       {/* Navegação por Seção da Starplaza */}
       <div
         className="grid grid-cols-2 lg:grid-cols-4 gap-2 p-1.5 bg-white border border-[#E6E0D8] rounded-xl"
@@ -509,39 +597,107 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
         </div>
 
         {section === 'roupas' && (
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#EFEAE3]">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {SHOP_CATEGORIES.map((cat) => {
-                const isActive = selectedCategory === cat;
+          <div className="space-y-2.5 pt-3 border-t border-[#EFEAE3]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SHOP_CATEGORIES.map((cat) => {
+                  const isActive = selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        isActive
+                          ? 'bg-[#1C1917] text-white'
+                          : 'bg-[#F5F2EC] text-[#57534E] hover:bg-[#EAE4DA] hover:text-[#1C1917]'
+                      }`}
+                    >
+                      {cat === 'todas' ? 'Todas as Coleções' : CATEGORY_LABELS[cat]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <span className="text-xs text-[#6B645D] font-mono-num">
+                {filteredClothing.length} {filteredClothing.length === 1 ? 'peça exibida' : 'peças exibidas'}
+              </span>
+            </div>
+
+            {/* Filtros por Classe de Peça (Lendários, VIP, AM Livres) */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#EFEAE3]/70">
+              <span className="text-[11px] font-semibold text-[#78716C] mr-1">Classe:</span>
+              {[
+                { id: 'todas', label: 'Todas as Classes', count: filteredClothing.length },
+                { id: 'legendary', label: '✨ Lendários', count: legendaryItems.length },
+                { id: 'vip', label: '👑 Itens VIP', count: vipItems.length },
+                { id: 'am', label: '💎 Livres · AM', count: amFreeItems.length },
+              ].map((cls) => {
+                const isActive = selectedClass === cls.id;
                 return (
                   <button
-                    key={cat}
+                    key={cls.id}
                     type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    onClick={() => setSelectedClass(cls.id as typeof selectedClass)}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
                       isActive
-                        ? 'bg-[#1C1917] text-white'
-                        : 'bg-[#F5F2EC] text-[#57534E] hover:bg-[#EAE4DA] hover:text-[#1C1917]'
+                        ? cls.id === 'legendary'
+                          ? 'bg-gradient-to-r from-purple-700 to-pink-700 text-white font-bold shadow-xs'
+                          : cls.id === 'vip'
+                            ? 'bg-gradient-to-r from-amber-600 to-amber-700 text-white font-bold shadow-xs'
+                            : 'bg-[#1C1917] text-white font-bold'
+                        : 'bg-[#FAF8F5] text-[#57534E] border border-[#E6E0D8] hover:bg-[#EAE4DA]'
                     }`}
                   >
-                    {cat === 'todas' ? 'Todas as Coleções' : CATEGORY_LABELS[cat]}
+                    <span>{cls.label}</span>
+                    <span className="text-[10px] opacity-75 font-mono">({cls.count})</span>
                   </button>
                 );
               })}
             </div>
-
-            <span className="text-xs text-[#6B645D] font-mono-num">
-              {filteredClothing.length} {filteredClothing.length === 1 ? 'peça exibida' : 'peças exibidas'}
-            </span>
           </div>
         )}
       </section>
 
-      {/* SEÇÃO 1: ROUPAS & CABELOS */}
+      {/* SEÇÃO 1: ROUPAS & CABELOS SEPARADOS POR CLASSE */}
       {section === 'roupas' && (
-        <>
-          {vipItems.length > 0 && (
-            <section className="rounded-2xl border-2 border-[#D97706]/50 bg-gradient-to-br from-[#FFFBEB] via-white to-[#FEF3C7]/35 p-6 space-y-4">
+        <div className="space-y-6">
+          {/* BLOCO 1: ITENS LENDÁRIOS */}
+          {legendaryItems.length > 0 && (selectedClass === 'todas' || selectedClass === 'legendary') && (
+            <section className="rounded-2xl border-2 border-purple-400/80 bg-gradient-to-br from-[#FAF5FF] via-white to-[#F3E8FF]/40 p-6 space-y-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-purple-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-display text-2xl font-bold text-purple-950">
+                        Coleção de Itens Lendários 3D
+                      </h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gradient-to-r from-purple-600 to-pink-600 text-white">
+                        Alta-Raridade Three.js
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-800/90 mt-0.5">
+                      Edições limitadas com janela de 24 horas pelo relógio real na Starplaza. Após 24h ou quando marcadas como Vendido pelo Administrador, não podem mais ser compradas na loja.
+                    </p>
+                  </div>
+                </div>
+                <span className="font-mono-num text-xs font-bold text-purple-900 bg-purple-100 border border-purple-300 px-3 py-1 rounded-lg shrink-0">
+                  {legendaryItems.length} {legendaryItems.length === 1 ? 'peça lendária' : 'peças lendárias'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {legendaryItems.map((item) => renderClothingCard(item))}
+              </div>
+            </section>
+          )}
+
+          {/* BLOCO 2: ITENS VIP */}
+          {vipItems.length > 0 && (selectedClass === 'todas' || selectedClass === 'vip') && (
+            <section className="rounded-2xl border-2 border-[#D97706]/50 bg-gradient-to-br from-[#FFFBEB] via-white to-[#FEF3C7]/35 p-6 space-y-4 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#FDE68A]">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FEF3C7] to-[#F59E0B] text-[#78350F] border border-[#D97706] flex items-center justify-center shrink-0">
@@ -550,14 +706,14 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-display text-2xl font-bold text-[#78350F]">
-                        Boutique VIP Exclusiva
+                        Boutique de Itens VIP
                       </h3>
                       <VipBadge />
                     </div>
                     <p className="text-xs text-[#92400E] mt-0.5">
                       {isAccountVip
-                        ? 'Seu Passe VIP está ativo! Peças de alta-costura e itens lendários desbloqueados.'
-                        : 'Todos podem visualizar as peças lendárias abaixo. Ative o Passe VIP para comprar e equipar!'}
+                        ? 'Seu Passe VIP está ativo! Todas as peças VIP estão prontas para compra e equipagem imediata.'
+                        : 'Itens exclusivos para membros VIP do Starlight Atelier. Ative seu passe na Loja Premium para equipar!'}
                     </p>
                   </div>
                 </div>
@@ -566,7 +722,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                     <button
                       type="button"
                       onClick={onGoToVipStore}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#B45309] hover:bg-[#92400E] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#B45309] hover:bg-[#92400E] rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-xs"
                     >
                       <Crown className="w-3.5 h-3.5" />
                       Ativar VIP
@@ -579,35 +735,98 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {vipItems.map((item) => renderClothingCard(item, true))}
+                {vipItems.map((item) => renderClothingCard(item))}
               </div>
             </section>
           )}
 
-          {regularItems.length === 0 && vipItems.length === 0 ? (
+          {/* BLOCO 3: ROUPAS LIVRES (COMPRA LIVRE COM MOEDA PREMIUM AM) */}
+          {amFreeItems.length > 0 && (selectedClass === 'todas' || selectedClass === 'am') && (
+            <section className="rounded-2xl border border-[#E6E0D8] bg-white p-6 space-y-4 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#EFEAE3]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0">
+                    <Coins className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-2xl font-bold text-[#1C1917]">
+                      Coleção Livre · Moeda Premium AM
+                    </h3>
+                    <p className="text-xs text-[#57534E] mt-0.5">
+                      Peças 3D abertas para compra livre por todos os estilistas utilizando saldo AM regular.
+                    </p>
+                  </div>
+                </div>
+                <span className="font-mono-num text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-lg shrink-0">
+                  {amFreeItems.length} {amFreeItems.length === 1 ? 'peça livre' : 'peças livres'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {paginatedAmFreeItems.map((item) => renderClothingCard(item))}
+              </div>
+
+              {totalAmPages > 1 && (
+                <div className="pt-4 border-t border-[#EFEAE3] flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-xs text-[#57534E] font-mono-num">
+                    Mostrando {(safeAmPage - 1) * AM_PAGE_SIZE + 1}–
+                    {Math.min(safeAmPage * AM_PAGE_SIZE, amFreeItems.length)} de {amFreeItems.length} peças
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={safeAmPage <= 1}
+                      onClick={() => setAmPage((p) => Math.max(1, p - 1))}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[#E6E0D8] bg-[#FAF8F5] text-[#1C1917] hover:bg-[#EAE4DA] disabled:opacity-45 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      Anterior
+                    </button>
+                    <span className="px-3 py-1.5 text-xs font-mono-num font-semibold text-[#1C1917]">
+                      Página {safeAmPage} / {totalAmPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeAmPage >= totalAmPages}
+                      onClick={() => setAmPage((p) => Math.min(totalAmPages, p + 1))}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[#E6E0D8] bg-[#FAF8F5] text-[#1C1917] hover:bg-[#EAE4DA] disabled:opacity-45 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {legendaryItems.length === 0 && vipItems.length === 0 && amFreeItems.length === 0 && (
             <div className="bg-white border border-[#E6E0D8] rounded-xl p-12 text-center">
-              <p className="text-sm font-medium text-[#44403C]">
-                Nenhuma peça encontrada com os filtros atuais.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedGender('todos');
-                  setSelectedCategory('todas');
-                  setSearchQuery('');
-                  setOnlyPurchasable(false);
-                }}
-                className="mt-3 px-4 py-2 text-xs font-medium text-[#C8235D] hover:underline cursor-pointer"
-              >
-                Limpar filtros
-              </button>
+              {totalClothingCount === 0 ? (
+                <p className="text-sm font-medium text-[#44403C]">
+                  A loja de roupas está limpa no momento.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-[#44403C]">
+                    Nenhuma peça encontrada com os filtros atuais.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedGender('todos');
+                      setSelectedCategory('todas');
+                      setSelectedClass('todas');
+                      setSearchQuery('');
+                      setOnlyPurchasable(false);
+                    }}
+                    className="mt-3 px-4 py-2 text-xs font-medium text-[#C8235D] hover:underline cursor-pointer"
+                  >
+                    Limpar todos os filtros
+                  </button>
+                </>
+              )}
             </div>
-          ) : regularItems.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {regularItems.map((item) => renderClothingCard(item, false))}
-            </div>
-          ) : null}
-        </>
+          )}
+        </div>
       )}
 
       {/* SEÇÃO 2: MÓVEIS TEMÁTICOS (BOATE, CASA POR CÔMODO, BARES, HOTEL DE LUXO) */}
@@ -641,7 +860,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                           : 'bg-[#FAF8F5] border-[#EFEAE3]'
                       }`}
                     >
-                      <FurnitureSvg furnitureId={furn.id} furnitureDef={furn} className="w-full h-full" />
+                      <ThreeFurnitureThumbnail def={furn} className="w-full h-full object-contain drop-shadow-md" />
                       <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#1C1917]/80 text-white">
                         {themeLabel}
                       </span>
@@ -732,8 +951,8 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                 }`}
               >
                 <div>
-                  <div className="h-36 rounded-lg border border-[#E6E0D8] mb-3 relative overflow-hidden bg-[#F5EFE7]">
-                    <RoomBackdropSvg theme={room.backdropTheme} />
+                  <div className="h-36 rounded-lg border border-[#E6E0D8] mb-3 relative overflow-hidden bg-[#1D162B]">
+                    <ThreeRoomThumbnail theme={room.backdropTheme} alt={room.name} className="w-full h-full object-cover" />
                     <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#1C1917]/85 text-white z-10">
                       {themeLabel}
                     </span>
@@ -821,37 +1040,13 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                 }`}
               >
                 <div>
-                  <div className="h-36 rounded-lg border border-[#E6E0D8] mb-3 relative overflow-hidden">
-                    <svg viewBox="0 0 240 140" className="w-full h-full" preserveAspectRatio="none">
-                      <defs>
-                        <linearGradient id={`wp-wall-${wp.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={wp.wallTopColor} />
-                          <stop offset="100%" stopColor={wp.wallBottomColor} />
-                        </linearGradient>
-                        <linearGradient id={`wp-floor-${wp.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={wp.floorTopColor} />
-                          <stop offset="100%" stopColor={wp.floorBottomColor} />
-                        </linearGradient>
-                      </defs>
-                      <rect x="0" y="0" width="240" height="88" fill={`url(#wp-wall-${wp.id})`} />
-                      {wp.pattern === 'striped' &&
-                        [16, 40, 64, 88, 112, 136, 160, 184, 208].map((x) => (
-                          <rect key={x} x={x} y="0" width="8" height="88" fill={wp.accentColor} opacity="0.16" />
-                        ))}
-                      {wp.pattern === 'neon' && (
-                        <>
-                          <line x1="0" y1="22" x2="240" y2="22" stroke={wp.accentColor} strokeWidth="2" opacity="0.65" />
-                          <circle cx="190" cy="40" r="24" fill={wp.accentColor} opacity="0.22" />
-                        </>
-                      )}
-                      {wp.pattern === 'sequin' &&
-                        [30, 75, 120, 165, 210].map((cx, i) => (
-                          <circle key={cx} cx={cx} cy={i % 2 === 0 ? 28 : 48} r="4" fill={wp.accentColor} opacity="0.32" />
-                        ))}
-                      <rect x="0" y="64" width="240" height="24" fill={wp.wainscotColor} />
-                      <line x1="0" y1="64" x2="240" y2="64" stroke={wp.accentColor} strokeWidth="1.5" opacity="0.6" />
-                      <rect x="0" y="88" width="240" height="52" fill={`url(#wp-floor-${wp.id})`} />
-                    </svg>
+                  <div className="h-36 rounded-lg border border-[#E6E0D8] mb-3 relative overflow-hidden bg-[#1D162B]">
+                    <ThreeRoomThumbnail
+                      theme="casa_estar_moderna"
+                      wallpaper={wp}
+                      alt={wp.name}
+                      className="w-full h-full object-cover"
+                    />
 
                     <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#1C1917]/85 text-white">
                       {themeLabel}
@@ -919,6 +1114,135 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
             );
           })}
         </section>
+      )}
+
+      {/* MODAL DE PROVADOR 3D INTERATIVO DA STARPLAZA */}
+      {tryOnItem && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Provador 3D: ${tryOnItem.name}`}
+          onClick={() => setTryOnItem(null)}
+        >
+          <div
+            className="bg-white border border-[#E6E0D8] rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 pb-3 border-b border-[#EFEAE3]">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#C8235D]">
+                  Provador 3D Starplaza · {tryOnItem.brand}
+                </p>
+                <h3 className="font-display text-2xl font-bold text-[#1C1917] mt-0.5">
+                  {tryOnItem.name}
+                </h3>
+                <p className="text-xs text-[#6B645D] mt-0.5">
+                  Gire o avatar 3D com o mouse, altere o ângulo para Rosto &amp; Cabelo ou visualize em pose de desfile.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTryOnItem(null)}
+                aria-label="Fechar provador 3D"
+                className="p-2 rounded-lg text-[#57534E] hover:bg-[#F5F2EC] hover:text-[#1C1917] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <Avatar3DViewport
+              equipped={
+                isClothingItemEquipped(equipped, tryOnItem)
+                  ? equipped
+                  : toggleItemInEquippedOutfit(equipped, tryOnItem, catalog)
+              }
+              skinTone="pessego"
+              avatarGender={
+                tryOnItem.gender === 'feminino' || tryOnItem.gender === 'masculino'
+                  ? tryOnItem.gender
+                  : bodyGender
+              }
+              catalog={catalog}
+              focusMode={tryOnItem.category === 'cabelo' ? 'face' : 'body'}
+              initialPose="runway"
+              showControls
+              heightClassName="h-[380px]"
+              backgroundHex="#F6F1EA"
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#EFEAE3]">
+              <div>
+                <span className="text-xs text-[#6B645D]">Valor da peça:</span>{' '}
+                <strong className="font-mono-num text-base text-[#1C1917]">
+                  {tryOnItem.price === 0 ? 'Grátis' : `${tryOnItem.price} AM`}
+                </strong>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTryOnItem(null)}
+                  className="px-4 py-2 text-xs font-semibold text-[#44403C] bg-[#F5F2EC] hover:bg-[#EAE4DA] rounded-lg cursor-pointer"
+                >
+                  Fechar
+                </button>
+                {ownedItemIds.includes(tryOnItem.id) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onEquipFromShop(tryOnItem);
+                      setTryOnItem(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#1C1917] hover:bg-[#332E2B] rounded-lg cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Vestir na MeDoll
+                  </button>
+                ) : resolveLegendarySaleStatus(
+                    tryOnItem,
+                    { soldOutItemIds, legendaryLaunchTimestamps },
+                    nowMs,
+                  ).isSoldOut ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#EFEAE3] text-[#78716C] rounded-lg cursor-not-allowed"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    {resolveLegendarySaleStatus(
+                      tryOnItem,
+                      { soldOutItemIds, legendaryLaunchTimestamps },
+                      nowMs,
+                    ).reason === 'expired_24h'
+                      ? 'Vendido (24h esgotadas)'
+                      : 'Vendido na Loja'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={
+                      starcoins < tryOnItem.price ||
+                      (resolveItemClass(tryOnItem) === 'vip' && !isAccountVip) ||
+                      !isItemCompatibleWithGender(
+                        tryOnItem.gender ?? tryOnItem.genderStyle ?? 'unissex',
+                        bodyGender,
+                      )
+                    }
+                    onClick={() => {
+                      onBuyItem(tryOnItem);
+                      setTryOnItem(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:bg-[#EFEAE3] disabled:text-[#8C8278] rounded-lg cursor-pointer"
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    Comprar agora
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

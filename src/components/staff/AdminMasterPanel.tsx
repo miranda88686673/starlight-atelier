@@ -1,15 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Ban,
+  Clock,
   Crown,
+  Gift,
   KeyRound,
+  Lock,
   Megaphone,
   Plus,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserPlus,
   Users,
@@ -17,6 +21,8 @@ import {
 import {
   FURNITURE_CATALOG,
   INITIAL_CLOTHING_CATALOG,
+  formatCountdown24h,
+  resolveLegendarySaleStatus,
 } from '../../data/catalog';
 import type {
   ClothingItem,
@@ -43,6 +49,8 @@ interface AdminMasterPanelProps {
   globalNotice: string;
   users: MockUser[];
   deletedItemIds: string[];
+  soldOutItemIds?: string[];
+  legendaryLaunchTimestamps?: Record<string, number>;
   bannedWords: string[];
   customClothingCatalog?: ClothingItem[];
   customFurnitureCatalog?: FurnitureDef[];
@@ -61,6 +69,12 @@ interface AdminMasterPanelProps {
     input: StaffBotEditorPayload,
   ) => { ok: true } | { ok: false; error: string };
   onDeleteCatalogItem: (itemId: string) => void;
+  onToggleSoldOutItem?: (itemId: string) => void;
+  onRelaunchLegendary24h?: (itemId: string) => void;
+  onAdminGrantItem?: (
+    targetAccountIdOrUsername: string,
+    itemId: string,
+  ) => Promise<{ ok: boolean; message: string }>;
   onRestoreAllItems: () => void;
   onResetAllDemoData: () => void;
   onAddBannedWord: (word: string) => void;
@@ -72,6 +86,8 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
   globalNotice,
   users,
   deletedItemIds,
+  soldOutItemIds = [],
+  legendaryLaunchTimestamps,
   bannedWords,
   customClothingCatalog = [],
   customFurnitureCatalog = [],
@@ -83,6 +99,9 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
   onAssignStaffRole,
   onAssignAccountStaffRole,
   onDeleteCatalogItem,
+  onToggleSoldOutItem,
+  onRelaunchLegendary24h,
+  onAdminGrantItem,
   onRestoreAllItems,
   onResetAllDemoData,
   onAddBannedWord,
@@ -98,10 +117,29 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
   const [humanCustomTitle, setHumanCustomTitle] = useState('');
 
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogFilter, setCatalogFilter] = useState<'todos' | 'legendary' | 'clothes' | 'furniture'>('todos');
   const [confirmReset, setConfirmReset] = useState(false);
+  const [grantTargetInput, setGrantTargetInput] = useState('');
+  const [grantItemId, setGrantItemId] = useState('legendary_coroa_2023');
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const accounts = useMemo(() => loadAccounts(), [staffAuditLogs, users]);
   const humanAccounts = useMemo(() => accounts.filter((a) => !a.isBot), [accounts]);
+
+  const grantableClothingItems = useMemo(() => {
+    const combined = [...customClothingCatalog, ...INITIAL_CLOTHING_CATALOG];
+    return [...combined].sort((a, b) => {
+      const aLeg = a.isLegendary || a.itemClass === 'legendary' ? 0 : 1;
+      const bLeg = b.isLegendary || b.itemClass === 'legendary' ? 0 : 1;
+      return aLeg - bLeg;
+    });
+  }, [customClothingCatalog]);
 
   const allCatalogEntries = useMemo(() => {
     const clothes = [...customClothingCatalog, ...INITIAL_CLOTHING_CATALOG].map((c) => ({
@@ -110,6 +148,11 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
       kind: 'Roupa',
       price: c.price,
       vip: Boolean(c.isVipOnly),
+      legendary: Boolean(c.isLegendary || c.itemClass === 'legendary'),
+      itemClass: c.itemClass,
+      launchedAt: c.launchedAt,
+      legendaryExpiresAt: c.legendaryExpiresAt,
+      customCreatedAt: c.customCreatedAt,
     }));
     const furns = [...customFurnitureCatalog, ...FURNITURE_CATALOG].map((f) => ({
       id: f.id,
@@ -117,12 +160,39 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
       kind: 'Móvel',
       price: f.price,
       vip: Boolean(f.isVipOnly),
+      legendary: false,
+      itemClass: f.isVipOnly ? ('vip' as const) : ('am' as const),
+      launchedAt: undefined,
+      legendaryExpiresAt: undefined,
+      customCreatedAt: undefined,
     }));
     const q = catalogSearch.trim().toLowerCase();
     return [...clothes, ...furns]
-      .filter((item) => !q || item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q))
-      .slice(0, 36);
-  }, [catalogSearch, customClothingCatalog, customFurnitureCatalog]);
+      .filter((item) => {
+        if (catalogFilter === 'legendary' && !item.legendary) return false;
+        if (catalogFilter === 'clothes' && item.kind !== 'Roupa') return false;
+        if (catalogFilter === 'furniture' && item.kind !== 'Móvel') return false;
+        if (q && !item.name.toLowerCase().includes(q) && !item.id.toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => Number(b.legendary) - Number(a.legendary))
+      .slice(0, 80);
+  }, [catalogSearch, catalogFilter, customClothingCatalog, customFurnitureCatalog]);
+
+  const handleGrantItemSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onAdminGrantItem || !grantTargetInput.trim() || !grantItemId) return;
+    setGrantBusy(true);
+    try {
+      const res = await onAdminGrantItem(grantTargetInput.trim(), grantItemId);
+      setFeedback(res.message);
+      if (res.ok) {
+        setGrantTargetInput('');
+      }
+    } finally {
+      setGrantBusy(false);
+    }
+  };
 
   const handleHireHuman = (e: React.FormEvent) => {
     e.preventDefault();
@@ -469,7 +539,7 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-display text-base font-bold text-[#1C1917] flex items-center gap-2">
               <Activity className="w-4 h-4 text-[#C8235D]" />
-              Catálogo Starplaza ({deletedItemIds.length} ocultos)
+              Catálogo Starplaza ({deletedItemIds.length} ocultos · {soldOutItemIds.length} vendidos)
             </h4>
             <div className="flex items-center gap-2">
               <button
@@ -503,16 +573,55 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
               )}
             </div>
           </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'todos', label: 'Todos' },
+                { id: 'legendary', label: 'Lendários (Coroas)' },
+                { id: 'clothes', label: 'Roupas' },
+                { id: 'furniture', label: 'Móveis' },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setCatalogFilter(f.id)}
+                className={`px-2.5 py-1 text-[11px] font-semibold rounded-md border cursor-pointer ${
+                  catalogFilter === f.id
+                    ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                    : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8]'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
           <input
             type="text"
             value={catalogSearch}
             onChange={(e) => setCatalogSearch(e.target.value)}
-            placeholder="Filtrar item por nome ou ID..."
+            placeholder="Filtrar item por nome ou ID (ex: Coroa 2023)..."
             className="w-full px-3 py-1.5 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
           />
-          <div className="max-h-52 overflow-y-auto divide-y divide-[#F5F2EC]">
+          <div className="max-h-56 overflow-y-auto divide-y divide-[#F5F2EC]">
             {allCatalogEntries.map((item) => {
               const hidden = deletedItemIds.includes(item.id);
+              const isManualSoldOut = soldOutItemIds.includes(item.id);
+              const saleStatus = resolveLegendarySaleStatus(
+                {
+                  id: item.id,
+                  itemClass: item.itemClass,
+                  isVipOnly: item.vip,
+                  isLegendary: item.legendary,
+                  launchedAt: item.launchedAt,
+                  legendaryExpiresAt: item.legendaryExpiresAt,
+                  customCreatedAt: item.customCreatedAt,
+                },
+                { soldOutItemIds, legendaryLaunchTimestamps },
+                nowMs,
+              );
               return (
                 <div
                   key={item.id}
@@ -520,28 +629,140 @@ export const AdminMasterPanel: React.FC<AdminMasterPanelProps> = ({
                 >
                   <div className="min-w-0">
                     <span className="font-medium text-[#1C1917]">{item.name}</span>{' '}
-                    <span className="text-[10px] text-[#78716C]">
-                      ({item.kind} · {item.price} SC)
+                    {item.legendary && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-purple-100 text-purple-900 rounded">
+                        <Sparkles className="w-2.5 h-2.5" />
+                        Lendário
+                      </span>
+                    )}{' '}
+                    {item.legendary && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono-num font-semibold rounded ${
+                          saleStatus.isSoldOut
+                            ? 'bg-amber-100 text-amber-900'
+                            : 'bg-emerald-50 text-emerald-800'
+                        }`}
+                      >
+                        <Clock className="w-2.5 h-2.5" />
+                        {saleStatus.reason === 'admin_sold_out'
+                          ? 'Vendido (Admin)'
+                          : saleStatus.reason === 'expired_24h'
+                            ? 'Vendido (24h esgotadas)'
+                            : `24h: ${formatCountdown24h(saleStatus.remainingMs)}`}
+                      </span>
+                    )}{' '}
+                    <span className="text-[10px] text-[#78716C] font-mono-num">
+                      ({item.kind} · {item.price.toLocaleString('pt-BR')} AM)
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteCatalogItem(item.id)}
-                    className={`px-2 py-0.5 text-[11px] font-semibold rounded border cursor-pointer ${
-                      hidden
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8]'
-                    }`}
-                  >
-                    <Trash2 className="w-3 h-3 inline mr-1" />
-                    {hidden ? 'Oculto' : 'Ocultar'}
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {item.legendary && onRelaunchLegendary24h && (
+                      <button
+                        type="button"
+                        onClick={() => onRelaunchLegendary24h(item.id)}
+                        title="Abrir ou renovar janela de 24 horas reais na Starplaza"
+                        className="px-2 py-0.5 text-[11px] font-semibold rounded border bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3 inline mr-1" />
+                        Lançar 24h
+                      </button>
+                    )}
+                    {onToggleSoldOutItem && (
+                      <button
+                        type="button"
+                        onClick={() => onToggleSoldOutItem(item.id)}
+                        title="Marcar ou desmarcar item como Vendido na loja"
+                        className={`px-2 py-0.5 text-[11px] font-semibold rounded border cursor-pointer ${
+                          isManualSoldOut
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8] hover:border-amber-400'
+                        }`}
+                      >
+                        <Lock className="w-3 h-3 inline mr-1" />
+                        {isManualSoldOut ? 'Vendido (Reabrir)' : 'Marcar Vendido'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteCatalogItem(item.id)}
+                      className={`px-2 py-0.5 text-[11px] font-semibold rounded border cursor-pointer ${
+                        hidden
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-[#FAF8F5] text-[#57534E] border-[#E6E0D8]'
+                      }`}
+                    >
+                      <Trash2 className="w-3 h-3 inline mr-1" />
+                      {hidden ? 'Oculto' : 'Ocultar'}
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
         </section>
       </div>
+
+      {/* 5. Entrega Direta de Relíquias Lendárias / Itens pelo Admin */}
+      {onAdminGrantItem && (
+        <section className="bg-white border border-[#E6E0D8] rounded-xl p-5 space-y-3">
+          <div>
+            <h4 className="font-display text-base font-bold text-[#1C1917] flex items-center gap-2">
+              <Gift className="w-4 h-4 text-[#C8235D]" />
+              Entregar Coroa Lendária ou Peça Exclusiva ao Jogador
+            </h4>
+            <p className="text-xs text-[#6B645D] mt-0.5">
+              Itens lendários não são vendidos diretamente na loja. Use este painel para entregar relíquias (Coroa 2023–2026) diretamente no guarda-roupa de qualquer jogador.
+            </p>
+          </div>
+          <form onSubmit={handleGrantItemSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+            <label className="block md:col-span-2">
+              <span className="text-xs font-semibold text-[#44403C]">
+                Jogador Destinatário (@usuário ou ID)
+              </span>
+              <input
+                type="text"
+                required
+                list="grant-player-targets"
+                value={grantTargetInput}
+                onChange={(e) => setGrantTargetInput(e.target.value)}
+                placeholder="Ex: clara_couture ou acc_..."
+                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
+              />
+              <datalist id="grant-player-targets">
+                {humanAccounts.map((a) => (
+                  <option key={a.id} value={a.username}>
+                    {a.displayName || a.username} ({a.id})
+                  </option>
+                ))}
+              </datalist>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-semibold text-[#44403C]">Peça / Coroa</span>
+              <select
+                value={grantItemId}
+                onChange={(e) => setGrantItemId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 text-xs bg-[#FAF8F5] border border-[#E6E0D8] rounded-lg"
+              >
+                {grantableClothingItems.map((ci) => (
+                  <option key={ci.id} value={ci.id}>
+                    {ci.isLegendary || ci.itemClass === 'legendary' ? '[Lendário] ' : ''}
+                    {ci.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="submit"
+              disabled={grantBusy || !grantTargetInput.trim()}
+              className="px-4 py-2 text-xs font-semibold text-white bg-[#C8235D] hover:bg-[#A61B4B] disabled:opacity-50 rounded-lg cursor-pointer"
+            >
+              {grantBusy ? 'Entregando...' : 'Entregar no Inventário'}
+            </button>
+          </form>
+        </section>
+      )}
     </div>
   );
 };

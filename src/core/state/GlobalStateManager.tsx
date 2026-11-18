@@ -39,6 +39,7 @@ import {
   notifyRemoteBanReviews,
   notifyRemoteDjSynced,
   notifyRemoteInit,
+  notifyRemoteMarketListings,
   notifyRemotePatch,
   notifyRemotePremiumOrders,
   notifyRemotePremiumPix,
@@ -52,6 +53,7 @@ import {
 import type { RoomTerminatedNotice } from './socketBridge';
 import type {
   BanReviewRequest,
+  MarketListing,
   PremiumOrder,
   PremiumPixConfig,
   RoomDjTrack,
@@ -82,6 +84,7 @@ interface GlobalStateContextValue {
   banReviews: BanReviewRequest[];
   premiumOrders: PremiumOrder[];
   premiumPixConfig: PremiumPixConfig;
+  marketListings: MarketListing[];
   roomHealthList: RoomHealthMetric[];
   lastTerminatedNotice: RoomTerminatedNotice | null;
   clearTerminatedNotice: () => void;
@@ -92,6 +95,7 @@ interface GlobalStateContextValue {
   refreshBanReviews: () => Promise<void>;
   refreshPremiumOrders: () => Promise<void>;
   refreshPremiumPixConfig: () => Promise<void>;
+  refreshMarketListings: () => Promise<void>;
   refreshRoomHealth: () => Promise<void>;
   bindHeartbeatUser: (
     account: UserAccount | null,
@@ -244,6 +248,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
   const [premiumPixConfig, setPremiumPixConfig] = useState<PremiumPixConfig>({
     pixKey: '7198826894',
   });
+  const [marketListings, setMarketListings] = useState<MarketListing[]>([]);
   const [roomHealthList, setRoomHealthList] = useState<RoomHealthMetric[]>([]);
   const [lastTerminatedNotice, setLastTerminatedNotice] =
     useState<RoomTerminatedNotice | null>(null);
@@ -336,6 +341,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
         setPremiumOrders(snapshot.premium_orders);
         notifyRemotePremiumOrders(snapshot.premium_orders);
       }
+      if (Array.isArray(snapshot.market_listings)) {
+        setMarketListings(snapshot.market_listings);
+        notifyRemoteMarketListings(snapshot.market_listings);
+      }
       if (snapshot.premium_pix_config?.pixKey) {
         setPremiumPixConfig(snapshot.premium_pix_config);
         notifyRemotePremiumPix(snapshot.premium_pix_config);
@@ -354,6 +363,12 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (serverHasData) {
         applySnapshotToLocalCache(snapshot);
+        if (!snapshot.roomsSnapshot) {
+          const localSeed = readLocalSeedSnapshot();
+          if (localSeed.roomsSnapshot) {
+            socket.emit('state:sync_patch', { roomsSnapshot: localSeed.roomsSnapshot });
+          }
+        }
         notifyRemoteInit(snapshot);
       } else {
         // Primeiro arranque do banco no servidor: envia seed inicial para persistência centralizada
@@ -456,6 +471,15 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     );
 
     socket.on(
+      'market:updated',
+      (payload: { listings?: MarketListing[] }) => {
+        if (!Array.isArray(payload?.listings)) return;
+        setMarketListings(payload.listings);
+        notifyRemoteMarketListings(payload.listings);
+      },
+    );
+
+    socket.on(
       'room:health_updated',
       (payload: { metrics?: RoomHealthMetric[] }) => {
         if (!Array.isArray(payload?.metrics)) return;
@@ -501,6 +525,35 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     const handleBeforeUnload = () => {
       const sock = socketRef.current;
       const user = activeUserRef.current;
+      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        try {
+          const flushPatch = readLocalSeedSnapshot();
+          if (user) {
+            const rawPlayer = window.localStorage.getItem(`${PLAYER_PREFIX}${user.id}`);
+            if (rawPlayer) {
+              flushPatch.playerPatch = {
+                accountId: user.id,
+                progress: JSON.parse(rawPlayer),
+              };
+            }
+          }
+          if (
+            flushPatch.accounts ||
+            flushPatch.worldState ||
+            flushPatch.roomsSnapshot ||
+            flushPatch.playerPatch
+          ) {
+            navigator.sendBeacon(
+              '/api/state/sync',
+              new Blob([JSON.stringify(flushPatch)], {
+                type: 'application/json',
+              }),
+            );
+          }
+        } catch {
+          // Silencioso
+        }
+      }
       if (user) {
         try {
           if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
@@ -673,6 +726,19 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshMarketListings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/market/listings');
+      if (!res.ok) return;
+      const data = (await res.json()) as { ok?: boolean; listings?: MarketListing[] };
+      if (data.ok && Array.isArray(data.listings)) {
+        setMarketListings(data.listings);
+      }
+    } catch {
+      // Silencioso
+    }
+  }, []);
+
   const refreshRoomHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/rooms/health');
@@ -697,6 +763,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       banReviews,
       premiumOrders,
       premiumPixConfig,
+      marketListings,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -707,6 +774,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshBanReviews,
       refreshPremiumOrders,
       refreshPremiumPixConfig,
+      refreshMarketListings,
       refreshRoomHealth,
       bindHeartbeatUser,
     }),
@@ -720,6 +788,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       banReviews,
       premiumOrders,
       premiumPixConfig,
+      marketListings,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -730,6 +799,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshBanReviews,
       refreshPremiumOrders,
       refreshPremiumPixConfig,
+      refreshMarketListings,
       refreshRoomHealth,
       bindHeartbeatUser,
     ],

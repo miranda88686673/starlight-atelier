@@ -167,6 +167,91 @@
   border-color: #D97706;
 }
 
+@keyframes profileBannerPan {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1.08);
+  }
+  50% {
+    transform: translate3d(4%, 2%, 0) scale(1.13);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1.08);
+  }
+}
+
+@keyframes profileBannerOrbA {
+  0% {
+    transform: translate3d(-8%, -6%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(12%, 8%, 0) scale(1.14);
+  }
+  100% {
+    transform: translate3d(-8%, -6%, 0) scale(1);
+  }
+}
+
+@keyframes profileBannerOrbB {
+  0% {
+    transform: translate3d(10%, 6%, 0) scale(1.08);
+  }
+  50% {
+    transform: translate3d(-12%, -8%, 0) scale(0.96);
+  }
+  100% {
+    transform: translate3d(10%, 6%, 0) scale(1.08);
+  }
+}
+
+@keyframes profileBannerSheen {
+  0% {
+    transform: translate3d(-110%, 0, 0) skewX(-18deg);
+  }
+  100% {
+    transform: translate3d(220%, 0, 0) skewX(-18deg);
+  }
+}
+
+.profile-banner-pan-slow {
+  animation: profileBannerPan 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-pan-medium {
+  animation: profileBannerPan 10s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-orb-a-slow {
+  animation: profileBannerOrbA 16s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-orb-a-medium {
+  animation: profileBannerOrbA 9s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-orb-b-slow {
+  animation: profileBannerOrbB 20s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-orb-b-medium {
+  animation: profileBannerOrbB 11s ease-in-out infinite;
+  will-change: transform;
+}
+
+.profile-banner-sheen-slow {
+  animation: profileBannerSheen 12s linear infinite;
+  will-change: transform;
+}
+
+.profile-banner-sheen-medium {
+  animation: profileBannerSheen 6.5s linear infinite;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .avatar-walk-bob,
   .avatar-idle-breathe,
@@ -174,7 +259,15 @@
   .avatar-leg-left-walk,
   .avatar-leg-right-walk,
   .target-ring-pulse,
-  .diamond-shimmer::after {
+  .diamond-shimmer::after,
+  .profile-banner-pan-slow,
+  .profile-banner-pan-medium,
+  .profile-banner-orb-a-slow,
+  .profile-banner-orb-a-medium,
+  .profile-banner-orb-b-slow,
+  .profile-banner-orb-b-medium,
+  .profile-banner-sheen-slow,
+  .profile-banner-sheen-medium {
     animation: none !important;
   }
 }

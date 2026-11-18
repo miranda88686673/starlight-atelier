@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import { SKIN_TONES } from '../../data/catalog';
 import {
+  AvatarFaceCustomization,
   AvatarGender,
   ClothingItem,
   DesignPattern,
@@ -78,6 +79,7 @@ interface MeDollSvgProps {
   equipped: EquippedOutfit;
   skinTone: SkinToneId;
   avatarGender?: AvatarGender;
+  faceCustomization?: AvatarFaceCustomization;
   /** Lista de IDs removidos pelo moderador (não devem ser renderizados) */
   deletedItemIds?: string[];
   /** Ativa animação fluida de passos ao caminhar pelo chão */
@@ -153,6 +155,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
   equipped,
   skinTone,
   avatarGender = 'feminino',
+  faceCustomization,
   deletedItemIds = [],
   isWalking = false,
   enableIdle = true,
@@ -166,18 +169,29 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
 
   const pick = (id?: string) => (id && !deletedItemIds.includes(id) ? id : undefined);
 
+  const rawAccIds = [
+    ...(equipped.acessorios ? [equipped.acessorios] : []),
+    ...(equipped.acessoriosSlots
+      ? Object.values(equipped.acessoriosSlots).filter((v): v is string => Boolean(v))
+      : []),
+  ];
+  const equippedAccIds = Array.from(new Set(rawAccIds)).filter(
+    (id) => !deletedItemIds.includes(id),
+  );
+
   const active = {
     cabelo: pick(equipped.cabelo),
     sapatos: pick(equipped.sapatos),
     calcas: pick(equipped.calcas),
     blusas: pick(equipped.blusas),
+    casacos: pick(equipped.casacos),
     vestidos: pick(equipped.vestidos),
-    acessorios: pick(equipped.acessorios),
+    acessorios: equippedAccIds[0],
   };
 
-  const hasDynamicItem = Object.values(active).some(
-    (id) => id && !STATIC_RENDERED_IDS.has(id)
-  );
+  const hasDynamicItem =
+    Object.values(active).some((id) => id && !STATIC_RENDERED_IDS.has(id)) ||
+    equippedAccIds.some((id) => !STATIC_RENDERED_IDS.has(id));
   const fullCatalog: ClothingItem[] = hasDynamicItem
     ? [...extraItems, ...getFullClothingCatalog()]
     : extraItems;
@@ -190,8 +204,12 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
   const dynShoes = findDynamic(active.sapatos);
   const dynBottom = findDynamic(active.calcas);
   const dynTop = findDynamic(active.blusas);
+  const dynCoat = findDynamic(active.casacos);
   const dynDress = findDynamic(active.vestidos);
-  const dynAcc = findDynamic(active.acessorios);
+  const dynAccList = equippedAccIds
+    .map((id) => findDynamic(id))
+    .filter((item): item is ClothingItem => Boolean(item));
+  const hasStaticAcc = (id: string) => equippedAccIds.includes(id);
 
   const renderCustomPngLayer = (item?: ClothingItem) => {
     if (!item?.customLayerPngUrl) return null;
@@ -207,9 +225,11 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             ? { x: 80, y: 215, w: 120, h: 255, cx: 140, cy: 340 }
             : item.category === 'vestidos'
               ? { x: 65, y: 135, w: 150, h: 280, cx: 140, cy: 270 }
-              : item.category === 'acessorios'
-                ? { x: 85, y: 45, w: 110, h: 140, cx: 140, cy: 115 }
-                : { x: 70, y: 132, w: 140, h: 130, cx: 140, cy: 195 };
+              : item.category === 'casacos'
+                ? { x: 66, y: 130, w: 148, h: 170, cx: 140, cy: 210 }
+                : item.category === 'acessorios'
+                  ? { x: 85, y: 45, w: 110, h: 140, cx: 140, cy: 115 }
+                  : { x: 70, y: 132, w: 140, h: 130, cx: 140, cy: 195 };
 
     return (
       <g
@@ -263,7 +283,6 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
   const inkColor = '#2B231F';
   const showBaseTopMesh = !active.blusas && !active.vestidos;
   const showBaseBottomMesh = !active.calcas && !active.vestidos;
-  const showFullMalhaBase = showBaseTopMesh && showBaseBottomMesh;
 
   return (
     <svg
@@ -282,13 +301,6 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
           <stop offset="28%" stopColor={tone.base} stopOpacity="0" />
           <stop offset="72%" stopColor={tone.base} stopOpacity="0" />
           <stop offset="100%" stopColor={tone.shadow} stopOpacity="0.34" />
-        </linearGradient>
-        <linearGradient id={`${rawUid}_malhaBase`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#7A8070" />
-          <stop offset="28%" stopColor="#949A8A" />
-          <stop offset="55%" stopColor="#A2A898" />
-          <stop offset="82%" stopColor="#8E9484" />
-          <stop offset="100%" stopColor="#6E7465" />
         </linearGradient>
         <linearGradient id={`${rawUid}_silkIvory`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#FFFFFF" />
@@ -320,8 +332,8 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
           <stop offset="100%" stopColor="#121014" />
         </linearGradient>
         <radialGradient id={`${rawUid}_iris`} cx="45%" cy="38%" r="55%">
-          <stop offset="0%" stopColor={isMasc ? '#6B7E85' : '#7C6253'} />
-          <stop offset="72%" stopColor={isMasc ? '#324148' : '#3E2B22'} />
+          <stop offset="0%" stopColor={faceCustomization?.eyeColor || (isMasc ? '#6B7E85' : '#7C6253')} />
+          <stop offset="72%" stopColor={faceCustomization?.eyeColor || (isMasc ? '#324148' : '#3E2B22')} stopOpacity={faceCustomization?.eyeColor ? 0.78 : 1} />
           <stop offset="100%" stopColor="#1B1715" />
         </radialGradient>
         <linearGradient id={`${rawUid}_clothShade`} x1="0" y1="0" x2="1" y2="1">
@@ -441,11 +453,11 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Esquerdo Masculino (deltoide, bíceps e antebraço definidos) */}
             <path
               d="M84,148 C72,160 69,183 71,203 C70,222 71,240 73,254 L87,254 C88,236 89,218 90,201 C93,184 96,170 100,158 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
-            <path d="M73,196 Q81,201 89,198" stroke={showFullMalhaBase ? '#53584B' : tone.shadow} strokeWidth="0.9" fill="none" opacity="0.7" />
+            <path d="M73,196 Q81,201 89,198" stroke={tone.shadow} strokeWidth="0.9" fill="none" opacity="0.7" />
             <path d="M73,254 L87,254" stroke={inkColor} strokeWidth="1.1" />
             {/* Mão Esquerda Masculina (5 dedos articulados) */}
             <path
@@ -458,11 +470,11 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Direito Masculino */}
             <path
               d="M196,148 C208,160 211,183 209,203 C210,222 209,240 207,254 L193,254 C192,236 191,218 190,201 C187,184 184,170 180,158 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
-            <path d="M207,196 Q199,201 191,198" stroke={showFullMalhaBase ? '#53584B' : tone.shadow} strokeWidth="0.9" fill="none" opacity="0.7" />
+            <path d="M207,196 Q199,201 191,198" stroke={tone.shadow} strokeWidth="0.9" fill="none" opacity="0.7" />
             <path d="M193,254 L207,254" stroke={inkColor} strokeWidth="1.1" />
             {/* Mão Direita Masculina (5 dedos articulados) */}
             <path
@@ -477,7 +489,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Esquerdo Neutro */}
             <path
               d="M95,149 C84,166 78,195 75,224 C73,237 72,247 71,254 L84,255 C86,242 89,224 91,206 C95,186 100,170 105,159 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
@@ -492,7 +504,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Direito Neutro */}
             <path
               d="M185,149 C196,166 202,195 205,224 C207,237 208,247 209,254 L196,255 C194,242 191,224 189,206 C185,186 180,170 175,159 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
@@ -509,11 +521,11 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Esquerdo Feminino (pose editorial A-frame graciosamente aberta) */}
             <path
               d="M102,150 C90,168 83,196 76,225 C73,238 71,247 70,253 L82,256 C85,243 88,226 92,208 C97,188 102,172 108,160 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
-            <path d="M81,203 Q87,207 92,205" stroke={showFullMalhaBase ? '#53584B' : tone.shadow} strokeWidth="0.85" fill="none" opacity="0.65" />
+            <path d="M81,203 Q87,207 92,205" stroke={tone.shadow} strokeWidth="0.85" fill="none" opacity="0.65" />
             {/* Mão Esquerda Feminina aberta (5 dedos alongados) */}
             <path
               d="M70,253 L64,267 L58,278 L61,280 L67,270 L64,284 L67,285 L71,272 L71,286 L74,286 L75,272 L77,283 L80,282 L79,269 L84,273 L86,271 L82,256 Z"
@@ -525,11 +537,11 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             {/* Braço Direito Feminino (simétrico em pose A-frame aberta) */}
             <path
               d="M178,150 C190,168 197,196 204,225 C207,238 209,247 210,253 L198,256 C195,243 192,226 188,208 C183,188 178,172 172,160 Z"
-              fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+              fill={tone.base}
               stroke={inkColor}
               strokeWidth="1.05"
             />
-            <path d="M199,203 Q193,207 188,205" stroke={showFullMalhaBase ? '#53584B' : tone.shadow} strokeWidth="0.85" fill="none" opacity="0.65" />
+            <path d="M199,203 Q193,207 188,205" stroke={tone.shadow} strokeWidth="0.85" fill="none" opacity="0.65" />
             {/* Mão Direita Feminina aberta (5 dedos alongados) */}
             <path
               d="M198,256 L194,271 L196,273 L201,269 L200,282 L203,283 L205,272 L206,286 L209,286 L209,272 L213,285 L216,284 L213,270 L219,280 L222,278 L216,267 L210,253 Z"
@@ -549,34 +561,25 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
                 ? 'M107,264 C104,306 107,344 113,375 C112,402 112,432 117,461 L132,461 C135,432 136,404 136,376 C137,342 138,304 139,278 L131,264 Z'
                 : 'M98,266 C97,306 104,344 113,376 C113,402 115,432 119,461 L130,461 C133,432 135,402 134,375 C135,340 137,304 138,276 L130,266 Z'
             }
-            fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+            fill={tone.base}
             stroke={inkColor}
             strokeWidth="1.05"
           />
           {/* Contornos anatômicos do joelho e coxa */}
           <path
             d={isMasc ? 'M118,370 Q125,365 131,370 M119,380 Q125,384 130,380' : 'M118,372 Q124,368 129,372 M120,380 Q124,383 128,380'}
-            stroke={showFullMalhaBase ? '#505649' : tone.shadow}
+            stroke={tone.shadow}
             strokeWidth="1"
             fill="none"
             opacity="0.72"
           />
           <path
             d={isMasc ? 'M114,312 Q117,340 120,358' : 'M108,314 Q112,338 116,356'}
-            stroke={showFullMalhaBase ? '#505649' : tone.shadow}
+            stroke={tone.shadow}
             strokeWidth="0.9"
             fill="none"
             opacity="0.55"
           />
-          {/* Borda da malha base acima do tornozelo */}
-          {showFullMalhaBase && (
-            <path
-              d="M117,458 Q125,461 132,458"
-              stroke={inkColor}
-              strokeWidth="1"
-              fill="none"
-            />
-          )}
           {/* Pé esquerdo descalço com dedos definidos */}
           <path
             d={
@@ -609,32 +612,24 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
                 ? 'M149,264 L141,278 C142,304 143,342 144,376 C144,404 145,432 148,461 L163,461 C168,432 168,402 167,375 C173,344 176,306 173,264 Z'
                 : 'M150,266 L142,276 C143,304 145,340 146,375 C145,402 147,432 150,461 L161,461 C165,432 167,402 167,376 C176,344 183,306 182,266 Z'
             }
-            fill={showFullMalhaBase ? `url(#${rawUid}_malhaBase)` : tone.base}
+            fill={tone.base}
             stroke={inkColor}
             strokeWidth="1.05"
           />
           <path
             d={isMasc ? 'M149,370 Q155,365 162,370 M150,380 Q155,384 161,380' : 'M151,372 Q156,368 162,372 M152,380 Q156,383 160,380'}
-            stroke={showFullMalhaBase ? '#505649' : tone.shadow}
+            stroke={tone.shadow}
             strokeWidth="1"
             fill="none"
             opacity="0.72"
           />
           <path
             d={isMasc ? 'M166,312 Q163,340 160,358' : 'M172,314 Q168,338 164,356'}
-            stroke={showFullMalhaBase ? '#505649' : tone.shadow}
+            stroke={tone.shadow}
             strokeWidth="0.9"
             fill="none"
             opacity="0.55"
           />
-          {showFullMalhaBase && (
-            <path
-              d="M148,458 Q155,461 163,458"
-              stroke={inkColor}
-              strokeWidth="1"
-              fill="none"
-            />
-          )}
           {/* Pé direito descalço com dedos definidos */}
           <path
             d={
@@ -691,97 +686,73 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
           opacity="0.78"
         />
 
-        {/* Camada "MALHA BASE PARA ROUPAS" em verde-oliva acinzentado fiel ao sheet de referência */}
-        {showFullMalhaBase ? (
+        {/* Roupa íntima padrão: Cueca padrão (Masculino) / Biquíni de duas peças (Feminino e Neutro) */}
+        {showBaseTopMesh && (
           isMasc ? (
-            <g>
-              {/* Camisa de manga longa ajustada */}
-              <path
-                d="M124,136 Q140,145 156,136 C171,140 190,142 198,149 C193,170 187,190 181,207 C178,216 176,225 176,233 L104,233 C104,225 102,216 99,207 C93,190 87,170 82,149 C90,142 109,140 124,136 Z"
-                fill={`url(#${rawUid}_malhaBase)`}
-                stroke={inkColor}
-                strokeWidth="1.05"
-              />
-              {/* Gola redonda e costuras raglan */}
-              <path d="M123,137 Q140,147 157,137" fill="none" stroke={inkColor} strokeWidth="1.1" />
-              <path d="M117,140 Q105,152 100,164 M163,140 Q175,152 180,164" fill="none" stroke="#53584B" strokeWidth="0.9" opacity="0.65" />
-              {/* Definição peitoral e abdominal sobre a malha */}
-              <path d="M104,173 Q123,184 139,175 M176,173 Q157,184 141,175" fill="none" stroke="#4D5245" strokeWidth="1.15" opacity="0.72" />
-              <path d="M140,178 L140,224 M124,193 Q140,197 156,193 M126,209 Q140,213 154,209" fill="none" stroke="#53584B" strokeWidth="0.9" opacity="0.48" />
-              {/* Calça legging / cós masculino */}
-              <path
-                d="M104,232 Q140,236 176,232 L173,274 C162,283 118,283 107,274 Z"
-                fill={`url(#${rawUid}_malhaBase)`}
-                stroke={inkColor}
-                strokeWidth="1.05"
-              />
-              <path d="M105,238 Q140,242 175,238" fill="none" stroke="#4D5245" strokeWidth="1" />
-              <path d="M133,241 Q136,262 140,276 Q144,262 147,241" fill="none" stroke="#4D5245" strokeWidth="0.9" opacity="0.7" />
+            <g fill="none" stroke={tone.shadow} opacity="0.55">
+              <path d="M107,172 Q123,182 138,175" strokeWidth="1.2" />
+              <path d="M142,175 Q157,182 173,172" strokeWidth="1.2" />
+              <line x1="140" y1="178" x2="140" y2="218" strokeWidth="1" opacity="0.65" />
             </g>
           ) : (
             <g>
-              {/* Collant / Malha base feminina e neutra de corpo inteiro */}
+              {/* Alças do biquíni */}
+              <path d="M123,167 L128,139 M157,167 L152,139" stroke="#232732" strokeWidth="2.1" fill="none" />
+              {/* Faixa dorsal lateral */}
+              <path d="M111,175 L169,175" stroke="#232732" strokeWidth="2.4" fill="none" />
+              {/* Bojos do biquíni */}
               <path
-                d={
-                  isNeutral
-                    ? 'M128,137 Q140,145 152,137 C165,141 179,144 186,151 C182,168 178,186 174,200 C171,212 169,222 170,232 C172,245 177,257 176,273 C163,282 117,282 104,273 C103,257 108,245 110,232 C111,222 109,212 106,200 C102,186 97,168 94,151 C101,144 115,141 128,137 Z'
-                    : 'M130,138 Q140,146 150,138 C161,142 173,145 178,152 C175,167 172,183 169,196 C167,208 164,219 165,229 C168,242 182,254 182,272 C167,282 113,282 98,272 C98,254 112,242 115,229 C116,219 113,208 111,196 C108,183 104,167 102,152 C107,145 119,142 130,138 Z'
-                }
-                fill={`url(#${rawUid}_malhaBase)`}
+                d="M114,175 C118,163 134,163 139,175 C135,183 120,184 114,175 Z"
+                fill="#232732"
+                stroke={inkColor}
+                strokeWidth="0.95"
+              />
+              <path
+                d="M166,175 C162,163 146,163 141,175 C145,183 160,184 166,175 Z"
+                fill="#232732"
+                stroke={inkColor}
+                strokeWidth="0.95"
+              />
+              <line x1="138" y1="174" x2="142" y2="174" stroke="#3B4252" strokeWidth="1.8" />
+            </g>
+          )
+        )}
+
+        {showBaseBottomMesh && (
+          isMasc ? (
+            <g>
+              {/* Cueca padrão masculina com elástico discreto */}
+              <path
+                d="M105,236 Q140,240 175,236 L173,274 C162,283 147,281 140,275 C133,281 118,283 107,274 Z"
+                fill="#232732"
                 stroke={inkColor}
                 strokeWidth="1.05"
               />
-              {/* Gola redonda e costuras anatômicas */}
-              <path d="M128,138 Q140,148 152,138" fill="none" stroke={inkColor} strokeWidth="1.05" />
-              <path d="M117,175 Q129,185 139,177 M163,175 Q151,185 141,177" fill="none" stroke="#4D5245" strokeWidth="1.15" opacity="0.75" />
-              {/* Costura em V do collant sobre os quadris */}
               <path
-                d={isNeutral ? 'M107,246 L140,278 L173,246' : 'M102,244 Q124,264 140,278 Q156,264 178,244'}
+                d="M105,236 Q140,240 175,236 L174,244 Q140,248 106,244 Z"
+                fill="#E5E7EB"
+                stroke={inkColor}
+                strokeWidth="0.85"
+              />
+              <path d="M134,247 Q136,262 140,274 Q144,262 146,247" fill="none" stroke="#3B4252" strokeWidth="0.95" />
+            </g>
+          ) : (
+            <g>
+              {/* Calcinha de biquíni feminina / neutra */}
+              <path
+                d={`M${hipL + 4},248 Q140,259 ${hipR - 4},248 L${hipR - 2},257 C163,267 148,278 140,280 C132,278 117,267 ${hipL + 2},257 Z`}
+                fill="#232732"
+                stroke={inkColor}
+                strokeWidth="1"
+              />
+              <path
+                d={`M${hipL + 3},250 Q140,261 ${hipR - 3},250`}
                 fill="none"
-                stroke="#4D5245"
-                strokeWidth="0.95"
-                opacity="0.72"
+                stroke="#3B4252"
+                strokeWidth="1.3"
               />
             </g>
           )
-        ) : (
-          /* Quando apenas parte do look está equipada, preserva pele nas zonas expostas + base neutra nas zonas sem peça */
-          <>
-            {showBaseTopMesh && (
-              <path
-                d={
-                  isMasc
-                    ? 'M122,140 Q140,152 158,140 L172,144 L167,226 L113,226 L108,144 Z'
-                    : 'M126,143 Q140,155 154,143 L164,147 L160,218 L120,218 L116,147 Z'
-                }
-                fill={`url(#${rawUid}_malhaBase)`}
-                stroke={inkColor}
-                strokeWidth="0.95"
-              />
-            )}
-            {showBaseBottomMesh && (
-              <path
-                d={`M${hipL + 2},246 C122,253 158,253 ${hipR - 2},246 L${hipR - 4},274 C156,282 124,282 ${hipL + 4},274 Z`}
-                fill={`url(#${rawUid}_malhaBase)`}
-                stroke={inkColor}
-                strokeWidth="0.95"
-              />
-            )}
-            {!showBaseTopMesh && !showBaseBottomMesh && (
-              isMasc ? (
-                <g fill="none" stroke={tone.shadow} opacity="0.52">
-                  <path d="M107,172 Q123,182 138,175" strokeWidth="1.2" />
-                  <path d="M142,175 Q157,182 173,172" strokeWidth="1.2" />
-                  <line x1="140" y1="178" x2="140" y2="218" strokeWidth="1" opacity="0.65" />
-                </g>
-              ) : (
-                <g fill="none" stroke={tone.shadow} opacity="0.48">
-                  <path d="M119,174 Q130,182 138,176" strokeWidth="1" />
-                  <path d="M142,176 Q150,182 161,174" strokeWidth="1" />
-                </g>
-              )
-            )}
-          </>
         )}
 
         {/* Orelhas esculpidas */}
@@ -819,79 +790,223 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
           <path d="M117,97 L123,111 M163,97 L157,111" stroke={tone.shadow} strokeWidth="0.9" opacity="0.55" />
         )}
 
-        {/* Sobrancelhas definidas */}
-        <path
-          d={isMasc ? 'M117,74.5 Q126,70.5 136,74.5' : 'M119,75.5 Q127,71 135,75'}
-          fill="none"
-          stroke="#2A1D17"
-          strokeWidth={isMasc ? 2.7 : 1.7}
-          strokeLinecap="round"
-        />
-        <path
-          d={isMasc ? 'M144,74.5 Q154,70.5 163,74.5' : 'M145,75 Q153,71 161,75.5'}
-          fill="none"
-          stroke="#2A1D17"
-          strokeWidth={isMasc ? 2.7 : 1.7}
-          strokeLinecap="round"
-        />
+        {/* Sobrancelhas, Olhos, Nariz e Boca definidos com estilos & customização 2D/3D sincronizada */}
+        {(() => {
+          const browStyle = faceCustomization?.eyebrowStyle ?? 'arqueada';
+          const browColor = faceCustomization?.eyebrowColor || '#2A1D17';
+          const browDx = (faceCustomization?.eyebrowsPosX ?? 0) * 0.45;
+          const browDy = (faceCustomization?.eyebrowsPosY ?? 0) * 0.45;
+          const browSc = Math.max(0.6, Math.min(1.5, faceCustomization?.eyebrowsScale ?? 1.0));
 
-        {/* Olhos com pálpebra marcada, íris sombreada e piscar procedural */}
-        <g>
-          <g className={enableIdle ? 'avatar-eye-blink' : undefined}>
-            <path
-              d={isMasc ? 'M120,83 Q127,79 134,83.5 Q127,87.5 120,83 Z' : 'M120,83 Q127,78.2 134,83.5 Q127,88 120,83 Z'}
-              fill="#FFFFFF"
-              stroke={inkColor}
-              strokeWidth="0.7"
-            />
-            <path d="M121,79.5 Q127,76.8 133,79.8" fill="none" stroke={tone.shadow} strokeWidth="0.9" opacity="0.7" />
-            <circle cx="127.3" cy="83.2" r="3.2" fill={`url(#${rawUid}_iris)`} />
-            <circle cx="127.3" cy="83.2" r="1.5" fill="#141210" />
-            <circle cx="128.7" cy="81.6" r="1.1" fill="#FFFFFF" />
-            <path d="M119.5,82.8 Q127,77.6 134.5,83.4" fill="none" stroke="#181412" strokeWidth={isMasc ? 1.7 : 2.1} />
-            {!isMasc && (
-              <path d="M120,82.2 L117.8,79.8 M122.2,80.6 L120.4,78.4" stroke="#181412" strokeWidth="0.9" />
-            )}
-          </g>
+          const eyeStyle = faceCustomization?.eyeStyle ?? 'amendoado';
+          const eyeDx = (faceCustomization?.eyesPosX ?? 0) * 0.45;
+          const eyeDy = (faceCustomization?.eyesPosY ?? 0) * 0.45;
+          const eyeSc = Math.max(0.6, Math.min(1.5, faceCustomization?.eyesScale ?? 1.0));
 
-          <g className={enableIdle ? 'avatar-eye-blink' : undefined}>
-            <path
-              d={isMasc ? 'M146,83.5 Q153,79 160,83 Q153,87.5 146,83.5 Z' : 'M146,83.5 Q153,78.2 160,83 Q153,88 146,83.5 Z'}
-              fill="#FFFFFF"
-              stroke={inkColor}
-              strokeWidth="0.7"
-            />
-            <path d="M147,79.8 Q153,76.8 159,79.5" fill="none" stroke={tone.shadow} strokeWidth="0.9" opacity="0.7" />
-            <circle cx="152.7" cy="83.2" r="3.2" fill={`url(#${rawUid}_iris)`} />
-            <circle cx="152.7" cy="83.2" r="1.5" fill="#141210" />
-            <circle cx="154.1" cy="81.6" r="1.1" fill="#FFFFFF" />
-            <path d="M145.5,83.4 Q153,77.6 160.5,82.8" fill="none" stroke="#181412" strokeWidth={isMasc ? 1.7 : 2.1} />
-            {!isMasc && (
-              <path d="M160,82.2 L162.2,79.8 M157.8,80.6 L159.6,78.4" stroke="#181412" strokeWidth="0.9" />
-            )}
-          </g>
-        </g>
+          const noseStyle = faceCustomization?.noseStyle ?? 'fino';
+          const noseDx = (faceCustomization?.nosePosX ?? 0) * 0.4;
+          const noseDy = (faceCustomization?.nosePosY ?? 0) * 0.45;
+          const noseSc = Math.max(0.6, Math.min(1.5, faceCustomization?.noseScale ?? 1.0));
 
-        {/* Nariz esculpido */}
-        <line x1="139.5" y1="83" x2="139.5" y2="92" stroke="#FFFFFF" strokeWidth="0.95" opacity="0.3" />
-        <path d="M139.2,85 Q141.5,93 137.8,96" fill="none" stroke={inkColor} strokeWidth="1.05" opacity="0.72" />
-        <path d="M137.5,96.2 Q140,97.4 142.8,96" fill="none" stroke={tone.shadow} strokeWidth="0.95" />
+          const mouthStyle = faceCustomization?.mouthStyle ?? 'cupido';
+          const mouthDx = (faceCustomization?.mouthPosX ?? 0) * 0.4;
+          const mouthDy = (faceCustomization?.mouthPosY ?? 0) * 0.45;
+          const mouthSc = Math.max(0.6, Math.min(1.5, faceCustomization?.mouthScale ?? 1.0));
+          const lipColor = faceCustomization?.mouthColor || (isMasc ? tone.shadow : isNeutral ? '#BC707B' : '#C65B6F');
 
-        {/* Lábios detalhados */}
-        <path
-          d={
-            isMasc
-              ? 'M132.5,107.5 Q140,105.5 147.5,107.5 Q144,111.5 140,111.5 Q136,111.5 132.5,107.5 Z'
-              : 'M132,107 Q136,104.2 140,106.2 Q144,104.2 148,107 Q144,112.4 140,112.4 Q136,112.4 132,107 Z'
-          }
-          fill={isMasc ? tone.shadow : isNeutral ? '#BC707B' : '#C65B6F'}
-          stroke={inkColor}
-          strokeWidth="0.65"
-        />
-        <path d="M133,107.5 Q140,109 147,107.5" fill="none" stroke={inkColor} strokeWidth="0.75" opacity="0.85" />
-        {!isMasc && (
-          <ellipse cx="140" cy="110.1" rx="2.8" ry="0.85" fill="#FFFFFF" opacity="0.48" />
-        )}
+          const leftBrowPath =
+            browStyle === 'reta'
+              ? 'M117,74 L136,73.2'
+              : browStyle === 'fina'
+                ? 'M118.5,75 Q127,72 135.5,74.8'
+                : browStyle === 'grossa'
+                  ? 'M116.5,75.2 Q126,69.5 136.5,74.2'
+                  : isMasc
+                    ? 'M117,74.5 Q126,70.5 136,74.5'
+                    : 'M119,75.5 Q127,70.4 135.5,74.8';
+          const rightBrowPath =
+            browStyle === 'reta'
+              ? 'M144,73.2 L163,74'
+              : browStyle === 'fina'
+                ? 'M144.5,74.8 Q153,72 161.5,75'
+                : browStyle === 'grossa'
+                  ? 'M143.5,74.2 Q154,69.5 163.5,75.2'
+                  : isMasc
+                    ? 'M144,74.5 Q154,70.5 163,74.5'
+                    : 'M144.5,74.8 Q153,70.4 161,75.5';
+          const browStrokeW =
+            browStyle === 'fina'
+              ? isMasc
+                ? 1.8
+                : 1.25
+              : browStyle === 'grossa'
+                ? isMasc
+                  ? 3.4
+                  : 2.55
+                : isMasc
+                  ? 2.6
+                  : 1.75;
+
+          const leftEyeSclera =
+            eyeStyle === 'grande'
+              ? 'M119.5,83 Q127,76.4 134.5,83.4 Q127,89.4 119.5,83 Z'
+              : eyeStyle === 'marcado'
+                ? 'M119,83.2 Q127,78.4 135,83.2 Q127,87.4 119,83.2 Z'
+                : eyeStyle === 'suave'
+                  ? 'M120.2,83.4 Q127,79.6 133.8,83.5 Q127,87.2 120.2,83.4 Z'
+                  : isMasc
+                    ? 'M120,83 Q127,79 134,83.5 Q127,87.5 120,83 Z'
+                    : 'M120,83 Q127,78.2 134,83.5 Q127,88 120,83 Z';
+          const rightEyeSclera =
+            eyeStyle === 'grande'
+              ? 'M145.5,83.4 Q153,76.4 160.5,83 Q153,89.4 145.5,83.4 Z'
+              : eyeStyle === 'marcado'
+                ? 'M145,83.2 Q153,78.4 161,83.2 Q153,87.4 145,83.2 Z'
+                : eyeStyle === 'suave'
+                  ? 'M146.2,83.5 Q153,79.6 159.8,83.4 Q153,87.2 146.2,83.5 Z'
+                  : isMasc
+                    ? 'M146,83.5 Q153,79 160,83 Q153,87.5 146,83.5 Z'
+                    : 'M146,83.5 Q153,78.2 160,83 Q153,88 146,83.5 Z';
+          const irisR = eyeStyle === 'grande' ? 3.7 : eyeStyle === 'suave' ? 2.9 : 3.2;
+          const lidStrokeW =
+            eyeStyle === 'marcado'
+              ? isMasc
+                ? 2.2
+                : 2.7
+              : eyeStyle === 'suave'
+                ? 1.5
+                : isMasc
+                  ? 1.7
+                  : 2.1;
+
+          const lipPath =
+            mouthStyle === 'cheia'
+              ? 'M131.2,107 Q135.5,103.4 140,105.6 Q144.5,103.4 148.8,107 Q144.8,113.8 140,113.8 Q135.2,113.8 131.2,107 Z'
+              : mouthStyle === 'delicada'
+                ? 'M134,107.6 Q137,105.6 140,106.8 Q143,105.6 146,107.6 Q143,110.8 140,110.8 Q137,110.8 134,107.6 Z'
+                : mouthStyle === 'natural'
+                  ? 'M132.5,107.4 Q140,105.2 147.5,107.4 Q144,111.5 140,111.5 Q136,111.5 132.5,107.4 Z'
+                  : isMasc
+                    ? 'M132.5,107.5 Q140,105.5 147.5,107.5 Q144,111.5 140,111.5 Q136,111.5 132.5,107.5 Z'
+                    : 'M132,107 Q136,104.2 140,106.2 Q144,104.2 148,107 Q144,112.4 140,112.4 Q136,112.4 132,107 Z';
+
+          return (
+            <>
+              {/* Sobrancelhas */}
+              <g>
+                <g transform={`translate(${browDx}, ${browDy}) translate(127, 73) scale(${browSc}) translate(-127, -73)`}>
+                  <path
+                    d={leftBrowPath}
+                    fill="none"
+                    stroke={browColor}
+                    strokeWidth={browStrokeW}
+                    strokeLinecap="round"
+                  />
+                </g>
+                <g transform={`translate(${-browDx}, ${browDy}) translate(153, 73) scale(${browSc}) translate(-153, -73)`}>
+                  <path
+                    d={rightBrowPath}
+                    fill="none"
+                    stroke={browColor}
+                    strokeWidth={browStrokeW}
+                    strokeLinecap="round"
+                  />
+                </g>
+              </g>
+
+              {/* Olhos com pálpebra marcada, íris sombreada e piscar procedural */}
+              <g>
+                <g transform={`translate(${eyeDx}, ${eyeDy}) translate(127, 83) scale(${eyeSc}) translate(-127, -83)`}>
+                  <g className={enableIdle ? 'avatar-eye-blink' : undefined}>
+                    <path
+                      d={leftEyeSclera}
+                      fill="#FFFFFF"
+                      stroke={inkColor}
+                      strokeWidth="0.7"
+                    />
+                    <path d="M121,79.5 Q127,76.8 133,79.8" fill="none" stroke={tone.shadow} strokeWidth="0.9" opacity="0.7" />
+                    <circle cx="127.3" cy="83.2" r={irisR} fill={`url(#${rawUid}_iris)`} />
+                    <circle cx="127.3" cy="83.2" r={irisR * 0.46} fill="#141210" />
+                    <circle cx="128.7" cy="81.6" r="1.15" fill="#FFFFFF" />
+                    <path
+                      d={eyeStyle === 'marcado' ? 'M118,82.6 Q127,77.2 134.8,83.4' : 'M119.5,82.8 Q127,77.6 134.5,83.4'}
+                      fill="none"
+                      stroke="#181412"
+                      strokeWidth={lidStrokeW}
+                    />
+                    {(!isMasc || eyeStyle === 'marcado') && (
+                      <path d="M120,82.2 L117.2,79.2 M122.2,80.6 L120.2,78.1" stroke="#181412" strokeWidth="0.95" />
+                    )}
+                  </g>
+                </g>
+
+                <g transform={`translate(${-eyeDx}, ${eyeDy}) translate(153, 83) scale(${eyeSc}) translate(-153, -83)`}>
+                  <g className={enableIdle ? 'avatar-eye-blink' : undefined}>
+                    <path
+                      d={rightEyeSclera}
+                      fill="#FFFFFF"
+                      stroke={inkColor}
+                      strokeWidth="0.7"
+                    />
+                    <path d="M147,79.8 Q153,76.8 159,79.5" fill="none" stroke={tone.shadow} strokeWidth="0.9" opacity="0.7" />
+                    <circle cx="152.7" cy="83.2" r={irisR} fill={`url(#${rawUid}_iris)`} />
+                    <circle cx="152.7" cy="83.2" r={irisR * 0.46} fill="#141210" />
+                    <circle cx="154.1" cy="81.6" r="1.15" fill="#FFFFFF" />
+                    <path
+                      d={eyeStyle === 'marcado' ? 'M145.2,83.4 Q153,77.2 162,82.6' : 'M145.5,83.4 Q153,77.6 160.5,82.8'}
+                      fill="none"
+                      stroke="#181412"
+                      strokeWidth={lidStrokeW}
+                    />
+                    {(!isMasc || eyeStyle === 'marcado') && (
+                      <path d="M160,82.2 L162.8,79.2 M157.8,80.6 L159.8,78.1" stroke="#181412" strokeWidth="0.95" />
+                    )}
+                  </g>
+                </g>
+              </g>
+
+              {/* Nariz esculpido conforme noseStyle */}
+              <g transform={`translate(${noseDx}, ${noseDy}) translate(140, 90) scale(${noseSc}) translate(-140, -90)`}>
+                <line x1="139.5" y1="83" x2="139.5" y2="92" stroke="#FFFFFF" strokeWidth="0.95" opacity="0.32" />
+                {noseStyle === 'reto' ? (
+                  <>
+                    <path d="M139.3,83.5 L139.8,95.2" fill="none" stroke={inkColor} strokeWidth="1.15" opacity="0.76" />
+                    <path d="M137.2,96.2 L142.8,96.2" fill="none" stroke={tone.shadow} strokeWidth="1.05" />
+                  </>
+                ) : noseStyle === 'delicado' ? (
+                  <>
+                    <path d="M139.6,87.5 Q140.8,92.5 138.6,95.2" fill="none" stroke={inkColor} strokeWidth="0.85" opacity="0.6" />
+                    <path d="M138.2,95.4 Q140,96.4 141.8,95.4" fill="none" stroke={tone.shadow} strokeWidth="0.9" />
+                  </>
+                ) : noseStyle === 'arredondado' ? (
+                  <>
+                    <path d="M138.5,86 Q142,92.8 137.5,96.4" fill="none" stroke={inkColor} strokeWidth="1.1" opacity="0.72" />
+                    <path d="M136.5,95.6 Q140,98.6 143.5,95.6" fill="none" stroke={tone.shadow} strokeWidth="1.15" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M139.2,85 Q141.5,93 137.8,96" fill="none" stroke={inkColor} strokeWidth="1.05" opacity="0.72" />
+                    <path d="M137.5,96.2 Q140,97.4 142.8,96" fill="none" stroke={tone.shadow} strokeWidth="0.95" />
+                  </>
+                )}
+              </g>
+
+              {/* Lábios detalhados conforme mouthStyle */}
+              <g transform={`translate(${mouthDx}, ${mouthDy}) translate(140, 108) scale(${mouthSc}) translate(-140, -108)`}>
+                <path
+                  d={lipPath}
+                  fill={lipColor}
+                  stroke={inkColor}
+                  strokeWidth="0.65"
+                />
+                <path d="M133.2,107.5 Q140,109 146.8,107.5" fill="none" stroke={inkColor} strokeWidth="0.75" opacity="0.85" />
+                {(!isMasc || mouthStyle === 'cheia') && (
+                  <ellipse cx="140" cy="110.2" rx="2.8" ry="0.85" fill="#FFFFFF" opacity="0.48" />
+                )}
+              </g>
+            </>
+          );
+        })()}
 
         {/* Cabelo Base Padrão (Estrutura Facial e Cabelo Padrão da folha de referência) quando nenhum cabelo está equipado */}
         {!active.cabelo && (
@@ -1600,6 +1715,43 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
           ))}
       </g>
 
+      {/* 7.5 Camada de Sobreposição: Jaquetas & Casacos (z-index 44) */}
+      <g data-layer="casacos">
+        {dynCoat &&
+          (dynCoat.customLayerPngUrl ? (
+            renderCustomPngLayer(dynCoat)
+          ) : (
+            <g>
+              <path
+                d={`M${shL - 1},148 L122,146 L132,248 L${waistL - 6},248 Z`}
+                fill={dynCoat.swatchColor}
+                stroke={dynCoat.secondaryColor || '#1C1917'}
+                strokeWidth="1.2"
+              />
+              <path
+                d={`M${shR + 1},148 L158,146 L148,248 L${waistR + 6},248 Z`}
+                fill={dynCoat.swatchColor}
+                stroke={dynCoat.secondaryColor || '#1C1917'}
+                strokeWidth="1.2"
+              />
+              <polygon
+                points={`122,146 135,182 126,184`}
+                fill={dynCoat.secondaryColor || dynCoat.swatchColor}
+                stroke={dynCoat.accentColor || '#1C1917'}
+                strokeWidth="0.9"
+              />
+              <polygon
+                points={`158,146 145,182 154,184`}
+                fill={dynCoat.secondaryColor || dynCoat.swatchColor}
+                stroke={dynCoat.accentColor || '#1C1917'}
+                strokeWidth="0.9"
+              />
+              <circle cx="131" cy="196" r="2.1" fill={dynCoat.accentColor || '#D4A853'} />
+              <circle cx="131" cy="214" r="2.1" fill={dynCoat.accentColor || '#D4A853'} />
+            </g>
+          ))}
+      </g>
+
       {/* 8. Camada Frontal do Cabelo (z-index 50) */}
       <g data-layer="cabelo-frente">
         {active.cabelo === 'hair_ondas_mel' && (
@@ -1704,9 +1856,9 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
         )}
       </g>
 
-      {/* 9. Acessórios (z-index 60) */}
+      {/* 9. Acessórios Múltiplos por Parte do Corpo (z-index 60) */}
       <g data-layer="acessorios">
-        {active.acessorios === 'acc_oculos_gatinho' && (
+        {hasStaticAcc('acc_oculos_gatinho') && (
           <g>
             <path
               d="M112,80 L135,82 C136,89 131,93 123,93 C115,93 112,87 112,80 Z"
@@ -1725,7 +1877,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <line x1="135" y1="83" x2="145" y2="83" stroke="#5B3926" strokeWidth="2.2" />
           </g>
         )}
-        {active.acessorios === 'acc_oculos_aviador' && (
+        {hasStaticAcc('acc_oculos_aviador') && (
           <g>
             <path
               d="M115,80 L136,80 C136,90 130,94 123,93 C117,92 114,86 115,80 Z"
@@ -1745,27 +1897,27 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <line x1="136" y1="83" x2="144" y2="83" stroke="#D4A853" strokeWidth="1.5" />
           </g>
         )}
-        {active.acessorios === 'acc_boina_francesa' && (
+        {hasStaticAcc('acc_boina_francesa') && (
           <g transform="rotate(-12 140 52)">
             <ellipse cx="140" cy="48" rx="34" ry="15" fill="#B91C4D" stroke="#881236" strokeWidth="1.2" />
             <path d="M138,33 L142,27" stroke="#881236" strokeWidth="2.2" strokeLinecap="round" />
             <ellipse cx="140" cy="59" rx="26" ry="4" fill="#881236" />
           </g>
         )}
-        {active.acessorios === 'acc_bone_street' && (
+        {hasStaticAcc('acc_bone_street') && (
           <g>
             <path d="M108,65 C109,42 124,35 140,35 C156,35 171,42 172,65 Z" fill="#201F23" stroke="#111013" strokeWidth="1" />
             <path d="M107,65 Q140,73 185,68 Q162,59 107,65 Z" fill="#171619" />
           </g>
         )}
-        {active.acessorios === 'acc_chapeu_fedora' && (
+        {hasStaticAcc('acc_chapeu_fedora') && (
           <g>
             <ellipse cx="140" cy="59" rx="46" ry="8" fill="#C5AB89" stroke="#9B805E" strokeWidth="1.2" />
             <path d="M116,58 L121,36 Q140,32 159,36 L164,58 Z" fill="#C5AB89" stroke="#9B805E" strokeWidth="1.2" />
             <rect x="116.5" y="51" width="47" height="5" fill="#3D2B24" />
           </g>
         )}
-        {active.acessorios === 'acc_tiara_perolas' && (
+        {hasStaticAcc('acc_tiara_perolas') && (
           <g fill="#FFFDF8" stroke="#D6C9B4" strokeWidth="0.7">
             <path d="M110,70 C115,44 165,44 170,70" fill="none" stroke="#DFC496" strokeWidth="2.5" />
             <circle cx="117" cy="56" r="3" />
@@ -1775,7 +1927,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <circle cx="163" cy="56" r="3" />
           </g>
         )}
-        {active.acessorios === 'acc_colar_perolas' && (
+        {hasStaticAcc('acc_colar_perolas') && (
           <g fill="#FFFDF8" stroke="#DDD3C2" strokeWidth="0.7">
             <circle cx="127" cy="141" r="2.6" />
             <circle cx="132" cy="145" r="2.6" />
@@ -1790,20 +1942,20 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <circle cx="151" cy="149" r="2.4" />
           </g>
         )}
-        {active.acessorios === 'acc_relogio_couro' && (
+        {hasStaticAcc('acc_relogio_couro') && (
           <g>
             <rect x={isMasc ? 194 : isNeutral ? 196 : 198} y="246" width="12" height="5" rx="1.5" fill="#6D3E24" />
             <circle cx={isMasc ? 200 : isNeutral ? 202 : 204} cy="248.5" r="3.5" fill="#D4A853" stroke="#855C33" strokeWidth="0.8" />
           </g>
         )}
-        {active.acessorios === 'acc_bolsa_estruturada' && (
+        {hasStaticAcc('acc_bolsa_estruturada') && (
           <g>
             <path d={`M${isMasc ? 198 : 202},265 C${isMasc ? 196 : 200},249 ${isMasc ? 211 : 215},249 ${isMasc ? 211 : 215},265`} fill="none" stroke="#7B4320" strokeWidth="2.5" />
             <path d={`M${isMasc ? 191 : 195},266 L${isMasc ? 219 : 223},266 L${isMasc ? 223 : 227},305 L${isMasc ? 187 : 191},305 Z`} fill="#A66134" stroke="#7B4320" strokeWidth="1.2" />
             <rect x={isMasc ? 201 : 205} y="275" width="8" height="5" rx="1" fill="#D4A853" />
           </g>
         )}
-        {active.acessorios === 'acc_coroa_imperial_vip' && (
+        {hasStaticAcc('acc_coroa_imperial_vip') && (
           <g>
             <polygon points="116,54 121,34 131,45 140,26 149,45 159,34 164,54" fill="#FBBF24" stroke="#B45309" strokeWidth="1.3" />
             <polygon points="140,36 144,43 140,50 136,43" fill="#38BDF8" stroke="#0284C7" strokeWidth="0.7" />
@@ -1811,7 +1963,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <circle cx="158" cy="46" r="2.2" fill="#FFFDF8" />
           </g>
         )}
-        {active.acessorios === 'acc_coroa_diamante_soberana_vip' && (
+        {hasStaticAcc('acc_coroa_diamante_soberana_vip') && (
           <g>
             <polygon points="114,55 120,30 130,43 140,22 150,43 160,30 166,55" fill="#F8FAFC" stroke="#0284C7" strokeWidth="1.2" />
             <polygon points="140,31 145,41 140,51 135,41" fill="#0EA5E9" stroke="#0369A1" strokeWidth="0.8" />
@@ -1821,7 +1973,7 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <circle cx="149" cy="49" r="2" fill="#E0F2FE" />
           </g>
         )}
-        {active.acessorios === 'acc_cetro_real_vip' && (
+        {hasStaticAcc('acc_cetro_real_vip') && (
           <g>
             <line x1={isMasc ? 202 : 206} y1="196" x2={isMasc ? 210 : 215} y2="338" stroke="#D97706" strokeWidth="3.6" strokeLinecap="round" />
             <circle cx={isMasc ? 202 : 206} cy="192" r="9" fill="#FBBF24" stroke="#92400E" strokeWidth="1.2" />
@@ -1829,72 +1981,150 @@ export const MeDollSvg: React.FC<MeDollSvgProps> = ({
             <circle cx={isMasc ? 202 : 206} cy="192" r="2.4" fill="#FFFFFF" />
           </g>
         )}
-        {active.acessorios === 'acc_relogio_ouro_vip' && (
+        {hasStaticAcc('acc_relogio_ouro_vip') && (
           <g>
             <rect x={isMasc ? 194 : isNeutral ? 196 : 198} y="245" width="13" height="6" rx="2" fill="#B45309" />
             <circle cx={isMasc ? 200.5 : isNeutral ? 202.5 : 204.5} cy="248" r="4.5" fill="#FDE68A" stroke="#D97706" strokeWidth="1.2" />
             <circle cx={isMasc ? 200.5 : isNeutral ? 202.5 : 204.5} cy="248" r="1.5" fill="#38BDF8" />
           </g>
         )}
-        {active.acessorios === 'acc_bolsa_grife_vip' && (
+        {hasStaticAcc('acc_bolsa_grife_vip') && (
           <g>
             <path d={`M${isMasc ? 198 : 202},264 C${isMasc ? 195 : 199},247 ${isMasc ? 212 : 216},247 ${isMasc ? 212 : 216},264`} fill="none" stroke="#FBBF24" strokeWidth="2.6" />
             <path d={`M${isMasc ? 189 : 193},265 L${isMasc ? 221 : 225},265 L${isMasc ? 225 : 229},308 L${isMasc ? 185 : 189},308 Z`} fill="#18181B" stroke="#D97706" strokeWidth="1.3" />
             <polygon points={`${isMasc ? 205 : 209},278 ${isMasc ? 210 : 214},285 ${isMasc ? 205 : 209},292 ${isMasc ? 200 : 204},285`} fill="#38BDF8" stroke="#FBBF24" strokeWidth="0.9" />
           </g>
         )}
-        {dynAcc &&
-          (dynAcc.customLayerPngUrl ? (
-            renderCustomPngLayer(dynAcc)
-          ) : dynAcc.templateId === 'tpl_oculos' || dynAcc.templateId === 'acc_oculos_aviador' || dynAcc.templateId === 'acc_oculos_gatinho' ? (
-            <g>
-              <rect x="114" y="79" width="22" height="12" rx="4" fill="#1C1917" fillOpacity="0.28" stroke={dynAcc.swatchColor} strokeWidth="2.2" />
-              <rect x="144" y="79" width="22" height="12" rx="4" fill="#1C1917" fillOpacity="0.28" stroke={dynAcc.swatchColor} strokeWidth="2.2" />
-              <line x1="136" y1="84" x2="144" y2="84" stroke={dynAcc.swatchColor} strokeWidth="2" />
-            </g>
-          ) : dynAcc.templateId === 'tpl_bolsa' || dynAcc.templateId === 'acc_bolsa_estruturada' ? (
-            <g>
-              <path d={`M${isMasc ? 198 : 202},265 C${isMasc ? 196 : 200},249 ${isMasc ? 211 : 215},249 ${isMasc ? 211 : 215},265`} fill="none" stroke={dynAcc.secondaryColor || dynAcc.swatchColor} strokeWidth="2.5" />
-              <path d={`M${isMasc ? 191 : 195},266 L${isMasc ? 219 : 223},266 L${isMasc ? 223 : 227},305 L${isMasc ? 187 : 191},305 Z`} fill={dynAcc.swatchColor} stroke={dynAcc.isVipOnly ? '#D4A853' : '#1C1917'} strokeOpacity="0.7" strokeWidth="1.1" />
-              <rect x={isMasc ? 201 : 205} y="277" width="8" height="5" rx="1" fill={dynAcc.accentColor || '#D4A853'} />
-            </g>
-          ) : dynAcc.templateId === 'tpl_cetro' ? (
-            <g>
-              <line x1={isMasc ? 202 : 206} y1="198" x2={isMasc ? 210 : 215} y2="334" stroke="#D97706" strokeWidth="3.2" strokeLinecap="round" />
-              <circle cx={isMasc ? 202 : 206} cy="194" r="8" fill={dynAcc.swatchColor} stroke="#92400E" strokeWidth="1.2" />
-              <circle cx={isMasc ? 202 : 206} cy="194" r="2.5" fill="#FFFFFF" />
-            </g>
-          ) : dynAcc.templateId === 'tpl_coroa' || dynAcc.templateId === 'acc_coroa_imperial_vip' ? (
-            <g>
-              <polygon points="116,54 121,34 131,45 140,26 149,45 159,34 164,54" fill={dynAcc.swatchColor} stroke="#B45309" strokeWidth="1.2" />
-              <circle cx="140" cy="42" r="3" fill={dynAcc.accentColor || '#E0F2FE'} />
-            </g>
-          ) : dynAcc.templateId === 'tpl_relogio' ? (
-            <g>
-              <rect x={isMasc ? 194 : isNeutral ? 196 : 198} y="245" width="13" height="6" rx="2" fill={dynAcc.secondaryColor || '#92400E'} />
-              <circle cx={isMasc ? 200.5 : isNeutral ? 202.5 : 204.5} cy="248" r="4.2" fill={dynAcc.swatchColor} stroke="#78350F" strokeWidth="1" />
-            </g>
-          ) : dynAcc.templateId === 'tpl_colar' || dynAcc.templateId === 'acc_colar_perolas' ? (
-            <g fill={dynAcc.swatchColor} stroke={dynAcc.accentColor || '#D4A853'} strokeWidth="0.8">
-              <path d="M126,142 Q140,158 154,142" fill="none" stroke={dynAcc.swatchColor} strokeWidth="2.4" />
-              <circle cx="131" cy="147" r="2.3" />
-              <circle cx="140" cy="151" r="3" fill={dynAcc.accentColor || '#FDE68A'} />
-              <circle cx="149" cy="147" r="2.3" />
-            </g>
-          ) : dynAcc.templateId === 'tpl_chapeu' || dynAcc.templateId === 'acc_boina_francesa' || dynAcc.templateId === 'acc_chapeu_fedora' ? (
-            <g>
-              <ellipse cx="140" cy="59" rx="44" ry="8" fill={dynAcc.swatchColor} stroke={dynAcc.secondaryColor || '#1C1917'} strokeWidth="1.2" />
-              <path d="M116,58 L121,36 Q140,32 159,36 L164,58 Z" fill={dynAcc.swatchColor} stroke={dynAcc.secondaryColor || '#1C1917'} strokeWidth="1.2" />
-              <rect x="116.5" y="51" width="47" height="5" fill={dynAcc.accentColor || '#3D2B24'} />
-            </g>
-          ) : (
-            <g>
+        {dynAccList.map((dynAcc) => {
+          if (dynAcc.customLayerPngUrl) {
+            return <React.Fragment key={dynAcc.id}>{renderCustomPngLayer(dynAcc)}</React.Fragment>;
+          }
+          if (dynAcc.threeSpec?.garmentSilhouette === 'acc_eyepatch' || dynAcc.id === 'legendary_tapa_olho') {
+            return (
+              <g key={dynAcc.id}>
+                <line x1="111" y1="81" x2="168" y2="75" stroke="#D4AF37" strokeWidth="2" />
+                <path
+                  d="M115,80 Q125,75 135,80 L133,91 Q124,95 116,90 Z"
+                  fill="#18181B"
+                  stroke="#F59E0B"
+                  strokeWidth="1.8"
+                />
+                <circle cx="125" cy="85" r="2.2" fill="#FBBF24" />
+              </g>
+            );
+          }
+          if (dynAcc.threeSpec?.garmentSilhouette === 'acc_dragon' || dynAcc.id === 'legendary_dragaozinho') {
+            return (
+              <g key={dynAcc.id} transform="translate(212, 82)">
+                <path d="M-4,10 Q-20,-6 -6,-14 Q6,-6 2,10 Z" fill="#F59E0B" opacity="0.88" stroke="#991B1B" strokeWidth="1" />
+                <path d="M12,10 Q28,-6 14,-14 Q2,-6 6,10 Z" fill="#F59E0B" opacity="0.88" stroke="#991B1B" strokeWidth="1" />
+                <ellipse cx="4" cy="14" rx="11" ry="8" fill="#DC2626" stroke="#7F1D1D" strokeWidth="1.2" />
+                <ellipse cx="4" cy="16" rx="6" ry="4" fill="#FDE68A" />
+                <circle cx="13" cy="6" r="6" fill="#DC2626" stroke="#7F1D1D" strokeWidth="1.1" />
+                <polygon points="10,0 13,-7 15,1" fill="#FBBF24" />
+                <circle cx="15" cy="5" r="1.4" fill="#FDE047" />
+                <path d="M-7,15 Q-18,22 -14,30" fill="none" stroke="#B91C1C" strokeWidth="3" strokeLinecap="round" />
+              </g>
+            );
+          }
+          if (dynAcc.threeSpec?.garmentSilhouette === 'acc_white_tiger' || dynAcc.id === 'legendary_tigre_branco') {
+            return (
+              <g key={dynAcc.id} transform="translate(206, 430)">
+                {/* Cauda listrada */}
+                <path d="M-16,14 Q-32,8 -30,-4" fill="none" stroke="#F8FAFC" strokeWidth="4.2" strokeLinecap="round" />
+                <path d="M-24,10 L-22,6 M-30,4 L-27,1" stroke="#18181B" strokeWidth="2.2" strokeLinecap="round" />
+                {/* Patas brancas */}
+                <rect x="-14" y="16" width="5" height="16" rx="2.5" fill="#F8FAFC" stroke="#18181B" strokeWidth="0.9" />
+                <rect x="-6" y="17" width="5" height="15" rx="2.5" fill="#E2E8F0" stroke="#18181B" strokeWidth="0.9" />
+                <rect x="6" y="16" width="5" height="16" rx="2.5" fill="#F8FAFC" stroke="#18181B" strokeWidth="0.9" />
+                <rect x="13" y="17" width="5" height="15" rx="2.5" fill="#E2E8F0" stroke="#18181B" strokeWidth="0.9" />
+                {/* Corpo branco com listras pretas */}
+                <ellipse cx="0" cy="12" rx="18" ry="11" fill="#F8FAFC" stroke="#334155" strokeWidth="1.1" />
+                <path d="M-9,3 Q-8,12 -10,19 M-2,2 Q-1,12 -3,20 M5,3 Q6,12 4,19" fill="none" stroke="#18181B" strokeWidth="2.2" strokeLinecap="round" />
+                {/* Cabeça felina e orelhas */}
+                <circle cx="15" cy="1" r="9.5" fill="#F8FAFC" stroke="#334155" strokeWidth="1.1" />
+                <circle cx="9" cy="-7" r="3.4" fill="#F8FAFC" stroke="#18181B" strokeWidth="1" />
+                <circle cx="20" cy="-7" r="3.4" fill="#F8FAFC" stroke="#18181B" strokeWidth="1" />
+                <path d="M13,-5 L15,-2 M17,-5 L15,-2" stroke="#18181B" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx="12.5" cy="0" r="1.5" fill="#38BDF8" />
+                <circle cx="18.5" cy="0" r="1.5" fill="#38BDF8" />
+                <ellipse cx="16" cy="4.2" rx="3.2" ry="2.2" fill="#FFFFFF" />
+                <polygon points="14.6,3 17.4,3 16,5" fill="#F472B6" />
+              </g>
+            );
+          }
+          if (dynAcc.threeSpec?.garmentSilhouette === 'acc_watch' || dynAcc.id === 'acc_relogio_ouro_atelier' || dynAcc.templateId === 'tpl_relogio') {
+            return (
+              <g key={dynAcc.id}>
+                <rect x={isMasc ? 194 : isNeutral ? 196 : 198} y="245" width="13" height="6" rx="2" fill={dynAcc.secondaryColor || '#B45309'} />
+                <circle cx={isMasc ? 200.5 : isNeutral ? 202.5 : 204.5} cy="248" r="4.5" fill={dynAcc.swatchColor || '#FBBF24'} stroke="#78350F" strokeWidth="1.1" />
+                <circle cx={isMasc ? 200.5 : isNeutral ? 202.5 : 204.5} cy="248" r="1.5" fill="#FFFFFF" />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_oculos' || dynAcc.templateId === 'acc_oculos_aviador' || dynAcc.templateId === 'acc_oculos_gatinho') {
+            return (
+              <g key={dynAcc.id}>
+                <rect x="114" y="79" width="22" height="12" rx="4" fill="#1C1917" fillOpacity="0.28" stroke={dynAcc.swatchColor} strokeWidth="2.2" />
+                <rect x="144" y="79" width="22" height="12" rx="4" fill="#1C1917" fillOpacity="0.28" stroke={dynAcc.swatchColor} strokeWidth="2.2" />
+                <line x1="136" y1="84" x2="144" y2="84" stroke={dynAcc.swatchColor} strokeWidth="2" />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_bolsa' || dynAcc.templateId === 'acc_bolsa_estruturada') {
+            return (
+              <g key={dynAcc.id}>
+                <path d={`M${isMasc ? 198 : 202},265 C${isMasc ? 196 : 200},249 ${isMasc ? 211 : 215},249 ${isMasc ? 211 : 215},265`} fill="none" stroke={dynAcc.secondaryColor || dynAcc.swatchColor} strokeWidth="2.5" />
+                <path d={`M${isMasc ? 191 : 195},266 L${isMasc ? 219 : 223},266 L${isMasc ? 223 : 227},305 L${isMasc ? 187 : 191},305 Z`} fill={dynAcc.swatchColor} stroke={dynAcc.isVipOnly ? '#D4A853' : '#1C1917'} strokeOpacity="0.7" strokeWidth="1.1" />
+                <rect x={isMasc ? 201 : 205} y="277" width="8" height="5" rx="1" fill={dynAcc.accentColor || '#D4A853'} />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_cetro') {
+            return (
+              <g key={dynAcc.id}>
+                <line x1={isMasc ? 202 : 206} y1="198" x2={isMasc ? 210 : 215} y2="334" stroke="#D97706" strokeWidth="3.2" strokeLinecap="round" />
+                <circle cx={isMasc ? 202 : 206} cy="194" r="8" fill={dynAcc.swatchColor} stroke="#92400E" strokeWidth="1.2" />
+                <circle cx={isMasc ? 202 : 206} cy="194" r="2.5" fill="#FFFFFF" />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_coroa' || dynAcc.templateId === 'acc_coroa_imperial_vip') {
+            return (
+              <g key={dynAcc.id}>
+                <polygon points="116,54 121,34 131,45 140,26 149,45 159,34 164,54" fill={dynAcc.swatchColor} stroke="#B45309" strokeWidth="1.2" />
+                <circle cx="140" cy="42" r="3" fill={dynAcc.accentColor || '#E0F2FE'} />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_colar' || dynAcc.templateId === 'acc_colar_perolas') {
+            return (
+              <g key={dynAcc.id} fill={dynAcc.swatchColor} stroke={dynAcc.accentColor || '#D4A853'} strokeWidth="0.8">
+                <path d="M126,142 Q140,158 154,142" fill="none" stroke={dynAcc.swatchColor} strokeWidth="2.4" />
+                <circle cx="131" cy="147" r="2.3" />
+                <circle cx="140" cy="151" r="3" fill={dynAcc.accentColor || '#FDE68A'} />
+                <circle cx="149" cy="147" r="2.3" />
+              </g>
+            );
+          }
+          if (dynAcc.templateId === 'tpl_chapeu' || dynAcc.templateId === 'acc_boina_francesa' || dynAcc.templateId === 'acc_chapeu_fedora') {
+            return (
+              <g key={dynAcc.id}>
+                <ellipse cx="140" cy="59" rx="44" ry="8" fill={dynAcc.swatchColor} stroke={dynAcc.secondaryColor || '#1C1917'} strokeWidth="1.2" />
+                <path d="M116,58 L121,36 Q140,32 159,36 L164,58 Z" fill={dynAcc.swatchColor} stroke={dynAcc.secondaryColor || '#1C1917'} strokeWidth="1.2" />
+                <rect x="116.5" y="51" width="47" height="5" fill={dynAcc.accentColor || '#3D2B24'} />
+              </g>
+            );
+          }
+          return (
+            <g key={dynAcc.id}>
               <path d="M110,66 C115,43 165,43 170,66" fill="none" stroke={dynAcc.swatchColor} strokeWidth="4" />
               {(dynAcc.isVipOnly || dynAcc.accentColor) && (
                 <circle cx="140" cy="44" r="4" fill={dynAcc.accentColor || '#FBBF24'} stroke="#B45309" strokeWidth="0.8" />
               )}
             </g>
-          ))}
+          );
+        })}
       </g>
       </g>
     </svg>

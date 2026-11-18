@@ -1,11 +1,12 @@
 /**
- * Definição central de tipos do Starlight Atelier.
+ * Definição central de tipos do Nocturne Vale Club.
  * Todos os módulos (Perfil, MeDoll, Starplaza, Suíte, Salas e Moderação) compartilham estas interfaces.
  */
 
 export type GameTab =
   | 'perfil'
   | 'medoll'
+  | 'mercado'
   | 'starplaza'
   | 'suite'
   | 'salas'
@@ -17,6 +18,7 @@ export type GameTab =
 export type ClothingCategory =
   | 'cabelo'
   | 'blusas'
+  | 'casacos'
   | 'vestidos'
   | 'calcas'
   | 'sapatos'
@@ -28,13 +30,15 @@ export const LAYER_Z_INDEX: Record<ClothingCategory, number> = {
   calcas: 30,
   blusas: 40,
   vestidos: 42,
+  casacos: 44,
   cabelo: 50,
   acessorios: 60,
 };
 
 export const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   cabelo: 'Cabelo',
-  blusas: 'Blusas & Jaquetas',
+  blusas: 'Blusas & Camisetas',
+  casacos: 'Jaquetas & Casacos',
   vestidos: 'Vestidos',
   calcas: 'Calças & Saias',
   sapatos: 'Sapatos',
@@ -87,7 +91,20 @@ export type Garment3DSilhouette =
   | 'acc_hat'
   | 'acc_earrings'
   | 'acc_watch'
-  | 'acc_scepter';
+  | 'acc_scepter'
+  | 'acc_eyepatch'
+  | 'acc_dragon'
+  | 'acc_white_tiger';
+
+/** Sub-local anatômico do corpo para permitir equipar múltiplos acessórios simultaneamente */
+export type AccessoryBodySlot =
+  | 'head'
+  | 'ear'
+  | 'face'
+  | 'neck'
+  | 'arm'
+  | 'hand'
+  | 'companion';
 
 /** Estilo geométrico procedural 3D para cabelos no motor Three.js */
 export type Hair3DSilhouette =
@@ -110,7 +127,9 @@ export type Hair3DSilhouette =
   | 'buzz_taper'
   | 'dreads_short'
   | 'wolf_cut'
-  | 'pompadour';
+  | 'pompadour'
+  | 'base_swept'
+  | 'base_chignon';
 
 export type Material3DFinish =
   | 'cotton'
@@ -210,6 +229,10 @@ export interface ClothingItem {
   isVipOnly?: boolean;
   /** Define se a peça pertence à classe Lendária */
   isLegendary?: boolean;
+  /** Timestamp UTC (ms) de lançamento na Starplaza (usado para janela de 24h em itens lendários) */
+  launchedAt?: number;
+  /** Timestamp UTC (ms) de expiração da janela de 24h na Starplaza */
+  legendaryExpiresAt?: number;
   /** Especificação procedural Three.js 3D para modelagem e materiais PBR */
   threeSpec?: ThreeItemSpec;
   /** Modelo visual usado para peças criadas pelo Ateliê / Designer Global */
@@ -247,6 +270,8 @@ export interface ClothingItem {
   thumbnail_url?: string;
   /** Indexação vinculada aos ossos e zonas de sobreposição do esqueleto modular v2.1 */
   rigMetadata?: ClothingRigMetadata;
+  /** Sub-slot anatômico quando category === 'acessorios' (cabeça, rosto, pescoço, braço, mão, mascote) */
+  accessorySlot?: AccessoryBodySlot;
   /** Metadados opcionais de autoria/edição do Designer Global */
   collection?: string;
   vip?: boolean;
@@ -255,8 +280,10 @@ export interface ClothingItem {
   customCreatedAt?: number;
 }
 
-/** Mapa de peças atualmente vestidas na MeDoll (1 peça por categoria) */
-export type EquippedOutfit = Partial<Record<ClothingCategory, string>>;
+/** Mapa de peças atualmente vestidas na MeDoll (1 peça por categoria + múltiplos acessórios por parte do corpo) */
+export type EquippedOutfit = Partial<Record<ClothingCategory, string>> & {
+  acessoriosSlots?: Partial<Record<AccessoryBodySlot, string>>;
+};
 
 /** Tons de pele disponíveis para personalização da MeDoll base */
 export type SkinToneId = 'porcelana' | 'pessego' | 'mel' | 'cacau';
@@ -268,6 +295,283 @@ export interface SkinToneOption {
   shadow: string;
   blush: string;
 }
+
+export type EyeStyleId = 'amendoado' | 'grande' | 'marcado' | 'suave';
+export type EyebrowStyleId = 'fina' | 'arqueada' | 'reta' | 'grossa';
+export type NoseStyleId = 'fino' | 'reto' | 'delicado' | 'arredondado';
+export type MouthStyleId = 'cupido' | 'natural' | 'cheia' | 'delicada';
+
+export interface AvatarFaceCustomization {
+  // Olhos
+  eyeStyle: EyeStyleId;
+  eyeColor: string;
+  eyesPosX?: number; // Deslocamento horizontal (-15 a +15, default 0)
+  eyesPosY?: number; // Deslocamento vertical (-15 a +15, default 0)
+  eyesScale?: number; // Multiplicador de escala (0.7 a 1.4, default 1.0)
+
+  // Sobrancelhas
+  eyebrowStyle: EyebrowStyleId;
+  eyebrowColor?: string;
+  eyebrowsPosX?: number; // (-15 a +15, default 0)
+  eyebrowsPosY?: number; // (-15 a +15, default 0)
+  eyebrowsScale?: number; // (0.7 a 1.4, default 1.0)
+
+  // Nariz
+  noseStyle: NoseStyleId;
+  nosePosX?: number; // (-12 a +12, default 0)
+  nosePosY?: number; // (-15 a +15, default 0)
+  noseScale?: number; // (0.7 a 1.4, default 1.0)
+
+  // Boca & Lábios
+  mouthStyle: MouthStyleId;
+  mouthColor?: string;
+  mouthPosX?: number; // (-12 a +12, default 0)
+  mouthPosY?: number; // (-15 a +15, default 0)
+  mouthScale?: number; // (0.7 a 1.4, default 1.0)
+}
+
+export interface ColorPaletteOption {
+  id: string;
+  label: string;
+  hex: string;
+}
+
+export type EyeColorOption = ColorPaletteOption;
+
+export interface FacePreset {
+  id: string;
+  name: string;
+  description?: string;
+  isBuiltIn?: boolean;
+  config: AvatarFaceCustomization;
+  createdAt?: string;
+}
+
+export const EYE_COLOR_PALETTE: ColorPaletteOption[] = [
+  { id: 'cyan', label: 'Azul Ciano', hex: '#38BDF8' },
+  { id: 'emerald', label: 'Verde Esmeralda', hex: '#10B981' },
+  { id: 'hazel', label: 'Castanho Mel', hex: '#92400E' },
+  { id: 'indigo', label: 'Azul Profundo', hex: '#6366F1' },
+  { id: 'violet', label: 'Violeta Místico', hex: '#8B5CF6' },
+  { id: 'amber', label: 'Âmbar Ouro', hex: '#D97706' },
+  { id: 'dark', label: 'Castanho Noite', hex: '#27272A' },
+  { id: 'ruby', label: 'Rubi Intenso', hex: '#E11D48' },
+  { id: 'ocean', label: 'Azul Safira', hex: '#0284C7' },
+];
+
+export const EYEBROW_COLOR_PALETTE: ColorPaletteOption[] = [
+  { id: 'black', label: 'Preto Noite', hex: '#181412' },
+  { id: 'ebony', label: 'Ébano Profundo', hex: '#2A1D17' },
+  { id: 'dark_brown', label: 'Castanho Escuro', hex: '#4A2E1B' },
+  { id: 'chestnut', label: 'Castanho Chocolate', hex: '#6B4226' },
+  { id: 'honey', label: 'Castanho Mel', hex: '#92400E' },
+  { id: 'blonde', label: 'Loiro Dourado', hex: '#D97706' },
+  { id: 'copper', label: 'Ruivo Cobre', hex: '#B45309' },
+  { id: 'silver', label: 'Platina / Grisalho', hex: '#94A3B8' },
+  { id: 'pink', label: 'Rosa Pastel', hex: '#F472B6' },
+];
+
+export const LIP_COLOR_PALETTE: ColorPaletteOption[] = [
+  { id: 'natural', label: 'Natural Suave', hex: '#BC707B' },
+  { id: 'cupid_rose', label: 'Rosa Cupido', hex: '#C65B6F' },
+  { id: 'nude', label: 'Nude Aveludado', hex: '#D49B8E' },
+  { id: 'chic_pink', label: 'Rosa Chic', hex: '#EC4899' },
+  { id: 'red_diva', label: 'Vermelho Diva', hex: '#DC2626' },
+  { id: 'wine', label: 'Vinho Nobre', hex: '#881337' },
+  { id: 'cherry', label: 'Cereja Pop', hex: '#9F1239' },
+  { id: 'coral', label: 'Coral Verão', hex: '#F97316' },
+  { id: 'chocolate', label: 'Chocolate Velvet', hex: '#713F12' },
+];
+
+export const DEFAULT_FACE_CUSTOMIZATION: AvatarFaceCustomization = {
+  eyeStyle: 'amendoado',
+  eyeColor: '#92400E',
+  eyesPosX: 0,
+  eyesPosY: 0,
+  eyesScale: 1.0,
+
+  eyebrowStyle: 'arqueada',
+  eyebrowColor: '#2A1D17',
+  eyebrowsPosX: 0,
+  eyebrowsPosY: 0,
+  eyebrowsScale: 1.0,
+
+  noseStyle: 'fino',
+  nosePosX: 0,
+  nosePosY: 0,
+  noseScale: 1.0,
+
+  mouthStyle: 'cupido',
+  mouthColor: '#C65B6F',
+  mouthPosX: 0,
+  mouthPosY: 0,
+  mouthScale: 1.0,
+};
+
+export const BUILTIN_FACE_PRESETS: FacePreset[] = [
+  {
+    id: 'preset_glamour',
+    name: 'Glamour Atelier',
+    description: 'Olhar marcante com delineado expressivo, lábios cheios em tom vinho e sobrancelha arqueada.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'marcado',
+      eyeColor: '#38BDF8',
+      eyesPosX: 2,
+      eyesPosY: 1,
+      eyesScale: 1.15,
+      eyebrowStyle: 'arqueada',
+      eyebrowColor: '#181412',
+      eyebrowsPosX: 1,
+      eyebrowsPosY: 3,
+      eyebrowsScale: 1.1,
+      noseStyle: 'delicado',
+      nosePosX: 0,
+      nosePosY: 1,
+      noseScale: 0.9,
+      mouthStyle: 'cheia',
+      mouthColor: '#881337',
+      mouthPosX: 0,
+      mouthPosY: -1,
+      mouthScale: 1.15,
+    },
+  },
+  {
+    id: 'preset_natural',
+    name: 'Natural Chic',
+    description: 'Proporções clássicas equilibradas, olhos amendoados cor de mel e boca em arco suave.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'amendoado',
+      eyeColor: '#92400E',
+      eyesPosX: 0,
+      eyesPosY: 0,
+      eyesScale: 1.0,
+      eyebrowStyle: 'fina',
+      eyebrowColor: '#4A2E1B',
+      eyebrowsPosX: 0,
+      eyebrowsPosY: 0,
+      eyebrowsScale: 1.0,
+      noseStyle: 'fino',
+      nosePosX: 0,
+      nosePosY: 0,
+      noseScale: 1.0,
+      mouthStyle: 'natural',
+      mouthColor: '#BC707B',
+      mouthPosX: 0,
+      mouthPosY: 0,
+      mouthScale: 1.0,
+    },
+  },
+  {
+    id: 'preset_anime',
+    name: 'Anime Doll',
+    description: 'Olhos grandes violeta aumentados e espaçados, nariz miniatura e boca delicada rosada.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'grande',
+      eyeColor: '#8B5CF6',
+      eyesPosX: 3,
+      eyesPosY: 2,
+      eyesScale: 1.3,
+      eyebrowStyle: 'fina',
+      eyebrowColor: '#2A1D17',
+      eyebrowsPosX: 2,
+      eyebrowsPosY: 5,
+      eyebrowsScale: 0.9,
+      noseStyle: 'delicado',
+      nosePosX: 0,
+      nosePosY: 3,
+      noseScale: 0.75,
+      mouthStyle: 'delicada',
+      mouthColor: '#EC4899',
+      mouthPosX: 0,
+      mouthPosY: 1,
+      mouthScale: 0.85,
+    },
+  },
+  {
+    id: 'preset_striking',
+    name: 'Olhar Marcado',
+    description: 'Olhos noite profundos, sobrancelhas grossas escuras e lábios com arco definido.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'marcado',
+      eyeColor: '#27272A',
+      eyesPosX: -1,
+      eyesPosY: -1,
+      eyesScale: 1.1,
+      eyebrowStyle: 'grossa',
+      eyebrowColor: '#181412',
+      eyebrowsPosX: 0,
+      eyebrowsPosY: -2,
+      eyebrowsScale: 1.2,
+      noseStyle: 'reto',
+      nosePosX: 0,
+      nosePosY: 0,
+      noseScale: 1.05,
+      mouthStyle: 'cupido',
+      mouthColor: '#DC2626',
+      mouthPosX: 0,
+      mouthPosY: -2,
+      mouthScale: 1.08,
+    },
+  },
+  {
+    id: 'preset_elegant',
+    name: 'Elegante & Suave',
+    description: 'Feições finas e harmoniosas com olhos esmeralda, nariz reto estilizado e lábio nude.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'suave',
+      eyeColor: '#10B981',
+      eyesPosX: 0,
+      eyesPosY: 1,
+      eyesScale: 1.05,
+      eyebrowStyle: 'reta',
+      eyebrowColor: '#6B4226',
+      eyebrowsPosX: 0,
+      eyebrowsPosY: 1,
+      eyebrowsScale: 1.0,
+      noseStyle: 'delicado',
+      nosePosX: 0,
+      nosePosY: -1,
+      noseScale: 0.92,
+      mouthStyle: 'cupido',
+      mouthColor: '#D49B8E',
+      mouthPosX: 0,
+      mouthPosY: 0,
+      mouthScale: 1.0,
+    },
+  },
+  {
+    id: 'preset_vamp',
+    name: 'Vamp Romântico',
+    description: 'Estética gótica refinada com olhos rubi intensos, sobrancelhas arqueadas e lábios cereja escuro.',
+    isBuiltIn: true,
+    config: {
+      eyeStyle: 'marcado',
+      eyeColor: '#E11D48',
+      eyesPosX: 1,
+      eyesPosY: 0,
+      eyesScale: 1.12,
+      eyebrowStyle: 'arqueada',
+      eyebrowColor: '#181412',
+      eyebrowsPosX: 1,
+      eyebrowsPosY: 2,
+      eyebrowsScale: 1.05,
+      noseStyle: 'fino',
+      nosePosX: 0,
+      nosePosY: 0,
+      noseScale: 0.95,
+      mouthStyle: 'cheia',
+      mouthColor: '#9F1239',
+      mouthPosX: 0,
+      mouthPosY: -1,
+      mouthScale: 1.12,
+    },
+  },
+];
 
 export type FurnitureTemplateId =
   | 'tpl_sofa'
@@ -492,9 +796,33 @@ export interface MockUser {
 /** Modo de exibição do ícone oficial de perfil do jogador */
 export type AvatarDisplayMode = 'medoll' | 'photo';
 
+/** Temas animados disponíveis para o banner em movimento do perfil */
+export type ProfileBannerPresetId =
+  | 'atelier_aurora'
+  | 'runway_gold'
+  | 'midnight_velvet'
+  | 'botanical_silk'
+  | 'sunset_rose'
+  | 'custom_image';
+
+/** Configuração persistida do banner animado exibido atrás e acima do perfil */
+export interface ProfileBannerConfig {
+  presetId: ProfileBannerPresetId;
+  customImageUrl?: string;
+  motionSpeed?: 'slow' | 'medium';
+}
+
 /** Estado individual de progresso salvo por conta de usuário */
 export interface PlayerProgressState {
   catalogSchemaVersion?: number;
+  /** Nível atual da conta (1..1000; Admin Geral inicia em 874) */
+  level?: number;
+  /** Pontos de XP acumulados dentro do nível atual */
+  xp?: number;
+  /** Timestamp do último ganho de XP por entrada (login) */
+  lastLoginXpAt?: number;
+  /** Último valor de XP ganho no login */
+  lastLoginXpGained?: number;
   starcoins: number;
   ownedItemIds: string[];
   /** Móveis desbloqueados/comprados pelo jogador para decorar a Suíte */
@@ -512,6 +840,8 @@ export interface PlayerProgressState {
   profilePic?: string;
   /** Define se o ícone oficial usa a MeDoll ao vivo ou a foto enviada */
   avatarDisplayMode: AvatarDisplayMode;
+  /** Banner animado exibido acima e por trás do avatar e informações da conta */
+  profileBanner?: ProfileBannerConfig;
   /** Biografia / Recado livre exibido e editado na aba Meu Perfil */
   bio: string;
   /** Status de presença em tempo real (Online / Ausente / Offline) */
@@ -525,6 +855,7 @@ export interface PlayerProgressState {
   /** Lista de nomes de usuário (normalizados) adicionados como amigos */
   friendUsernames?: string[];
   suite: SuiteLayoutState;
+  faceCustomization?: AvatarFaceCustomization;
 }
 
 /** Mensagem privada entre jogadores salva no localStorage */
@@ -541,12 +872,15 @@ export interface PublicProfileSummary {
   accountId?: string;
   username: string;
   displayName: string;
+  createdAt?: string;
   role: UserRole;
   staffRoleTier?: StaffRoleTier;
   staffRoleTitle?: string;
   serverRegion?: ServerRegion;
   isVip?: boolean;
   level: number;
+  xp?: number;
+  xpRequired?: number;
   starcoins: number;
   presenceStatus: PresenceStatus;
   staffStatus?: StaffStatus;
@@ -559,7 +893,9 @@ export interface PublicProfileSummary {
   avatarGender: AvatarGender;
   customAvatarUrl?: string;
   avatarDisplayMode: AvatarDisplayMode;
+  profileBanner?: ProfileBannerConfig;
   suite: SuiteLayoutState;
+  faceCustomization?: AvatarFaceCustomization;
 }
 
 /** Status em tempo real exibido no card da Equipe de Moderação */
@@ -597,7 +933,13 @@ export type RoomBackdropTheme =
   | 'bar_lounge'
   | 'cobertura_diamante_vip'
   | 'casa_estar_moderna'
-  | 'estudio_3d_designer';
+  | 'estudio_3d_designer'
+  | 'lounge_party_natal'
+  | 'lounge_party_halloween'
+  | 'ilha_tropical'
+  | 'floresta_piquenique'
+  | 'ilha_coqueiro'
+  | 'chao_plano_custom';
 
 /** Item na fila de músicas da Cabine de DJ */
 export interface RoomDjQueuedTrack {
@@ -622,11 +964,17 @@ export interface RoomDjTrack {
 /** Mobília interativa e obstáculos de colisão em salas 2D */
 export interface RoomInteractiveProp {
   id: string;
-  kind: 'chair' | 'sofa' | 'table';
+  kind: 'chair' | 'sofa' | 'table' | 'decor';
   label: string;
   /** Coordenadas percentuais (0..100) no palco da sala */
   x: number;
   y: number;
+  /** Rotação 3D no eixo Y em graus (0..360) */
+  rotationY?: number;
+  /** Tipo opcional de decoração 3D quando kind === 'decor' */
+  decorType?: 'tree' | 'pumpkin' | 'gift' | 'crystal' | 'generic';
+  /** Estilo opcional da cadeira quando kind === 'chair' */
+  chairStyle?: 'standard' | 'wooden_beach';
   /** Ponto de assento em % quando clicável (chair/sofa) */
   seatX?: number;
   seatY?: number;
@@ -650,6 +998,8 @@ export interface RoomDef {
   interactiveProps?: RoomInteractiveProp[];
   /** Papel de parede personalizado aplicado à sala */
   wallpaperId?: string;
+  /** Imagem de plano de fundo carregada do PC do jogador (Data URL comprimida) */
+  customBackgroundImageUrl?: string;
   /** Limite superior e inferior do piso caminhável em coordenadas percentuais (0..100) */
   walkMinY: number;
   walkMaxY: number;
@@ -661,6 +1011,14 @@ export interface RoomDef {
   /** Aviso local exibido dentro da sala e editável pelo dono da sala */
   roomNotice?: string;
   isCustom?: boolean;
+  employees?: Array<{
+    userId: string;
+    username: string;
+    jobTitle: string;
+    wage: number;
+    period: 'hora' | 'semana' | 'mes';
+  }>;
+  supportStaff?: string[];
 }
 
 /** Estado sincronizado de um avatar conectado em uma sala */
@@ -670,6 +1028,8 @@ export interface RoomAvatarPresence {
   role: UserRole;
   staffRoleTier?: StaffRoleTier;
   isVip?: boolean;
+  level?: number;
+  officialRoleLabel?: string;
   roomId: RoomId;
   /** Coordenada horizontal em percentual da largura do palco (8..92) */
   x: number;
@@ -680,6 +1040,7 @@ export interface RoomAvatarPresence {
   equipped: EquippedOutfit;
   skinTone: SkinToneId;
   avatarGender: AvatarGender;
+  faceCustomization?: AvatarFaceCustomization;
   customAvatarUrl?: string;
   avatarDisplayMode?: AvatarDisplayMode;
   lastSeen: number;
@@ -763,6 +1124,10 @@ export interface WorldModerationState {
   serverNotices?: Partial<Record<ServerRegion, string>>;
   users: MockUser[];
   deletedItemIds: string[];
+  /** IDs de itens marcados pelo Administrador como "Vendido" na Starplaza (bloqueia novas compras na loja) */
+  soldOutItemIds?: string[];
+  /** Timestamp real (ms) do lançamento de itens lendários na Starplaza (duração de 24h reais) */
+  legendaryLaunchTimestamps?: Record<string, number>;
   /** Peças de vestuário adicionadas pelo Designer Global ou Ateliê de Criação do Admin */
   customClothingCatalog?: ClothingItem[];
   /** Móveis adicionados pelo Designer Global ou Ateliê de Criação do Admin */
@@ -902,4 +1267,19 @@ export type StaffWorkDeskType =
   | 'cm_control_desk'
   | 'moderator_desk'
   | 'designer_workbench';
+
+/** Anúncio de item no Mercado P2P entre jogadores */
+export interface MarketListing {
+  id: string;
+  itemId: string;
+  sellerAccountId: string;
+  sellerUsername: string;
+  sellerDisplayName?: string;
+  price: number;
+  createdAt: number;
+  status: 'active' | 'sold' | 'cancelled';
+  buyerAccountId?: string;
+  buyerUsername?: string;
+  soldAt?: number;
+}
 

@@ -5,6 +5,10 @@
 
 import crypto from 'node:crypto';
 import type { PlayerProgressState, ServerRegion, UserAccount } from '../src/types/game.ts';
+import {
+  ADMIN_CREATED_AT,
+  ADMIN_INITIAL_LEVEL,
+} from '../src/utils/levelSystem.ts';
 
 export const ADMIN_OWNER_EMAIL = 'miranda88686673@gmail.com';
 
@@ -69,30 +73,8 @@ export function buildInitialPlayerProgressServer(
   accountId: string,
   avatarGender: UserAccount['avatarGender'],
   serverRegion: ServerRegion = 'BR',
+  isPrimaryAdmin: boolean = accountId === 'acc_admin_owner',
 ): PlayerProgressState {
-  const isMasc = avatarGender === 'masculino';
-  const isNeutro = avatarGender === 'neutro';
-
-  const starterItems = isMasc
-    ? ['m_hair_01', 'm_hair_02', 'm_top_01', 'm_bottom_01', 'm_shoes_01']
-    : isNeutro
-      ? ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01', 'm_hair_01', 'm_top_01', 'm_bottom_01', 'm_shoes_01']
-      : ['f_hair_01', 'f_hair_02', 'f_top_01', 'f_bottom_01', 'f_shoes_01'];
-
-  const defaultEquipped = isMasc
-    ? {
-        cabelo: 'm_hair_01',
-        blusas: 'm_top_01',
-        calcas: 'm_bottom_01',
-        sapatos: 'm_shoes_01',
-      }
-    : {
-        cabelo: 'f_hair_01',
-        blusas: 'f_top_01',
-        calcas: 'f_bottom_01',
-        sapatos: 'f_shoes_01',
-      };
-
   const countryCode =
     serverRegion === 'ES' ? 'ES' : serverRegion === 'EN' ? 'US' : 'BR';
   const timezone =
@@ -103,17 +85,19 @@ export function buildInitialPlayerProgressServer(
         : 'America/Sao_Paulo';
 
   return {
-    catalogSchemaVersion: 3,
+    catalogSchemaVersion: 4,
+    level: isPrimaryAdmin ? ADMIN_INITIAL_LEVEL : 1,
+    xp: 0,
     starcoins: 1200,
-    ownedItemIds: starterItems,
+    ownedItemIds: [],
     ownedFurnitureIds: ['furn_tapete_persa', 'furn_sofa_veludo', 'furn_luminaria_arco'],
     ownedRoomTemplateIds: ['tpl_room_cozy', 'tpl_room_lounge'],
     ownedWallpaperIds: ['wp_boiserie_marfim'],
-    equipped: defaultEquipped,
+    equipped: {},
     skinTone: 'pessego',
     avatarGender,
     avatarDisplayMode: 'medoll',
-    bio: 'Explorando estilos na Starplaza e decorando minha Suíte no Starlight Atelier.',
+    bio: 'Explorando estilos na Starplaza e decorando minha Suíte no Nocturne Vale Club.',
     presenceStatus: 'online',
     countryCode,
     timezone,
@@ -142,7 +126,7 @@ export function createSeededServerAccounts(): UserAccount[] {
   return [
     {
       id: 'acc_admin_owner',
-      username: 'vitor',
+      username: 'Vitor',
       displayName: 'Vitor',
       email: ADMIN_OWNER_EMAIL,
       password: '',
@@ -153,7 +137,7 @@ export function createSeededServerAccounts(): UserAccount[] {
       staffRoleTitle: 'Administrador Geral',
       isVip: true,
       isPrimaryOwner: true,
-      createdAt: '01/01/2025',
+      createdAt: ADMIN_CREATED_AT,
     },
   ];
 }
@@ -178,7 +162,7 @@ export async function sendRecoveryEmailIfConfigured(params: {
 
   try {
     const fromEmail =
-      process.env.RECOVERY_FROM_EMAIL || 'Starlight Atelier <onboarding@resend.dev>';
+      process.env.RECOVERY_FROM_EMAIL || 'Nocturne Vale Club <onboarding@resend.dev>';
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -188,10 +172,10 @@ export async function sendRecoveryEmailIfConfigured(params: {
       body: JSON.stringify({
         from: fromEmail,
         to: [params.toEmail],
-        subject: 'Starlight Atelier · Código de Redefinição de Senha',
+        subject: 'Nocturne Vale Club · Código de Redefinição de Senha',
         html:
           `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e6e0d8;border-radius:12px;">` +
-          `<h2 style="color:#c8235d;margin:0 0 12px;">Starlight Atelier</h2>` +
+          `<h2 style="color:#c8235d;margin:0 0 12px;">Nocturne Vale Club</h2>` +
           `<p>Olá <strong>@${params.username}</strong>,</p>` +
           `<p>Recebemos uma solicitação para redefinir a senha da sua conta. Use o código temporário abaixo (válido por 15 minutos):</p>` +
           `<div style="font-size:24px;font-weight:bold;letter-spacing:6px;background:#faf8f5;padding:16px;text-align:center;border-radius:8px;margin:16px 0;color:#1c1917;">${params.token}</div>` +

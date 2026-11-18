@@ -1,13 +1,27 @@
 /**
  * DJMediaSyncController — Ponte de Mídia Externa (YouTube IFrame Player API).
- * Carrega https://www.youtube.com/iframe_api assincronamente e sincroniza a faixa
- * da Cabine de DJ (video_id, started_at, is_playing) ao segundo exato entre todos os clientes.
+ * Carrega https://www.youtube.com/iframe_api assincronamente, exibe o vídeo na
+ * tela da Cabine de DJ e sincroniza áudio espacial + segundo exato entre clientes.
  */
 
 export interface DjSyncTrackInput {
   video_id: string;
   started_at: number;
   is_playing: boolean;
+}
+
+export type DjPlaybackState =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'blocked'
+  | 'error';
+
+export interface DjPlaybackStatus {
+  state: DjPlaybackState;
+  needsAudioUnlock: boolean;
+  errorCode?: number;
 }
 
 interface YTPlayerInstance {
@@ -18,9 +32,11 @@ interface YTPlayerInstance {
   stopVideo: () => void;
   mute: () => void;
   unMute: () => void;
+  isMuted?: () => boolean;
   setVolume: (volume: number) => void;
   getCurrentTime: () => number;
   getPlayerState: () => number;
+  getIframe?: () => HTMLIFrameElement;
   destroy: () => void;
 }
 
@@ -112,10 +128,13 @@ export class DJMediaSyncController {
   private pendingTrack: DjSyncTrackInput | null = null;
   private muted = false;
   private volume = 80;
+  private spatialGain = 1;
   private onEndedCallback?: () => void;
+  private onStatusCallback?: (status: DjPlaybackStatus) => void;
+  private autoplayCheckTimer: number | null = null;
   private destroyed = false;
 
-  /** Inicializa o YT.Player dentro do elemento container oculto ou visível */
+  /** Inicializa o YT.Player visível ocupando 100% da tela da Cabine de DJ */
   async mount(container: HTMLElement): Promise<void> {
     if (this.destroyed || this.player) return;
 
@@ -123,37 +142,72 @@ export class DJMediaSyncController {
     if (this.destroyed) return;
 
     const hostEl = document.createElement('div');
+    hostEl.style.width = '100%';
+    hostEl.style.height = '100%';
     container.innerHTML = '';
     container.appendChild(hostEl);
 
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : undefined;
+
     this.player = new YT.Player(hostEl, {
-      height: '1',
-      width: '1',
+      height: '100%',
+      width: '100%',
       videoId: this.pendingTrack?.video_id ?? undefined,
       playerVars: {
         autoplay: 1,
-        controls: 0,
-        disablekb: 1,
+        controls: 1,
+        disablekb: 0,
         enablejsapi: 1,
+        fs: 0,
+        iv_load_policy: 3,
         modestbranding: 1,
         playsinline: 1,
         rel: 0,
+        ...(origin ? { origin } : {}),
       },
       events: {
         onReady: () => {
           this.isPlayerReady = true;
-          if (this.muted || this.volume <= 0) {
-            this.player?.mute();
-          } else {
-            this.player?.unMute();
-            this.player?.setVolume(this.volume);
+          try {
+            const iframe = this.player?.getIframe?.();
+            if (iframe) {
+              iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+              iframe.style.width = '100%';
+              iframe.style.height = '100%';
+              iframe.style.display = 'block';
+              iframe.style.border = '0';
+            }
+          } catch {
+            // Silencioso
           }
+          this.applyVolumeToPlayer();
           if (this.pendingTrack) {
             this.applyTrackState(this.pendingTrack);
+          } else {
+            this.emitStatus('idle', false);
           }
         },
         onStateChange: (ev) => {
-          if (ev.data === 0) {
+          // 0=ENDED, 1=PLAYING, 2=PAUSED, 3=BUFFERING, 5=CUED, -1=UNSTARTED
+          if (ev.data === 1) {
+            this.clearAutoplayTimer();
+            let playerIsMuted = false;
+            try {
+              playerIsMuted = Boolean(this.player?.isMuted?.());
+            } catch {
+              playerIsMuted = false;
+            }
+            const needsUnlock = !this.muted && this.volume > 0 && playerIsMuted;
+            this.emitStatus('playing', needsUnlock);
+          } else if (ev.data === 2) {
+            this.emitStatus('paused', false);
+          } else if (ev.data === 3) {
+            this.emitStatus('loading', false);
+          } else if (ev.data === 0) {
+            this.clearAutoplayTimer();
             if (this.onEndedCallback) {
               this.onEndedCallback();
             } else if (this.pendingTrack?.is_playing) {
@@ -164,12 +218,69 @@ export class DJMediaSyncController {
             }
           }
         },
+        onError: (ev) => {
+          this.clearAutoplayTimer();
+          this.emitStatus('error', false, ev.data);
+        },
       },
     });
   }
 
+  private clearAutoplayTimer(): void {
+    if (this.autoplayCheckTimer !== null) {
+      window.clearTimeout(this.autoplayCheckTimer);
+      this.autoplayCheckTimer = null;
+    }
+  }
+
+  private emitStatus(
+    state: DjPlaybackState,
+    needsAudioUnlock: boolean,
+    errorCode?: number,
+  ): void {
+    this.onStatusCallback?.({ state, needsAudioUnlock, errorCode });
+  }
+
+  private getEffectiveVolume(): number {
+    return Math.max(0, Math.min(100, Math.round(this.volume * this.spatialGain)));
+  }
+
+  private applyVolumeToPlayer(): void {
+    if (!this.player || !this.isPlayerReady) return;
+    const effective = this.getEffectiveVolume();
+    try {
+      if (this.muted || effective <= 0) {
+        this.player.mute();
+      } else {
+        this.player.unMute();
+        this.player.setVolume(effective);
+      }
+    } catch {
+      // Silencioso
+    }
+  }
+
   setOnEnded(cb?: () => void): void {
     this.onEndedCallback = cb;
+  }
+
+  setOnStatusChange(cb?: (status: DjPlaybackStatus) => void): void {
+    this.onStatusCallback = cb;
+  }
+
+  /** Desbloqueia áudio e inicia reprodução em resposta direta a um clique do jogador */
+  unlockAudio(): void {
+    this.muted = false;
+    if (!this.player || !this.isPlayerReady) return;
+    const effective = this.getEffectiveVolume();
+    try {
+      this.player.unMute();
+      this.player.setVolume(Math.max(5, effective));
+      this.player.playVideo();
+      this.emitStatus('playing', false);
+    } catch {
+      this.emitStatus('blocked', true);
+    }
   }
 
   /** Calcula o segundo exato decorrido desde `started_at` */
@@ -187,32 +298,41 @@ export class DJMediaSyncController {
 
   private applyTrackState(track: DjSyncTrackInput | null): void {
     if (!this.player || !this.isPlayerReady) return;
+    this.clearAutoplayTimer();
 
     if (!track || !track.video_id) {
       this.currentVideoId = null;
-      this.player.stopVideo();
+      try {
+        this.player.stopVideo();
+      } catch {
+        // Silencioso
+      }
+      this.emitStatus('idle', false);
       return;
     }
 
     const startSeconds = DJMediaSyncController.computeElapsedSeconds(track.started_at);
+    this.applyVolumeToPlayer();
 
     if (this.currentVideoId !== track.video_id) {
       this.currentVideoId = track.video_id;
+      this.emitStatus('loading', false);
       if (track.is_playing) {
         this.player.loadVideoById({
           videoId: track.video_id,
           startSeconds,
         });
+        this.scheduleAutoplayVerify();
       } else {
         this.player.cueVideoById({
           videoId: track.video_id,
           startSeconds,
         });
+        this.emitStatus('paused', false);
       }
     } else if (track.is_playing) {
       try {
         const currentTime = this.player.getCurrentTime?.() ?? startSeconds;
-        // Só corrige posição se houver deriva superior a 2 segundos para evitar engasgos
         if (Math.abs(currentTime - startSeconds) > 2.5) {
           this.player.loadVideoById({
             videoId: track.video_id,
@@ -221,39 +341,66 @@ export class DJMediaSyncController {
         } else {
           this.player.playVideo();
         }
+        this.scheduleAutoplayVerify();
       } catch {
         this.player.playVideo();
       }
     } else {
       this.player.pauseVideo();
+      this.emitStatus('paused', false);
     }
+  }
+
+  /**
+   * Verifica se o navegador bloqueou autoplay com som: caso travado em UNSTARTED/CUED,
+   * inicia reprodução mutada e sinaliza o botão de desbloqueio de som para o jogador.
+   */
+  private scheduleAutoplayVerify(): void {
+    this.clearAutoplayTimer();
+    this.autoplayCheckTimer = window.setTimeout(() => {
+      if (this.destroyed || !this.player || !this.isPlayerReady) return;
+      if (!this.pendingTrack?.is_playing) return;
+      try {
+        const state = this.player.getPlayerState?.();
+        const playerMuted = Boolean(this.player.isMuted?.());
+        if (state === 1) {
+          this.emitStatus('playing', !this.muted && this.volume > 0 && playerMuted);
+          return;
+        }
+        if (state === -1 || state === 5 || state === 2) {
+          // Navegador bloqueou autoplay com som: inicia vídeo visível mutado e avisa usuário
+          this.player.mute();
+          this.player.playVideo();
+          this.emitStatus('blocked', true);
+        }
+      } catch {
+        // Silencioso
+      }
+    }, 1100);
   }
 
   setMuted(muted: boolean): void {
     this.muted = muted;
-    if (!this.player || !this.isPlayerReady) return;
-    if (muted || this.volume <= 0) {
-      this.player.mute();
-    } else {
-      this.player.unMute();
-      this.player.setVolume(this.volume);
-    }
+    this.applyVolumeToPlayer();
   }
 
   setVolume(vol: number): void {
     const clamped = Math.max(0, Math.min(100, Math.round(vol)));
     this.volume = clamped;
-    if (!this.player || !this.isPlayerReady) return;
-    if (this.muted || clamped <= 0) {
-      this.player.mute();
-    } else {
-      this.player.unMute();
-      this.player.setVolume(clamped);
-    }
+    this.applyVolumeToPlayer();
+  }
+
+  /** Aplica atenuação suave baseada na distância até a Cabine de DJ (0.55..1.0) */
+  setSpatialGain(gain: number): void {
+    const clamped = Math.max(0.55, Math.min(1, gain));
+    if (Math.abs(this.spatialGain - clamped) < 0.015) return;
+    this.spatialGain = clamped;
+    this.applyVolumeToPlayer();
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.clearAutoplayTimer();
     try {
       this.player?.destroy();
     } catch {

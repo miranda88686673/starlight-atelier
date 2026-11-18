@@ -1,7 +1,7 @@
 {
-  "name": "Starlight Atelier",
-  "description": "Protótipo de jogo web 2D de moda e decoração inspirado no clássico Stardoll, com MeDoll em camadas, Starplaza, Suíte interativa e Mod Tools.",
-  "requestFramePermissions": [],
+  "name": "Nocturne Vale Club",
+  "description": "Nocturne Vale Club - Jogo web 2D de moda, MeDoll em camadas, Starplaza, Suíte e salas oficiais.",
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

@@ -9,6 +9,7 @@
  */
 
 import type { ClothingItem, SkinToneId } from '../../../types/game';
+import { getEquippedAccessoriesList } from '../../../utils/storage';
 import {
   AVATAR_STRICT_LAYER_ORDER,
   type AvatarRenderEntity,
@@ -169,8 +170,11 @@ export class AvatarRigAssembler {
     const shoesAsset = getAsset(avatar.equipped.sapatos);
     const dressAsset = getAsset(avatar.equipped.vestidos);
     const topAsset = dressAsset ? null : getAsset(avatar.equipped.blusas);
+    const coatAsset = getAsset(avatar.equipped.casacos);
     const hairAsset = getAsset(avatar.equipped.cabelo);
-    const accAsset = getAsset(avatar.equipped.acessorios);
+    const accAssets = getEquippedAccessoriesList(avatar.equipped, catalogMap).map(
+      ({ item }) => toStarlightItemAsset(item),
+    );
 
     ctx.save();
     ctx.translate(avatar.x, avatar.y);
@@ -178,7 +182,7 @@ export class AvatarRigAssembler {
       ctx.scale(-1, 1);
     }
 
-    const hasTopOrDress = Boolean(dressAsset || topAsset);
+    const hasTopOrDress = Boolean(dressAsset || topAsset || coatAsset);
     const hasBottomOrDress = Boolean(dressAsset || bottomAsset);
     const isFullMalhaBase = !hasTopOrDress && !hasBottomOrDress;
 
@@ -233,6 +237,9 @@ export class AvatarRigAssembler {
           } else if (topAsset) {
             this.drawGarmentOnRig(ctx, topAsset, bones, isMasc, isSit);
           }
+          if (coatAsset) {
+            this.drawGarmentOnRig(ctx, coatAsset, bones, isMasc, isSit);
+          }
           break;
         }
 
@@ -249,8 +256,8 @@ export class AvatarRigAssembler {
         }
 
         case AVATAR_STRICT_LAYER_ORDER.ACCESSORIES: {
-          if (accAsset) {
-            this.drawGarmentOnRig(ctx, accAsset, bones, isMasc, isSit);
+          for (const acc of accAssets) {
+            this.drawGarmentOnRig(ctx, acc, bones, isMasc, isSit);
           }
           break;
         }

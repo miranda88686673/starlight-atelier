@@ -209,7 +209,7 @@ export const DjBoothModal: React.FC<DjBoothModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-[#94A3B8]">
-                Tocando som sincronizado para todos em <strong>{roomName}</strong>
+                Reproduzindo som e vídeo do YouTube na tela da Cabine de DJ em <strong>{roomName}</strong>
               </p>
             </div>
           </div>

@@ -18,6 +18,175 @@ export const RoomBackdropSvg: React.FC<RoomBackdropSvgProps> = React.memo(
     const uid = useId().replace(/:/g, '');
 
     const renderArchitecturalBackdrop = () => {
+      if (theme === 'lounge_party') {
+        return (
+          <svg
+            viewBox="0 0 800 500"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id={`${uid}_sky`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#38BDF8" />
+                <stop offset="65%" stopColor="#7DD3FC" />
+                <stop offset="100%" stopColor="#BAE6FD" />
+              </linearGradient>
+              <linearGradient id={`${uid}_woodDeck`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#7A4928" />
+                <stop offset="100%" stopColor="#5C3419" />
+              </linearGradient>
+              <linearGradient id={`${uid}_aqWater`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0EA5E9" stopOpacity="0.45" />
+                <stop offset="100%" stopColor="#0369A1" stopOpacity="0.65" />
+              </linearGradient>
+            </defs>
+
+            {/* Céu azul limpo e lindo com sol radiante */}
+            <rect x="0" y="0" width="800" height="290" fill={`url(#${uid}_sky)`} />
+            <circle cx="670" cy="52" r="34" fill="#FEF3C7" opacity="0.95" />
+            <circle cx="670" cy="52" r="48" fill="#FDE68A" opacity="0.32" />
+
+            {/* Nuvens fofas brancas no céu limpo */}
+            {[
+              { cx: 140, cy: 62, r: 24 },
+              { cx: 165, cy: 56, r: 20 },
+              { cx: 380, cy: 75, r: 28 },
+              { cx: 412, cy: 68, r: 22 },
+            ].map((cl, i) => (
+              <g key={i} fill="#FFFFFF" opacity="0.82">
+                <circle cx={cl.cx} cy={cl.cy} r={cl.r} />
+                <circle cx={cl.cx + 22} cy={cl.cy + 4} r={cl.r * 0.8} />
+                <circle cx={cl.cx - 20} cy={cl.cy + 6} r={cl.r * 0.75} />
+              </g>
+            ))}
+
+            {/* Prédios modernos diurnos no plano de fundo */}
+            {[
+              { x: 10, y: 110, w: 58, h: 180 },
+              { x: 74, y: 68, w: 52, h: 222 },
+              { x: 132, y: 95, w: 62, h: 195 },
+              { x: 202, y: 52, w: 56, h: 238 },
+              { x: 266, y: 88, w: 66, h: 202 },
+              { x: 342, y: 64, w: 58, h: 226 },
+              { x: 408, y: 98, w: 60, h: 192 },
+              { x: 476, y: 56, w: 64, h: 234 },
+              { x: 548, y: 84, w: 54, h: 206 },
+              { x: 610, y: 72, w: 62, h: 218 },
+              { x: 680, y: 92, w: 56, h: 198 },
+              { x: 742, y: 114, w: 52, h: 176 },
+            ].map((b, i) => (
+              <g key={b.x}>
+                <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="#1E293B" stroke="#334155" strokeWidth="1.5" />
+                {[0, 1, 2, 3, 4, 5].map((r) => (
+                  <rect
+                    key={r}
+                    x={b.x + 8}
+                    y={b.y + 14 + r * 22}
+                    width={b.w - 16}
+                    height="7"
+                    fill={i % 2 === 0 ? '#E2E8F0' : '#94A3B8'}
+                    opacity="0.85"
+                  />
+                ))}
+              </g>
+            ))}
+
+            {/* Paredes de vidro panorâmicas */}
+            <rect x="0" y="165" width="800" height="125" fill="#E0F2FE" opacity="0.25" />
+            <line x1="0" y1="165" x2="800" y2="165" stroke="#94A3B8" strokeWidth="3.5" />
+            {[160, 320, 480, 640].map((gx) => (
+              <line key={gx} x1={gx} y1="165" x2={gx} y2="290" stroke="#94A3B8" strokeWidth="2.5" opacity="0.7" />
+            ))}
+
+            {/* Aquários de luxo com peixes nadando junto às paredes de vidro */}
+            {[36, 564].map((ax) => (
+              <g key={ax}>
+                <rect x={ax} y="256" width="200" height="32" fill="#0F172A" stroke="#D4A853" strokeWidth="2" />
+                <rect x={ax + 2} y="180" width="196" height="76" fill={`url(#${uid}_aqWater)`} stroke="#D4A853" strokeWidth="2.5" />
+                <ellipse cx={ax + 52} cy="212" rx="12" ry="6" fill="#FF6B2B" />
+                <polygon points={`${ax + 40},212 ${ax + 31},206 ${ax + 31},218`} fill="#FFFFFF" />
+                <ellipse cx={ax + 112} cy="228" rx="11" ry="5.5" fill="#FACC15" />
+                <polygon points={`${ax + 123},228 ${ax + 132},223 ${ax + 132},233`} fill="#FEF3C7" />
+                <ellipse cx={ax + 158} cy="204" rx="10" ry="5" fill="#38BDF8" />
+                <polygon points={`${ax + 148},204 ${ax + 140},199 ${ax + 140},209`} fill="#E0F2FE" />
+              </g>
+            ))}
+
+            {/* Chão de madeira do terraço */}
+            <rect x="0" y="288" width="800" height="212" fill={`url(#${uid}_woodDeck)`} />
+            {[320, 355, 390, 425, 460, 492].map((wy) => (
+              <line key={wy} x1="0" y1={wy} x2="800" y2={wy} stroke="#3D2110" strokeWidth="2" opacity="0.65" />
+            ))}
+            <ellipse cx="400" cy="396" rx="165" ry="44" fill="#2A1B12" opacity="0.65" stroke="#F59E0B" strokeWidth="3" />
+          </svg>
+        );
+      }
+
+      if (theme === 'ilha_tropical' || theme === 'ilha_coqueiro') {
+        return (
+          <svg
+            viewBox="0 0 800 500"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id={`${uid}_tropSky`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0EA5E9" />
+                <stop offset="100%" stopColor="#BAE6FD" />
+              </linearGradient>
+              <linearGradient id={`${uid}_tropOcean`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0284C7" />
+                <stop offset="100%" stopColor="#22D3EE" />
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="800" height="250" fill={`url(#${uid}_tropSky)`} />
+            <circle cx="675" cy="60" r="34" fill="#FEF08A" />
+            <rect x="0" y="220" width="800" height="280" fill={`url(#${uid}_tropOcean)`} />
+            <ellipse cx="400" cy="390" rx="310" ry="105" fill="#F2D296" stroke="#FFFFFF" strokeWidth="6" strokeOpacity="0.65" />
+            {/* Coqueiro esquerdo */}
+            <path d="M120 355 Q138 250 110 155" stroke="#7C5333" strokeWidth="14" fill="none" strokeLinecap="round" />
+            <circle cx="110" cy="164" r="8" fill="#4B2C15" />
+            <circle cx="120" cy="168" r="8" fill="#4B2C15" />
+            <path d="M110 155 Q50 130 30 180 M110 155 Q175 125 190 175 M110 155 Q105 95 145 105" stroke="#16A34A" strokeWidth="10" fill="none" strokeLinecap="round" />
+            {theme === 'ilha_tropical' && (
+              <>
+                <path d="M680 355 Q662 250 690 155" stroke="#7C5333" strokeWidth="14" fill="none" strokeLinecap="round" />
+                <circle cx="690" cy="164" r="8" fill="#4B2C15" />
+                <circle cx="680" cy="168" r="8" fill="#4B2C15" />
+                <path d="M690 155 Q625 125 610 175 M690 155 Q750 130 770 180 M690 155 Q695 95 655 105" stroke="#16A34A" strokeWidth="10" fill="none" strokeLinecap="round" />
+              </>
+            )}
+          </svg>
+        );
+      }
+
+      if (theme === 'floresta_piquenique') {
+        return (
+          <svg
+            viewBox="0 0 800 500"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            preserveAspectRatio="none"
+          >
+            <rect x="0" y="0" width="800" height="250" fill="#7DD3FC" />
+            <circle cx="660" cy="65" r="32" fill="#FEF08A" />
+            <rect x="0" y="230" width="800" height="270" fill="#4ADE80" />
+            <ellipse cx="195" cy="365" rx="115" ry="48" fill="#0EA5E9" stroke="#78716C" strokeWidth="8" />
+            {[90, 210, 590, 710].map((tx) => (
+              <g key={tx}>
+                <rect x={tx - 10} y="155" width="20" height="95" fill="#78350F" />
+                <circle cx={tx} cy="130" r="52" fill="#15803D" />
+                <circle cx={tx - 24} cy="150" r="36" fill="#16A34A" />
+                <circle cx={tx + 24} cy="150" r="36" fill="#22C55E" />
+              </g>
+            ))}
+            <rect x="470" y="340" width="150" height="72" rx="6" fill="#EF4444" fillOpacity="0.85" stroke="#FFFFFF" strokeWidth="4" />
+            <circle cx="515" cy="366" r="10" fill="#A1622B" />
+            <circle cx="560" cy="378" r="8" fill="#EF4444" />
+            <circle cx="585" cy="372" r="8" fill="#F97316" />
+          </svg>
+        );
+      }
+
       if (theme === 'boate_neon') {
         return (
           <svg
@@ -673,6 +842,20 @@ export const RoomBackdropSvg: React.FC<RoomBackdropSvgProps> = React.memo(
             <rect x="730" y="195" width="45" height="90" rx="3" fill="#111827" stroke="#F472B6" strokeWidth="1.5" />
             <circle cx="753" cy="225" r="14" fill="#1F2937" stroke="#F472B6" strokeWidth="1" />
             <circle cx="753" cy="262" r="16" fill="#1F2937" stroke="#F472B6" strokeWidth="1" />
+          </svg>
+        );
+      }
+
+      if (theme === 'chao_plano_custom') {
+        return (
+          <svg
+            viewBox="0 0 800 500"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            preserveAspectRatio="none"
+          >
+            <rect x="0" y="0" width="800" height="295" fill="#CBD5E1" />
+            <rect x="0" y="295" width="800" height="205" fill="#EFEAE3" />
+            <line x1="0" y1="295" x2="800" y2="295" stroke="#D6CFC7" strokeWidth="2" />
           </svg>
         );
       }

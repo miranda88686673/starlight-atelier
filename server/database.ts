@@ -17,6 +17,7 @@ import type {
 } from '../src/core/schemas/dbSchema.ts';
 import type {
   BanReviewRequest,
+  MarketListing,
   NewsPost,
   PlayerProgressState,
   PremiumOrder,
@@ -36,6 +37,17 @@ import {
   sanitizeAccountForClient,
   verifyPassword,
 } from './auth.ts';
+import {
+  ADMIN_CREATED_AT,
+  ADMIN_INITIAL_LEVEL,
+  LOGIN_XP_REWARD,
+  awardLoginXp,
+  canonicalCharacterKey,
+  cleanCharacterName,
+  collapsedCharacterKey,
+  normalizeLevelAndXp,
+  validateCharacterName,
+} from '../src/utils/levelSystem.ts';
 
 function resolveDbFilePath(): string {
   const cwdCandidate = path.resolve(process.cwd(), '.starlight_db.json');
@@ -88,7 +100,7 @@ function migrateAccountTitleAndStripBot(acc: UserAccount): UserAccount {
   };
 }
 
-const SERVER_CATALOG_SCHEMA_VERSION = 3;
+const SERVER_CATALOG_SCHEMA_VERSION = 4;
 
 function sanitizeWorldStateNoBots(
   worldState: WorldModerationState | null | undefined,
@@ -100,28 +112,75 @@ function sanitizeWorldStateNoBots(
   const filteredCustomClothes = Array.isArray(worldState.customClothingCatalog)
     ? worldState.customClothingCatalog.filter((c) => Boolean(c?.threeSpec))
     : [];
+  const filteredNews = Array.isArray(worldState.newsPosts)
+    ? worldState.newsPosts.filter((p) => !p.id.startsWith('news_seed_'))
+    : [];
+  const now = Date.now();
+  const rawLaunches =
+    worldState.legendaryLaunchTimestamps &&
+    typeof worldState.legendaryLaunchTimestamps === 'object'
+      ? worldState.legendaryLaunchTimestamps
+      : {};
+  const mergedLaunches: Record<string, number> = {
+    legendary_coroa_2023: rawLaunches.legendary_coroa_2023 ?? now,
+    legendary_coroa_2024: rawLaunches.legendary_coroa_2024 ?? now,
+    legendary_coroa_2025: rawLaunches.legendary_coroa_2025 ?? now,
+    legendary_coroa_2026: rawLaunches.legendary_coroa_2026 ?? now,
+    legendary_dragaozinho: rawLaunches.legendary_dragaozinho ?? now,
+    legendary_tigre_branco: rawLaunches.legendary_tigre_branco ?? now,
+    ...rawLaunches,
+  };
   return {
     ...worldState,
     catalogSchemaVersion: SERVER_CATALOG_SCHEMA_VERSION,
     users: cleanedUsers,
+    soldOutItemIds: Array.isArray(worldState.soldOutItemIds) ? worldState.soldOutItemIds : [],
+    legendaryLaunchTimestamps: mergedLaunches,
     customClothingCatalog: filteredCustomClothes,
+    customFurnitureCatalog: Array.isArray(worldState.customFurnitureCatalog)
+      ? worldState.customFurnitureCatalog
+      : [],
+    customRoomCatalog: Array.isArray(worldState.customRoomCatalog)
+      ? worldState.customRoomCatalog
+      : [],
+    customWallpaperCatalog: Array.isArray(worldState.customWallpaperCatalog)
+      ? worldState.customWallpaperCatalog
+      : [],
+    newsPosts: filteredNews,
   };
 }
 
-function sanitizePlayerProgressV3Server(
+function sanitizePlayerProgressV4Server(
   accountId: string,
   progress: PlayerProgressState,
   gender: UserAccount['avatarGender'],
+  isPrimaryAdmin: boolean = accountId === 'acc_admin_owner',
 ): PlayerProgressState {
-  if (progress.catalogSchemaVersion === SERVER_CATALOG_SCHEMA_VERSION) {
-    return progress;
-  }
-  const base = buildInitialPlayerProgressServer(accountId, gender);
+  const { level, xp } = normalizeLevelAndXp(progress.level, progress.xp, isPrimaryAdmin);
+  const base = buildInitialPlayerProgressServer(accountId, gender, 'BR', isPrimaryAdmin);
+  const mergedOwnedItems = Array.isArray(progress.ownedItemIds)
+    ? Array.from(new Set([...base.ownedItemIds, ...progress.ownedItemIds]))
+    : [...base.ownedItemIds];
   return {
+    ...base,
     ...progress,
     catalogSchemaVersion: SERVER_CATALOG_SCHEMA_VERSION,
-    ownedItemIds: base.ownedItemIds,
-    equipped: base.equipped,
+    level,
+    xp,
+    ownedItemIds: mergedOwnedItems,
+    ownedFurnitureIds: Array.isArray(progress.ownedFurnitureIds)
+      ? Array.from(new Set([...(base.ownedFurnitureIds ?? []), ...progress.ownedFurnitureIds]))
+      : [...(base.ownedFurnitureIds ?? [])],
+    ownedRoomTemplateIds: Array.isArray(progress.ownedRoomTemplateIds)
+      ? Array.from(new Set([...(base.ownedRoomTemplateIds ?? []), ...progress.ownedRoomTemplateIds]))
+      : [...(base.ownedRoomTemplateIds ?? [])],
+    ownedWallpaperIds: Array.isArray(progress.ownedWallpaperIds)
+      ? Array.from(new Set([...(base.ownedWallpaperIds ?? []), ...progress.ownedWallpaperIds]))
+      : [...(base.ownedWallpaperIds ?? [])],
+    equipped:
+      progress.equipped && typeof progress.equipped === 'object'
+        ? progress.equipped
+        : { ...base.equipped },
   };
 }
 
@@ -142,11 +201,40 @@ function sanitizeRoomsSnapshotNoBots(
     ) {
       continue;
     }
-    const validRoom = pres.roomId === 'lounge_party' || customRoomIds.has(pres.roomId);
-    nextPresences[cid] = validRoom ? pres : { ...pres, roomId: 'lounge_party' };
+    const validRoom =
+      pres.roomId === 'lounge_party' ||
+      pres.roomId === 'lounge_party_es' ||
+      pres.roomId === 'lounge_party_en' ||
+      pres.roomId === 'ilha_brasil' ||
+      pres.roomId === 'ilha_spanish' ||
+      pres.roomId === 'ilha_english' ||
+      customRoomIds.has(pres.roomId);
+    const prevEq = pres.equipped ?? {};
+    const cleanEq: NonNullable<typeof pres.equipped> = {};
+    (Object.keys(prevEq) as Array<keyof typeof cleanEq>).forEach((slot) => {
+      if (slot === 'acessoriosSlots') {
+        if (prevEq.acessoriosSlots && typeof prevEq.acessoriosSlots === 'object') {
+          cleanEq.acessoriosSlots = prevEq.acessoriosSlots;
+        }
+        return;
+      }
+      const id = prevEq[slot];
+      if (typeof id === 'string' && id.trim().length > 0) {
+        cleanEq[slot] = id;
+      }
+    });
+    nextPresences[cid] = {
+      ...(validRoom ? pres : { ...pres, roomId: 'lounge_party' }),
+      equipped: cleanEq,
+    };
   }
   return {
     ...snapshot,
+    customRooms: Array.isArray(snapshot.customRooms) ? snapshot.customRooms : [],
+    messagesByRoom: snapshot.messagesByRoom ?? {},
+    kicks: Array.isArray(snapshot.kicks) ? snapshot.kicks : [],
+    djTracksByRoom: snapshot.djTracksByRoom ?? {},
+    officialOverrides: snapshot.officialOverrides ?? {},
     presences: nextPresences,
   };
 }
@@ -166,6 +254,7 @@ function createEmptyDb(): ServerDatabaseDocument {
     support_tickets: [],
     ban_reviews: [],
     premium_orders: [],
+    market_listings: [],
     premium_pix_config: {
       pixKey: DEFAULT_LOJA_PREMIUM_PIX_KEY,
     },
@@ -174,12 +263,26 @@ function createEmptyDb(): ServerDatabaseDocument {
   };
 }
 
-class StarlightServerDatabase {
+class NocturneValeServerDatabase {
   private doc: ServerDatabaseDocument;
   private writeTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.doc = this.loadFromDisk();
+    if (typeof process !== 'undefined') {
+      const flushOnExit = () => {
+        this.flushSaveNow();
+      };
+      process.once('beforeExit', flushOnExit);
+      process.once('SIGINT', () => {
+        flushOnExit();
+        process.exit(0);
+      });
+      process.once('SIGTERM', () => {
+        flushOnExit();
+        process.exit(0);
+      });
+    }
   }
 
   private hydrateSeededAccounts(existing: UserAccount[]): UserAccount[] {
@@ -189,14 +292,24 @@ class StarlightServerDatabase {
     );
     const list = cleaned.map((rawAcc) => {
       const acc = migrateAccountTitleAndStripBot(rawAcc);
-      if (!acc.password_hash && acc.password) {
+      const isPrimaryOwner =
+        Boolean(acc.isPrimaryOwner) || acc.id === 'acc_admin_owner';
+      const nextCreatedAt = isPrimaryOwner ? ADMIN_CREATED_AT : acc.createdAt;
+      const unifiedName = cleanCharacterName(acc.displayName || acc.username) || acc.username;
+      const normalizedAcc: UserAccount = {
+        ...acc,
+        username: unifiedName,
+        displayName: unifiedName,
+        createdAt: nextCreatedAt,
+      };
+      if (!normalizedAcc.password_hash && normalizedAcc.password) {
         return {
-          ...acc,
-          password_hash: hashPassword(acc.password),
+          ...normalizedAcc,
+          password_hash: hashPassword(normalizedAcc.password),
           password: '',
         };
       }
-      return acc;
+      return normalizedAcc;
     });
 
     for (const seed of seeded) {
@@ -255,16 +368,31 @@ class StarlightServerDatabase {
           : {};
       const migratedPlayersById: Record<string, PlayerProgressState> = {};
       const accGenderMap = new Map(hydratedAccounts.map((a) => [a.id, a.avatarGender]));
+      const accOwnerMap = new Map(
+        hydratedAccounts.map((a) => [a.id, Boolean(a.isPrimaryOwner) || a.id === 'acc_admin_owner']),
+      );
       for (const [pid, pState] of Object.entries(rawPlayersById)) {
         if (!pState) continue;
-        migratedPlayersById[pid] = sanitizePlayerProgressV3Server(
+        migratedPlayersById[pid] = sanitizePlayerProgressV4Server(
           pid,
           pState,
           accGenderMap.get(pid) ?? pState.avatarGender ?? 'feminino',
+          accOwnerMap.get(pid) ?? pid === 'acc_admin_owner',
         );
       }
+      for (const acc of hydratedAccounts) {
+        const isPrimaryAdmin = Boolean(acc.isPrimaryOwner) || acc.id === 'acc_admin_owner';
+        if (!migratedPlayersById[acc.id]) {
+          migratedPlayersById[acc.id] = buildInitialPlayerProgressServer(
+            acc.id,
+            acc.avatarGender,
+            acc.serverRegion ?? 'BR',
+            isPrimaryAdmin,
+          );
+        }
+      }
 
-      return {
+      const docResult: ServerDatabaseDocument = {
         version: typeof parsed.version === 'number' ? parsed.version : 1,
         updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
         accounts: hydratedAccounts,
@@ -282,6 +410,7 @@ class StarlightServerDatabase {
           : [],
         ban_reviews: Array.isArray(parsed.ban_reviews) ? parsed.ban_reviews : [],
         premium_orders: Array.isArray(parsed.premium_orders) ? parsed.premium_orders : [],
+        market_listings: Array.isArray(parsed.market_listings) ? parsed.market_listings : [],
         premium_pix_config: hydratedPixConfig,
         room_health:
           parsed.room_health && typeof parsed.room_health === 'object'
@@ -291,6 +420,17 @@ class StarlightServerDatabase {
           ? parsed.password_reset_tokens
           : [],
       };
+      const anyPlayerMigrated = Object.values(rawPlayersById).some(
+        (pState) =>
+          pState && pState.catalogSchemaVersion !== SERVER_CATALOG_SCHEMA_VERSION,
+      );
+      if (
+        parsed.worldState?.catalogSchemaVersion !== SERVER_CATALOG_SCHEMA_VERSION ||
+        anyPlayerMigrated
+      ) {
+        this.saveSync(docResult);
+      }
+      return docResult;
     } catch (err) {
       console.error('[ServerDatabase] Falha ao carregar DB, iniciando limpo:', err);
       const fallback = createEmptyDb();
@@ -317,6 +457,14 @@ class StarlightServerDatabase {
     }, 150);
   }
 
+  flushSaveNow(): void {
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer);
+      this.writeTimer = null;
+    }
+    this.saveSync(this.doc);
+  }
+
   getSnapshot(): ServerDatabaseDocument {
     return this.doc;
   }
@@ -334,7 +482,7 @@ class StarlightServerDatabase {
     return this.doc.accounts.find((a) => a.id === accountId);
   }
 
-  /** Registra nova conta no banco centralizado com senha scrypt */
+  /** Registra nova conta no banco centralizado com nome único unificado e e-mail exclusivo */
   registerAccountServer(input: {
     username: string;
     displayName?: string;
@@ -345,16 +493,13 @@ class StarlightServerDatabase {
   }):
     | { ok: true; account: UserAccount; progress: PlayerProgressState }
     | { ok: false; error: string } {
-    const normalized = normalizeUsernameServer(input.username || '');
-    const cleanedEmail = (input.email || '').trim().toLowerCase();
-    const displayName = (input.displayName || normalized).trim();
-
-    if (normalized.length < 3 || !/^[a-z0-9_]+$/.test(normalized)) {
-      return {
-        ok: false,
-        error: 'Nome do avatar inválido (mínimo 3 caracteres alfanuméricos ou _).',
-      };
+    const unifiedName = cleanCharacterName(input.username || input.displayName || '');
+    const nameFormatErr = validateCharacterName(unifiedName);
+    if (nameFormatErr) {
+      return { ok: false, error: nameFormatErr };
     }
+
+    const cleanedEmail = (input.email || '').trim().toLowerCase();
     if (!cleanedEmail.includes('@') || cleanedEmail.length < 5) {
       return { ok: false, error: 'Informe um endereço de e-mail válido.' };
     }
@@ -368,19 +513,43 @@ class StarlightServerDatabase {
     if (emailExists) {
       return {
         ok: false,
-        error: 'Este e-mail já está cadastrado em outra conta.',
+        error: 'Este e-mail já foi utilizado em outra conta. Só é permitido 1 conta por e-mail.',
       };
     }
 
-    const usernameExists = this.doc.accounts.some(
-      (a) =>
-        normalizeUsernameServer(a.username) === normalized ||
-        a.displayName.trim().toLowerCase() === displayName.toLowerCase(),
+    const targetKey = canonicalCharacterKey(unifiedName);
+    const targetCollapsed = collapsedCharacterKey(unifiedName);
+    const nameTakenInAccounts = this.doc.accounts.some((a) => {
+      const uKey = canonicalCharacterKey(a.username);
+      const dKey = canonicalCharacterKey(a.displayName);
+      const uCol = collapsedCharacterKey(a.username);
+      const dCol = collapsedCharacterKey(a.displayName);
+      return (
+        uKey === targetKey ||
+        dKey === targetKey ||
+        uCol === targetCollapsed ||
+        dCol === targetCollapsed
+      );
+    });
+    const nameTakenInWorld = Boolean(
+      this.doc.worldState?.users.some((u) => {
+        const uKey = canonicalCharacterKey(u.username);
+        const dKey = canonicalCharacterKey(u.displayName ?? u.username);
+        const uCol = collapsedCharacterKey(u.username);
+        const dCol = collapsedCharacterKey(u.displayName ?? u.username);
+        return (
+          uKey === targetKey ||
+          dKey === targetKey ||
+          uCol === targetCollapsed ||
+          dCol === targetCollapsed
+        );
+      }),
     );
-    if (usernameExists) {
+
+    if (nameTakenInAccounts || nameTakenInWorld) {
       return {
         ok: false,
-        error: `O nome de avatar "${normalized}" já está em uso.`,
+        error: `O nome de personagem "${unifiedName}" já está em uso. Cada jogador deve ter seu próprio nome exclusivo.`,
       };
     }
 
@@ -388,8 +557,8 @@ class StarlightServerDatabase {
     const uid = `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const newAccount: UserAccount = {
       id: uid,
-      username: normalized,
-      displayName,
+      username: unifiedName,
+      displayName: unifiedName,
       email: cleanedEmail,
       password: '',
       password_hash: hashPassword(input.password),
@@ -400,7 +569,12 @@ class StarlightServerDatabase {
       createdAt: new Date().toLocaleDateString('pt-BR'),
     };
 
-    const progress = buildInitialPlayerProgressServer(uid, newAccount.avatarGender, region);
+    const progress = buildInitialPlayerProgressServer(
+      uid,
+      newAccount.avatarGender,
+      region,
+      false,
+    );
     this.doc.accounts = [...this.doc.accounts, newAccount];
     this.doc.playersById = {
       ...this.doc.playersById,
@@ -431,7 +605,7 @@ class StarlightServerDatabase {
 
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
 
     return {
       ok: true,
@@ -440,28 +614,34 @@ class StarlightServerDatabase {
     };
   }
 
-  /** Login híbrido: aceita e-mail ou nome do avatar contra password_hash */
+  /** Login híbrido: aceita e-mail ou nome do personagem, e concede XP de login com subida de nível */
   authenticateHybrid(
     identifier: string,
     password: string,
   ):
-    | { ok: true; account: UserAccount; progress?: PlayerProgressState }
+    | {
+        ok: true;
+        account: UserAccount;
+        progress: PlayerProgressState;
+        loginXpAward: ReturnType<typeof awardLoginXp>;
+      }
     | { ok: false; error: string } {
     const raw = (identifier || '').trim();
     if (!raw || !password) {
-      return { ok: false, error: 'Informe seu e-mail ou nome do avatar e senha.' };
+      return { ok: false, error: 'Informe seu e-mail ou nome do personagem e senha.' };
     }
     const lower = raw.toLowerCase();
-    const normUser = normalizeUsernameServer(raw);
+    const normKey = canonicalCharacterKey(raw);
 
     const idx = this.doc.accounts.findIndex(
       (a) =>
         a.email.trim().toLowerCase() === lower ||
-        normalizeUsernameServer(a.username) === normUser,
+        canonicalCharacterKey(a.username) === normKey ||
+        canonicalCharacterKey(a.displayName) === normKey,
     );
 
     if (idx < 0) {
-      return { ok: false, error: 'E-mail, nome do avatar ou senha inválidos.' };
+      return { ok: false, error: 'E-mail, nome do personagem ou senha inválidos.' };
     }
 
     const target = this.doc.accounts[idx];
@@ -475,10 +655,9 @@ class StarlightServerDatabase {
       verifyPassword(password, target.password_hash, target.password);
 
     if (!valid) {
-      return { ok: false, error: 'E-mail, nome do avatar ou senha inválidos.' };
+      return { ok: false, error: 'E-mail, nome do personagem ou senha inválidos.' };
     }
 
-    // Verifica banimento no worldState
     const modEntry = this.doc.worldState?.users.find(
       (u) =>
         u.id === target.id ||
@@ -491,23 +670,98 @@ class StarlightServerDatabase {
       };
     }
 
-    // Migração transparente: garante que password_hash esteja gravado e sem plaintext
-    if (!target.password_hash || target.password) {
+    const isPrimaryAdmin =
+      Boolean(target.isPrimaryOwner) || target.id === 'acc_admin_owner';
+
+    if (!target.password_hash || target.password || (isPrimaryAdmin && target.createdAt !== ADMIN_CREATED_AT)) {
       const upgraded: UserAccount = {
         ...target,
+        createdAt: isPrimaryAdmin ? ADMIN_CREATED_AT : target.createdAt,
         password_hash: target.password_hash || hashPassword(password.trim()),
         password: '',
       };
       const next = [...this.doc.accounts];
       next[idx] = upgraded;
       this.doc.accounts = next;
-      this.scheduleSave();
     }
+
+    // Concede XP de entrada (login) e atualiza nível caso a barra tenha completado
+    const baseProgress =
+      this.doc.playersById[target.id] ??
+      buildInitialPlayerProgressServer(
+        target.id,
+        target.avatarGender,
+        target.serverRegion ?? 'BR',
+        isPrimaryAdmin,
+      );
+
+    const xpRes = awardLoginXp(
+      baseProgress.level ?? (isPrimaryAdmin ? ADMIN_INITIAL_LEVEL : 1),
+      baseProgress.xp ?? 0,
+      LOGIN_XP_REWARD,
+      isPrimaryAdmin,
+    );
+
+    const nextProgress: PlayerProgressState = {
+      ...baseProgress,
+      level: xpRes.level,
+      xp: xpRes.xp,
+      lastLoginXpAt: Date.now(),
+      lastLoginXpGained: xpRes.xpGained,
+    };
+
+    this.doc.playersById = {
+      ...this.doc.playersById,
+      [target.id]: nextProgress,
+    };
+
+    if (this.doc.worldState) {
+      const existsInWorld = this.doc.worldState.users.some(
+        (u) => u.id === target.id,
+      );
+      this.doc.worldState = {
+        ...this.doc.worldState,
+        users: existsInWorld
+          ? this.doc.worldState.users.map((u) =>
+              u.id === target.id
+                ? {
+                    ...u,
+                    level: xpRes.level,
+                    joinedAt: isPrimaryAdmin ? ADMIN_CREATED_AT : u.joinedAt,
+                  }
+                : u,
+            )
+          : [
+              {
+                id: target.id,
+                username: target.username,
+                displayName: target.displayName,
+                level: xpRes.level,
+                starcoins: nextProgress.starcoins,
+                status: 'active',
+                joinedAt: isPrimaryAdmin ? ADMIN_CREATED_AT : target.createdAt,
+                role: target.role,
+                staffRoleTier: target.staffRoleTier,
+                serverRegion: target.serverRegion,
+                isVip: target.isVip,
+                isPrimaryOwner: target.isPrimaryOwner,
+                simulatedIp: nextProgress.simulatedIp,
+                countryCode: nextProgress.countryCode,
+              },
+              ...this.doc.worldState.users,
+            ],
+      };
+    }
+
+    this.doc.version += 1;
+    this.doc.updatedAt = Date.now();
+    this.flushSaveNow();
 
     return {
       ok: true,
       account: sanitizeAccountForClient(this.doc.accounts[idx]),
-      progress: this.doc.playersById[target.id],
+      progress: nextProgress,
+      loginXpAward: xpRes,
     };
   }
 
@@ -586,7 +840,7 @@ class StarlightServerDatabase {
     this.doc.password_reset_tokens = nextTokens;
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
 
     return { ok: true };
   }
@@ -626,12 +880,15 @@ class StarlightServerDatabase {
 
     if (patch.playerPatch && patch.playerPatch.accountId) {
       const targetAcc = this.doc.accounts.find((a) => a.id === patch.playerPatch!.accountId);
+      const isPrimaryAdmin =
+        Boolean(targetAcc?.isPrimaryOwner) || patch.playerPatch.accountId === 'acc_admin_owner';
       this.doc.playersById = {
         ...this.doc.playersById,
-        [patch.playerPatch.accountId]: sanitizePlayerProgressV3Server(
+        [patch.playerPatch.accountId]: sanitizePlayerProgressV4Server(
           patch.playerPatch.accountId,
           patch.playerPatch.progress,
           targetAcc?.avatarGender ?? patch.playerPatch.progress.avatarGender ?? 'feminino',
+          isPrimaryAdmin,
         ),
       };
       changed = true;
@@ -667,6 +924,11 @@ class StarlightServerDatabase {
       changed = true;
     }
 
+    if (Array.isArray(patch.market_listings)) {
+      this.doc.market_listings = patch.market_listings.slice(0, 500);
+      changed = true;
+    }
+
     if (patch.premium_pix_config?.pixKey) {
       this.doc.premium_pix_config = patch.premium_pix_config;
       changed = true;
@@ -689,7 +951,7 @@ class StarlightServerDatabase {
     if (changed) {
       this.doc.version += 1;
       this.doc.updatedAt = now;
-      this.scheduleSave();
+      this.flushSaveNow();
     }
 
     return { changed, updatedAt: this.doc.updatedAt };
@@ -702,7 +964,7 @@ class StarlightServerDatabase {
       this.doc.staff_audit_logs = [entry, ...this.doc.staff_audit_logs].slice(0, 400);
       this.doc.version += 1;
       this.doc.updatedAt = Date.now();
-      this.scheduleSave();
+      this.flushSaveNow();
     }
     return this.doc.staff_audit_logs;
   }
@@ -726,7 +988,7 @@ class StarlightServerDatabase {
     }
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
     return this.doc.support_tickets;
   }
 
@@ -745,7 +1007,7 @@ class StarlightServerDatabase {
     }
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
     return this.doc.ban_reviews;
   }
 
@@ -826,7 +1088,7 @@ class StarlightServerDatabase {
         summary: `A equipe de Engenharia & Comunidade reiniciou a instância "${targetRoomId}" com evacuação segura e limpeza de cache em tempo real.`,
         body: `Nota Técnica Automática: Detectamos anomalia de sincronização na sala "${targetRoomId}". O Kill-Switch foi acionado por ${params.actorUsername} (${evacuatedCount} avatar(es) movido(s) sem perda de itens para o Lounge Principal). Cache de chat e áudio da sala restaurados. Motivo: ${params.reason}`,
         imageUrl: '/news/atelier-furniture.png',
-        imageCaption: 'Monitoramento DevOps & Saúde de Servidores · Starlight Atelier',
+        imageCaption: 'Monitoramento DevOps & Saúde de Servidores · Nocturne Vale Club',
         category: 'Atualizações',
         serverRegion: 'BR',
         authorAccountId: params.actorId,
@@ -855,7 +1117,7 @@ class StarlightServerDatabase {
     this.doc.staff_audit_logs = [auditEntry, ...this.doc.staff_audit_logs].slice(0, 400);
     this.doc.version += 1;
     this.doc.updatedAt = now;
-    this.scheduleSave();
+    this.flushSaveNow();
 
     return {
       evacuatedCount,
@@ -883,7 +1145,7 @@ class StarlightServerDatabase {
       summary: params.summary,
       body: params.body,
       imageUrl: '/news/atelier-furniture.png',
-      imageCaption: 'Auto Patch Notes · Engenharia Interna Starlight Atelier',
+      imageCaption: 'Auto Patch Notes · Engenharia Interna Nocturne Vale Club',
       category: 'Atualizações',
       serverRegion: params.serverRegion ?? 'BR',
       authorAccountId: params.actorId,
@@ -906,7 +1168,7 @@ class StarlightServerDatabase {
     };
     this.doc.version += 1;
     this.doc.updatedAt = now;
-    this.scheduleSave();
+    this.flushSaveNow();
     return post;
   }
 
@@ -931,7 +1193,7 @@ class StarlightServerDatabase {
     this.doc.premium_pix_config = config;
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
     return config;
   }
 
@@ -952,7 +1214,7 @@ class StarlightServerDatabase {
     this.doc.premium_orders = next;
     this.doc.version += 1;
     this.doc.updatedAt = Date.now();
-    this.scheduleSave();
+    this.flushSaveNow();
     return next;
   }
 
@@ -1106,7 +1368,7 @@ class StarlightServerDatabase {
     this.doc.staff_audit_logs = [auditEntry, ...this.doc.staff_audit_logs].slice(0, 400);
     this.doc.version += 1;
     this.doc.updatedAt = now;
-    this.scheduleSave();
+    this.flushSaveNow();
 
     return {
       ok: true,
@@ -1215,6 +1477,288 @@ class StarlightServerDatabase {
     return changed;
   }
 
+  getMarketListings(): MarketListing[] {
+    return this.doc.market_listings ?? [];
+  }
+
+  createMarketListing(params: {
+    sellerAccountId: string;
+    itemId: string;
+    price: number;
+  }):
+    | { ok: true; listing: MarketListing; listings: MarketListing[] }
+    | { ok: false; error: string } {
+    const seller = this.doc.accounts.find((a) => a.id === params.sellerAccountId);
+    if (!seller) {
+      return { ok: false, error: 'Conta do vendedor não encontrada no servidor.' };
+    }
+    const cleanItemId = (params.itemId || '').trim();
+    const numericPrice = Math.round(Number(params.price));
+    if (!cleanItemId) {
+      return { ok: false, error: 'Selecione um item válido para anunciar.' };
+    }
+    if (!Number.isFinite(numericPrice) || numericPrice < 1 || numericPrice > 10_000_000) {
+      return { ok: false, error: 'Informe um preço válido em AM (mínimo 1 AM).' };
+    }
+
+    const sellerProgress =
+      this.doc.playersById[seller.id] ??
+      buildInitialPlayerProgressServer(seller.id, seller.avatarGender, seller.serverRegion);
+
+    if (!sellerProgress.ownedItemIds.includes(cleanItemId)) {
+      return { ok: false, error: 'Você precisa possuir este item no guarda-roupa para vendê-lo no Mercado.' };
+    }
+
+    const currentListings = this.doc.market_listings ?? [];
+    const alreadyListed = currentListings.some(
+      (l) => l.status === 'active' && l.sellerAccountId === seller.id && l.itemId === cleanItemId,
+    );
+    if (alreadyListed) {
+      return { ok: false, error: 'Este item já está anunciado por você no Mercado.' };
+    }
+
+    const now = Date.now();
+    const listing: MarketListing = {
+      id: `mkt_${now}_${Math.random().toString(36).slice(2, 7)}`,
+      itemId: cleanItemId,
+      sellerAccountId: seller.id,
+      sellerUsername: seller.username,
+      sellerDisplayName: seller.displayName || seller.username,
+      price: numericPrice,
+      status: 'active',
+      createdAt: now,
+    };
+
+    const next = [listing, ...currentListings].slice(0, 500);
+    this.doc.market_listings = next;
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.flushSaveNow();
+    return { ok: true, listing, listings: next };
+  }
+
+  cancelMarketListing(params: {
+    listingId: string;
+    actorAccountId: string;
+    isAdmin?: boolean;
+  }):
+    | { ok: true; listing: MarketListing; listings: MarketListing[] }
+    | { ok: false; error: string } {
+    const current = this.doc.market_listings ?? [];
+    const idx = current.findIndex((l) => l.id === params.listingId);
+    if (idx < 0) {
+      return { ok: false, error: 'Anúncio não encontrado.' };
+    }
+    const existing = current[idx];
+    if (existing.status !== 'active') {
+      return { ok: false, error: 'Este anúncio já foi encerrado.' };
+    }
+    if (!params.isAdmin && existing.sellerAccountId !== params.actorAccountId) {
+      return { ok: false, error: 'Apenas o vendedor ou o Administrador pode cancelar este anúncio.' };
+    }
+
+    const updated: MarketListing = { ...existing, status: 'cancelled' };
+    const next = [...current];
+    next[idx] = updated;
+    this.doc.market_listings = next;
+    this.doc.version += 1;
+    this.doc.updatedAt = Date.now();
+    this.flushSaveNow();
+    return { ok: true, listing: updated, listings: next };
+  }
+
+  buyMarketListing(params: {
+    listingId: string;
+    buyerAccountId: string;
+  }):
+    | {
+        ok: true;
+        listing: MarketListing;
+        listings: MarketListing[];
+        buyerProgress: PlayerProgressState;
+        sellerProgress: PlayerProgressState;
+      }
+    | { ok: false; error: string } {
+    const current = this.doc.market_listings ?? [];
+    const idx = current.findIndex((l) => l.id === params.listingId);
+    if (idx < 0) {
+      return { ok: false, error: 'Anúncio não encontrado no Mercado.' };
+    }
+    const listing = current[idx];
+    if (listing.status !== 'active') {
+      return { ok: false, error: 'Este item já foi comprado ou retirado do Mercado.' };
+    }
+
+    const buyer = this.doc.accounts.find((a) => a.id === params.buyerAccountId);
+    if (!buyer) {
+      return { ok: false, error: 'Conta do comprador não encontrada.' };
+    }
+    if (buyer.id === listing.sellerAccountId) {
+      return { ok: false, error: 'Você não pode comprar o seu próprio anúncio.' };
+    }
+
+    const buyerProgress =
+      this.doc.playersById[buyer.id] ??
+      buildInitialPlayerProgressServer(buyer.id, buyer.avatarGender, buyer.serverRegion);
+
+    if (buyerProgress.ownedItemIds.includes(listing.itemId)) {
+      return { ok: false, error: 'Você já possui este item no seu guarda-roupa.' };
+    }
+    if (buyerProgress.starcoins < listing.price) {
+      return {
+        ok: false,
+        error: `Saldo insuficiente: você precisa de ${listing.price.toLocaleString('pt-BR')} AM.`,
+      };
+    }
+
+    const seller = this.doc.accounts.find((a) => a.id === listing.sellerAccountId);
+    const sellerProgress =
+      this.doc.playersById[listing.sellerAccountId] ??
+      buildInitialPlayerProgressServer(
+        listing.sellerAccountId,
+        seller?.avatarGender ?? 'feminino',
+        seller?.serverRegion ?? 'BR',
+      );
+
+    if (!sellerProgress.ownedItemIds.includes(listing.itemId)) {
+      // Vendedor não tem mais o item: encerra anúncio com segurança
+      const cancelled = [...current];
+      cancelled[idx] = { ...listing, status: 'cancelled' };
+      this.doc.market_listings = cancelled;
+      this.scheduleSave();
+      return { ok: false, error: 'Este item não está mais disponível no inventário do vendedor.' };
+    }
+
+    const now = Date.now();
+
+    // Remove item do vendedor (inventário + equipado atual) e credita AM
+    const nextSellerEquipped = { ...sellerProgress.equipped };
+    (Object.keys(nextSellerEquipped) as Array<keyof typeof nextSellerEquipped>).forEach((slot) => {
+      if (nextSellerEquipped[slot] === listing.itemId) {
+        delete nextSellerEquipped[slot];
+      }
+    });
+    const nextSellerProgress: PlayerProgressState = {
+      ...sellerProgress,
+      starcoins: Math.max(0, sellerProgress.starcoins + listing.price),
+      ownedItemIds: sellerProgress.ownedItemIds.filter((id) => id !== listing.itemId),
+      equipped: nextSellerEquipped,
+    };
+
+    // Debita AM do comprador e adiciona item
+    const nextBuyerProgress: PlayerProgressState = {
+      ...buyerProgress,
+      starcoins: Math.max(0, buyerProgress.starcoins - listing.price),
+      ownedItemIds: Array.from(new Set([...buyerProgress.ownedItemIds, listing.itemId])),
+    };
+
+    this.doc.playersById = {
+      ...this.doc.playersById,
+      [buyer.id]: nextBuyerProgress,
+      [listing.sellerAccountId]: nextSellerProgress,
+    };
+
+    if (this.doc.worldState) {
+      this.doc.worldState = {
+        ...this.doc.worldState,
+        users: this.doc.worldState.users.map((u) => {
+          if (u.id === buyer.id) return { ...u, starcoins: nextBuyerProgress.starcoins };
+          if (u.id === listing.sellerAccountId) return { ...u, starcoins: nextSellerProgress.starcoins };
+          return u;
+        }),
+      };
+    }
+
+    const updatedListing: MarketListing = {
+      ...listing,
+      status: 'sold',
+      buyerAccountId: buyer.id,
+      buyerUsername: buyer.username,
+      soldAt: now,
+    };
+    const nextListings = [...current];
+    nextListings[idx] = updatedListing;
+    this.doc.market_listings = nextListings;
+
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.flushSaveNow();
+
+    return {
+      ok: true,
+      listing: updatedListing,
+      listings: nextListings,
+      buyerProgress: nextBuyerProgress,
+      sellerProgress: nextSellerProgress,
+    };
+  }
+
+  adminGrantItemToAccount(params: {
+    actorId: string;
+    actorUsername: string;
+    targetAccountIdOrUsername: string;
+    itemId: string;
+  }):
+    | {
+        ok: true;
+        targetAccountId: string;
+        targetUsername: string;
+        updatedProgress: PlayerProgressState;
+        auditEntry: StaffAuditLogEntry;
+      }
+    | { ok: false; error: string } {
+    const cleanTarget = normalizeUsernameServer(params.targetAccountIdOrUsername || '');
+    const targetAcc = this.doc.accounts.find(
+      (a) =>
+        a.id === params.targetAccountIdOrUsername ||
+        normalizeUsernameServer(a.username) === cleanTarget,
+    );
+    if (!targetAcc) {
+      return { ok: false, error: 'Jogador de destino não encontrado no servidor.' };
+    }
+    const cleanItemId = (params.itemId || '').trim();
+    if (!cleanItemId) {
+      return { ok: false, error: 'Informe um ID de item válido.' };
+    }
+
+    const prevProgress =
+      this.doc.playersById[targetAcc.id] ??
+      buildInitialPlayerProgressServer(targetAcc.id, targetAcc.avatarGender, targetAcc.serverRegion);
+
+    const updatedProgress: PlayerProgressState = {
+      ...prevProgress,
+      ownedItemIds: Array.from(new Set([...prevProgress.ownedItemIds, cleanItemId])),
+    };
+    this.doc.playersById = {
+      ...this.doc.playersById,
+      [targetAcc.id]: updatedProgress,
+    };
+
+    const now = Date.now();
+    const auditEntry: StaffAuditLogEntry = {
+      id: `audit_grant_${now}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: now,
+      actor_id: params.actorId,
+      actor_username: params.actorUsername,
+      role: 'admin',
+      action_type: 'ADMIN_GRANT_ITEM',
+      target_id: targetAcc.username,
+      details: `Item "${cleanItemId}" concedido pelo Administrador para @${targetAcc.username}.`,
+    };
+    this.doc.staff_audit_logs = [auditEntry, ...this.doc.staff_audit_logs].slice(0, 400);
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.flushSaveNow();
+
+    return {
+      ok: true,
+      targetAccountId: targetAcc.id,
+      targetUsername: targetAcc.username,
+      updatedProgress,
+      auditEntry,
+    };
+  }
+
   updateUserProfilePic(targetUid: string, profilePic: string): boolean {
     let changed = false;
     this.doc.accounts = this.doc.accounts.map((acc) => {
@@ -1234,10 +1778,10 @@ class StarlightServerDatabase {
     if (changed) {
       this.doc.version += 1;
       this.doc.updatedAt = Date.now();
-      this.scheduleSave();
+      this.flushSaveNow();
     }
     return changed;
   }
 }
 
-export const serverDb = new StarlightServerDatabase();
+export const serverDb = new NocturneValeServerDatabase();

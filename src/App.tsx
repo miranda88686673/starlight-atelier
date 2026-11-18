@@ -11,9 +11,12 @@
  */
 
 import { useMemo, useRef, useState } from 'react';
-import { Coins, LogOut, Megaphone, Volume2, VolumeX } from 'lucide-react';
+import { Coins, LogOut, Megaphone, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import type { LoginXpAwardResult } from './utils/levelSystem';
+import { CountryFlag } from './components/CountryFlag';
 import { LoginModal } from './components/LoginModal';
 import { MeDollStudio } from './components/MeDollStudio';
+import { MercadoView } from './components/MercadoView';
 import { ModPanel, type StaffPanelSubTab } from './components/ModPanel';
 import { NewsFeedView } from './components/NewsFeedView';
 import { PRESENCE_META, ProfileAccountView } from './components/ProfileAccountView';
@@ -28,13 +31,16 @@ import { StarplazaShop } from './components/StarplazaShop';
 import { SuiteRoom } from './components/SuiteRoom';
 import { VipCoinsStoreView } from './components/VipCoinsStoreView';
 import { VisitorProfileModal } from './components/VisitorProfileModal';
+import { ThreeSceneProvider } from './components/three/ThreeSceneProvider';
 import { useGameRealtime } from './context/GameRealtimeContext';
 import { getActiveSyncSocket } from './core/state/socketBridge';
 import {
   AvatarDisplayMode,
+  AvatarFaceCustomization,
   AvatarGender,
   ClothingCategory,
   ClothingItem,
+  DEFAULT_FACE_CUSTOMIZATION,
   FurnitureDef,
   GameTab,
   MockUser,
@@ -58,6 +64,8 @@ import {
   appendRoomMessage,
   createRealtimeChannel,
   readRoomsSnapshot,
+  saveCurrentRoomId,
+  setSavedExitedRoomsMode,
 } from './utils/realtime';
 import { soundEngine } from './utils/sound';
 import {
@@ -83,6 +91,7 @@ import {
   removeStaffMember,
   resetAccountAndWorld,
   resolvePublicProfileSummary,
+  toggleItemInEquippedOutfit,
   toggleUserVipStatus,
   unequipIncompatibleClothes,
   updateAccountIdentity,
@@ -91,6 +100,7 @@ import {
 } from './utils/storage';
 import { logStaffAction } from './core/security/AuditLogger';
 import { hasRolePermission, resolveCoreStaffRole } from './core/security/RoleGuard';
+import { resolveLegendarySaleStatus } from './data/catalog';
 
 export default function App() {
   const {
@@ -124,12 +134,15 @@ export default function App() {
   const [sentinelLockoutReason, setSentinelLockoutReason] = useState<string | null>(
     null,
   );
+  const [loginXpToast, setLoginXpToast] = useState<LoginXpAwardResult | null>(null);
+  const loginXpTimerRef = useRef<number | null>(null);
 
   const navItems = useMemo<Array<{ id: GameTab; label: string }>>(
     () => [
       { id: 'perfil', label: 'Meu Perfil' },
       { id: 'suite', label: 'Suíte' },
       { id: 'medoll', label: 'MeDoll' },
+      { id: 'mercado', label: 'Mercado' },
       { id: 'starplaza', label: 'Starplaza' },
       { id: 'salas', label: 'Salas' },
       { id: 'noticias', label: 'Notícias' },
@@ -139,12 +152,37 @@ export default function App() {
     [],
   );
 
-  const handleAuthenticated = (account: UserAccount) => {
+  const handleAuthenticated = (
+    account: UserAccount,
+    loginXpAward?: LoginXpAwardResult,
+  ) => {
     setSentinelLockoutReason(null);
     setCurrentUser(account);
-    setPlayerState(loadPlayerProgress(account.id, account.avatarGender));
+    const loadedProgress = loadPlayerProgress(account.id, account.avatarGender);
+    setPlayerState(
+      loginXpAward
+        ? {
+            ...loadedProgress,
+            level: loginXpAward.level,
+            xp: loginXpAward.xp,
+          }
+        : loadedProgress,
+    );
     setWorldState(loadWorldState());
     setActiveTab('medoll');
+
+    if (loginXpTimerRef.current) {
+      window.clearTimeout(loginXpTimerRef.current);
+      loginXpTimerRef.current = null;
+    }
+    if (loginXpAward && loginXpAward.xpGained > 0) {
+      setLoginXpToast(loginXpAward);
+      loginXpTimerRef.current = window.setTimeout(() => {
+        setLoginXpToast(null);
+      }, 7500);
+    } else {
+      setLoginXpToast(null);
+    }
   };
 
   const handleLogout = () => {
@@ -181,22 +219,10 @@ export default function App() {
     }
 
     soundEngine.playEquip();
-    setPlayerState((prev) => {
-      const currentInSlot = prev.equipped[item.category];
-      const nextEquipped = { ...prev.equipped };
-      if (currentInSlot === item.id) {
-        delete nextEquipped[item.category];
-      } else {
-        nextEquipped[item.category] = item.id;
-        if (item.category === 'vestidos') {
-          delete nextEquipped.blusas;
-          delete nextEquipped.calcas;
-        } else if (item.category === 'blusas' || item.category === 'calcas') {
-          delete nextEquipped.vestidos;
-        }
-      }
-      return { ...prev, equipped: nextEquipped };
-    });
+    setPlayerState((prev) => ({
+      ...prev,
+      equipped: toggleItemInEquippedOutfit(prev.equipped, item, fullClothingCatalog),
+    }));
   };
 
   const handleUnequipCategory = (category: ClothingCategory) => {
@@ -204,6 +230,9 @@ export default function App() {
     setPlayerState((prev) => {
       const nextEquipped = { ...prev.equipped };
       delete nextEquipped[category];
+      if (category === 'acessorios') {
+        delete nextEquipped.acessoriosSlots;
+      }
       return { ...prev, equipped: nextEquipped };
     });
   };
@@ -216,6 +245,11 @@ export default function App() {
   const handleChangeSkinTone = (tone: SkinToneId) => {
     soundEngine.playEquip();
     setPlayerState((prev) => ({ ...prev, skinTone: tone }));
+  };
+
+  const handleUpdateFaceCustomization = (nextFc: AvatarFaceCustomization) => {
+    soundEngine.playEquip();
+    setPlayerState((prev) => ({ ...prev, faceCustomization: nextFc }));
   };
 
   const handleChangeAvatarGender = (gender: AvatarGender) => {
@@ -253,6 +287,10 @@ export default function App() {
 
   // --- Handlers do Módulo 2: Starplaza ---
   const handleBuyItem = (item: ClothingItem) => {
+    const saleStatus = resolveLegendarySaleStatus(item, worldState, Date.now());
+    if (saleStatus.isSoldOut) {
+      return;
+    }
     if (
       !isItemCompatibleWithGender(
         item.gender ?? item.genderStyle,
@@ -276,14 +314,6 @@ export default function App() {
         ownedItemIds: [...prev.ownedItemIds, item.id],
       };
     });
-  };
-
-  const handleClaimAllowance = () => {
-    soundEngine.playPurchase();
-    setPlayerState((prev) => ({
-      ...prev,
-      starcoins: prev.starcoins + 250,
-    }));
   };
 
   const handleBuyFurniture = (furn: FurnitureDef) => {
@@ -547,6 +577,108 @@ export default function App() {
       `Removeu item ${itemId} do catálogo ativo`,
       currentUser.username,
     );
+  };
+
+  const handleToggleSoldOutItem = (itemId: string) => {
+    if (!currentUser || !isPrimaryAdminAccount(currentUser)) return;
+    soundEngine.playModAction();
+    const currentlySoldOut = (worldState.soldOutItemIds ?? []).includes(itemId);
+    setWorldState((prev) => {
+      const current = prev.soldOutItemIds ?? [];
+      return {
+        ...prev,
+        soldOutItemIds: currentlySoldOut
+          ? current.filter((id) => id !== itemId)
+          : [...current, itemId],
+      };
+    });
+    void logStaffAction(
+      currentUser.id,
+      'admin',
+      currentlySoldOut ? 'RESTORE_ITEM_SALE' : 'MARK_ITEM_SOLD_OUT',
+      itemId,
+      currentlySoldOut
+        ? `Reabriu vendas na loja para o item ${itemId}`
+        : `Marcou o item ${itemId} como VENDIDO na loja Starplaza`,
+      currentUser.username,
+    );
+  };
+
+  const handleRelaunchLegendary24h = (itemId: string) => {
+    if (!currentUser || !isPrimaryAdminAccount(currentUser)) return;
+    soundEngine.playPurchase();
+    const launchTs = Date.now();
+    setWorldState((prev) => ({
+      ...prev,
+      soldOutItemIds: (prev.soldOutItemIds ?? []).filter((id) => id !== itemId),
+      legendaryLaunchTimestamps: {
+        ...(prev.legendaryLaunchTimestamps ?? {}),
+        [itemId]: launchTs,
+      },
+    }));
+    void logStaffAction(
+      currentUser.id,
+      'admin',
+      'RELAUNCH_LEGENDARY_24H',
+      itemId,
+      `Iniciou/renovou janela de 24h reais na Starplaza para o item lendário ${itemId}`,
+      currentUser.username,
+    );
+  };
+
+  const handleAdminGrantItem = async (
+    targetAccountIdOrUsername: string,
+    itemId: string,
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!currentUser || !isPrimaryAdminAccount(currentUser)) {
+      return {
+        ok: false,
+        message: 'Apenas o Administrador Geral pode entregar itens diretamente.',
+      };
+    }
+    try {
+      const response = await fetch('/api/admin/grant-item', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-actor-id': currentUser.id,
+          'x-actor-email': currentUser.email,
+          'x-staff-role': resolveCoreStaffRole(currentUser) ?? 'admin',
+        },
+        body: JSON.stringify({
+          targetAccountIdOrUsername,
+          itemId,
+          actorUsername: currentUser.displayName || currentUser.username,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        targetAccountId?: string;
+        targetUsername?: string;
+        updatedProgress?: PlayerProgressState;
+      };
+      if (!response.ok || !data.ok) {
+        soundEngine.playModAction();
+        return {
+          ok: false,
+          message: data.error || 'Não foi possível entregar o item ao jogador.',
+        };
+      }
+      soundEngine.playPurchase();
+      if (data.targetAccountId === currentUser.id && data.updatedProgress) {
+        setPlayerState(data.updatedProgress);
+      }
+      return {
+        ok: true,
+        message: `Relíquia/peça entregue com sucesso no guarda-roupa de @${data.targetUsername ?? targetAccountIdOrUsername}.`,
+      };
+    } catch {
+      return {
+        ok: false,
+        message: 'Falha de comunicação com o servidor ao entregar o item.',
+      };
+    }
   };
 
   const handleRestoreAllItems = () => {
@@ -1095,7 +1227,13 @@ export default function App() {
     patch: Partial<
       Pick<
         PlayerProgressState,
-        'bio' | 'presenceStatus' | 'countryCode' | 'timezone' | 'simulatedIp'
+        | 'bio'
+        | 'presenceStatus'
+        | 'countryCode'
+        | 'timezone'
+        | 'simulatedIp'
+        | 'friendUsernames'
+        | 'profileBanner'
       >
     >,
   ) => {
@@ -1162,6 +1300,15 @@ export default function App() {
     setActiveTab('suite');
   };
 
+  const handleGoToRoomFromProfile = (roomId: RoomId) => {
+    if (!currentUser) return;
+    soundEngine.playEquip();
+    saveCurrentRoomId(currentUser.id, roomId);
+    setSavedExitedRoomsMode(currentUser.id, false);
+    setVisitingSuiteProfile(null);
+    setActiveTab('salas');
+  };
+
   if (!currentUser) {
     return <LoginModal onAuthenticated={handleAuthenticated} />;
   }
@@ -1190,7 +1337,7 @@ export default function App() {
             }}
             className="font-display text-2xl font-bold tracking-tight text-[#1C1917] whitespace-nowrap shrink-0"
           >
-            Starlight Atelier
+            Nocturne Vale Club
           </a>
 
           <nav
@@ -1221,12 +1368,12 @@ export default function App() {
             })}
           </nav>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => setActiveTab('perfil')}
               title="Abrir Meu Perfil / Conta"
-              className="hidden md:flex items-center gap-2 text-xs text-[#44403C] hover:text-[#1C1917] whitespace-nowrap cursor-pointer"
+              className="flex items-center gap-2 text-xs text-[#44403C] hover:text-[#1C1917] whitespace-nowrap cursor-pointer"
             >
               <div className="relative">
                 <ProfileAvatar
@@ -1234,6 +1381,7 @@ export default function App() {
                   equipped={playerState.equipped}
                   skinTone={playerState.skinTone}
                   avatarGender={playerState.avatarGender}
+                  faceCustomization={playerState.faceCustomization}
                   customAvatarUrl={playerState.customAvatarUrl}
                   avatarDisplayMode={playerState.avatarDisplayMode}
                   deletedItemIds={worldState.deletedItemIds}
@@ -1245,16 +1393,29 @@ export default function App() {
                   title={`Presença: ${PRESENCE_META[playerState.presenceStatus].label}`}
                 />
               </div>
-              <span className="font-semibold text-[#1C1917]">
-                {currentUser.displayName !== currentUser.username
-                  ? `${currentUser.displayName} (${currentUser.username})`
-                  : currentUser.username}
+              <span className="hidden md:inline font-semibold text-[#1C1917]">
+                {currentUser.displayName || currentUser.username}
               </span>
+              <CountryFlag
+                countryCode={playerState.countryCode}
+                size="sm"
+                className="hidden sm:inline-flex"
+              />
               {currentUser.staffRoleTier && (
                 <StaffRoleBadge tier={currentUser.staffRoleTier} compact />
               )}
               {accountIsVip && <VipBadge compact />}
             </button>
+
+            <div
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#E6E0D8] text-xs font-semibold text-[#1C1917] whitespace-nowrap shrink-0"
+              title="Saldo disponível na conta"
+            >
+              <Coins className="w-3.5 h-3.5 text-[#C6922B] shrink-0" />
+              <span className="font-mono-num">
+                {playerState.starcoins.toLocaleString('pt-BR')} AM
+              </span>
+            </div>
 
             <button
               type="button"
@@ -1288,21 +1449,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4 shrink-0">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1C1917]">
-              <Coins className="w-4 h-4 text-[#C6922B]" />
-              <span className="font-mono-num">
-                {playerState.starcoins.toLocaleString('pt-BR')} AM
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleClaimAllowance}
-              className="text-xs font-semibold text-[#C8235D] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              +250 AM
-            </button>
-
             <button
               type="button"
               onClick={handleToggleSound}
@@ -1323,11 +1469,55 @@ export default function App() {
 
       {/* Conteúdo Principal do Módulo Ativo */}
       <main className="flex-1 max-w-[1320px] w-full mx-auto px-4 sm:px-6 py-6">
+        {loginXpToast && (
+          <div
+            role="status"
+            className="mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-xl border border-[#F3D0DC] bg-[#FDF2F5] text-xs text-[#1C1917]"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Sparkles className="w-4 h-4 text-[#C8235D] shrink-0" />
+              <div className="min-w-0">
+                <p className="font-semibold text-[#1C1917]">
+                  {loginXpToast.leveledUp
+                    ? `Parabéns! Você subiu para o Nível ${loginXpToast.level}! (+${loginXpToast.xpGained} XP pelo login)`
+                    : `Entrada na conta confirmada: +${loginXpToast.xpGained} XP adicionados à barra de nível.`}
+                </p>
+                <p className="font-mono-num text-[11px] text-[#6B645D] mt-0.5">
+                  Nível {loginXpToast.level} / 1000
+                  {loginXpToast.xpRequired > 0
+                    ? ` · ${loginXpToast.xp} / ${loginXpToast.xpRequired} XP para o próximo nível`
+                    : ' · Nível máximo atingido'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('perfil');
+                  setLoginXpToast(null);
+                }}
+                className="px-3 py-1.5 font-semibold text-[#C8235D] hover:bg-white rounded-lg transition-colors cursor-pointer"
+              >
+                Ver Barra de Nível
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginXpToast(null)}
+                aria-label="Fechar aviso de XP"
+                className="p-1 text-[#6B645D] hover:text-[#1C1917] rounded-md cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
         {activeTab === 'perfil' && (
           <ProfileAccountView
             account={currentUser}
             playerState={playerState}
             deletedItemIds={worldState.deletedItemIds}
+            catalog={fullClothingCatalog}
             onUpdateIdentity={handleUpdateIdentity}
             onUpdateProfileFields={handleUpdateProfileFields}
             onUploadProfilePhoto={handleUploadProfilePhoto}
@@ -1335,26 +1525,47 @@ export default function App() {
             onChangeAvatarDisplayMode={handleChangeAvatarDisplayMode}
             onGoToMeDoll={() => setActiveTab('medoll')}
             onGoToSuite={() => setActiveTab('suite')}
+            onGoToRoom={handleGoToRoomFromProfile}
+            onGoToRoomsLobby={() => setActiveTab('salas')}
           />
         )}
 
         {activeTab === 'medoll' && (
-          <MeDollStudio
+          <ThreeSceneProvider>
+            <MeDollStudio
+              catalog={fullClothingCatalog}
+              ownedItemIds={playerState.ownedItemIds}
+              equipped={playerState.equipped}
+              skinTone={playerState.skinTone}
+              avatarGender={playerState.avatarGender}
+              faceCustomization={playerState.faceCustomization ?? DEFAULT_FACE_CUSTOMIZATION}
+              deletedItemIds={worldState.deletedItemIds}
+              isAccountVip={accountIsVip}
+              genderNotice={genderNotice}
+              onToggleEquip={handleToggleEquip}
+              onUnequipCategory={handleUnequipCategory}
+              onClearOutfit={handleClearOutfit}
+              onChangeSkinTone={handleChangeSkinTone}
+              onChangeAvatarGender={handleChangeAvatarGender}
+              onChangeFaceCustomization={handleUpdateFaceCustomization}
+              onGoToShop={() => setActiveTab('starplaza')}
+              onGoToProfile={() => setActiveTab('perfil')}
+            />
+          </ThreeSceneProvider>
+        )}
+
+        {activeTab === 'mercado' && (
+          <MercadoView
+            currentUser={currentUser}
+            playerState={playerState}
             catalog={fullClothingCatalog}
-            ownedItemIds={playerState.ownedItemIds}
-            equipped={playerState.equipped}
-            skinTone={playerState.skinTone}
-            avatarGender={playerState.avatarGender}
             deletedItemIds={worldState.deletedItemIds}
-            isAccountVip={accountIsVip}
-            genderNotice={genderNotice}
-            onToggleEquip={handleToggleEquip}
-            onUnequipCategory={handleUnequipCategory}
-            onClearOutfit={handleClearOutfit}
-            onChangeSkinTone={handleChangeSkinTone}
-            onChangeAvatarGender={handleChangeAvatarGender}
-            onGoToShop={() => setActiveTab('starplaza')}
-            onGoToProfile={() => setActiveTab('perfil')}
+            onUpdatePlayerState={setPlayerState}
+            onOpenPublicProfile={(uname) => handleOpenPublicProfile(uname)}
+            onEquipItem={(item) => {
+              handleToggleEquip(item);
+              setActiveTab('medoll');
+            }}
           />
         )}
 
@@ -1370,6 +1581,8 @@ export default function App() {
             ownedWallpaperIds={playerState.ownedWallpaperIds ?? []}
             equipped={playerState.equipped}
             deletedItemIds={worldState.deletedItemIds}
+            soldOutItemIds={worldState.soldOutItemIds ?? []}
+            legendaryLaunchTimestamps={worldState.legendaryLaunchTimestamps}
             starcoins={playerState.starcoins}
             isAccountVip={accountIsVip}
             bodyGender={playerState.avatarGender}
@@ -1378,7 +1591,6 @@ export default function App() {
             onBuyRoomTemplate={handleBuyRoomTemplate}
             onBuyWallpaper={handleBuyWallpaper}
             onEquipFromShop={handleToggleEquip}
-            onClaimAllowance={handleClaimAllowance}
             onGoToVipStore={() => setActiveTab('vip_loja')}
             onGoToSuite={() => {
               setVisitingSuiteProfile(null);
@@ -1389,38 +1601,41 @@ export default function App() {
         )}
 
         {activeTab === 'suite' && (
-          <SuiteRoom
-            username={currentUser.username}
-            suite={playerState.suite}
-            catalog={fullClothingCatalog}
-            furnitureCatalog={fullFurnitureCatalog}
-            wallpaperCatalog={fullWallpaperCatalog}
-            ownedItemIds={playerState.ownedItemIds}
-            ownedFurnitureIds={playerState.ownedFurnitureIds ?? []}
-            ownedWallpaperIds={playerState.ownedWallpaperIds ?? []}
-            equipped={playerState.equipped}
-            skinTone={playerState.skinTone}
-            avatarGender={playerState.avatarGender}
-            deletedItemIds={worldState.deletedItemIds}
-            isAccountVip={accountIsVip}
-            visitingProfile={visitingSuiteProfile}
-            onExitVisit={() => setVisitingSuiteProfile(null)}
-            onOpenHostProfile={(profile) =>
-              handleOpenPublicProfile(profile.username, {
-                equipped: profile.equipped,
-                skinTone: profile.skinTone,
-                avatarGender: profile.avatarGender,
-                customAvatarUrl: profile.customAvatarUrl,
-                avatarDisplayMode: profile.avatarDisplayMode,
-                role: profile.role,
-              })
-            }
-            onUpdateSuite={handleUpdateSuite}
-            onToggleEquip={handleToggleEquip}
-            onChangeSkinTone={handleChangeSkinTone}
-            onClearOutfit={handleClearOutfit}
-            onGoToShop={() => setActiveTab('starplaza')}
-          />
+          <ThreeSceneProvider>
+            <SuiteRoom
+              username={currentUser.username}
+              suite={playerState.suite}
+              catalog={fullClothingCatalog}
+              furnitureCatalog={fullFurnitureCatalog}
+              wallpaperCatalog={fullWallpaperCatalog}
+              ownedItemIds={playerState.ownedItemIds}
+              ownedFurnitureIds={playerState.ownedFurnitureIds ?? []}
+              ownedWallpaperIds={playerState.ownedWallpaperIds ?? []}
+              equipped={playerState.equipped}
+              skinTone={playerState.skinTone}
+              avatarGender={playerState.avatarGender}
+              faceCustomization={playerState.faceCustomization}
+              deletedItemIds={worldState.deletedItemIds}
+              isAccountVip={accountIsVip}
+              visitingProfile={visitingSuiteProfile}
+              onExitVisit={() => setVisitingSuiteProfile(null)}
+              onOpenHostProfile={(profile) =>
+                handleOpenPublicProfile(profile.username, {
+                  equipped: profile.equipped,
+                  skinTone: profile.skinTone,
+                  avatarGender: profile.avatarGender,
+                  customAvatarUrl: profile.customAvatarUrl,
+                  avatarDisplayMode: profile.avatarDisplayMode,
+                  role: profile.role,
+                })
+              }
+              onUpdateSuite={handleUpdateSuite}
+              onToggleEquip={handleToggleEquip}
+              onChangeSkinTone={handleChangeSkinTone}
+              onClearOutfit={handleClearOutfit}
+              onGoToShop={() => setActiveTab('starplaza')}
+            />
+          </ThreeSceneProvider>
         )}
 
         {activeTab === 'salas' && (
@@ -1437,6 +1652,9 @@ export default function App() {
             wallpaperCatalog={fullWallpaperCatalog}
             ownedRoomTemplateIds={playerState.ownedRoomTemplateIds ?? []}
             ownedWallpaperIds={playerState.ownedWallpaperIds ?? []}
+            clothingCatalog={fullClothingCatalog}
+            furnitureCatalog={fullFurnitureCatalog}
+            onToggleEquip={handleToggleEquip}
             onGoToShop={() => setActiveTab('starplaza')}
             onStaffNotice={handleUpdateNotice}
             onUpdateServerNotice={handleUpdateServerNotice}
@@ -1485,6 +1703,8 @@ export default function App() {
             globalNotice={worldState.globalNotice}
             users={worldState.users}
             deletedItemIds={worldState.deletedItemIds}
+            soldOutItemIds={worldState.soldOutItemIds ?? []}
+            legendaryLaunchTimestamps={worldState.legendaryLaunchTimestamps}
             bannedWords={worldState.bannedWords}
             reports={worldState.reports}
             customClothingCatalog={worldState.customClothingCatalog}
@@ -1502,6 +1722,9 @@ export default function App() {
             onUpdateStaffProfile={handleUpdateStaffProfile}
             onRemoveStaffMember={handleRemoveStaffMember}
             onDeleteCatalogItem={handleDeleteCatalogItem}
+            onToggleSoldOutItem={handleToggleSoldOutItem}
+            onRelaunchLegendary24h={handleRelaunchLegendary24h}
+            onAdminGrantItem={handleAdminGrantItem}
             onRestoreAllItems={handleRestoreAllItems}
             onResetAllDemoData={handleResetAllDemoData}
             onAddBannedWord={handleAddBannedWord}
@@ -1557,6 +1780,7 @@ export default function App() {
           )}
           onToggleFriend={handleToggleFriend}
           onVisitSuite={handleVisitSuiteFromProfile}
+          onGoToRoom={handleGoToRoomFromProfile}
           onClose={() => setPublicProfileTarget(null)}
         />
       )}

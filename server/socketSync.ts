@@ -35,7 +35,9 @@ interface InternalRoomStats {
 }
 
 const DEFAULT_CORE_ROOMS: Array<{ id: string; name: string }> = [
-  { id: 'lounge_party', name: 'Lounge Party' },
+  { id: 'lounge_party', name: 'Lounge Party (BR)' },
+  { id: 'lounge_party_es', name: 'Lounge Party (ES)' },
+  { id: 'lounge_party_en', name: 'Lounge Party (EN)' },
 ];
 
 const roomTelemetryMap = new Map<string, InternalRoomStats>();

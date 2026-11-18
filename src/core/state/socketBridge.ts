@@ -13,6 +13,7 @@ import type {
 } from '../schemas/dbSchema';
 import type {
   BanReviewRequest,
+  MarketListing,
   PremiumOrder,
   PremiumPixConfig,
   RoomDjTrack,
@@ -41,6 +42,7 @@ export type RemoteSyncListener = {
   onBanReviewUpdated?: (reviews: BanReviewRequest[]) => void;
   onPremiumOrdersUpdated?: (orders: PremiumOrder[]) => void;
   onPremiumPixUpdated?: (config: PremiumPixConfig) => void;
+  onMarketListingsUpdated?: (listings: MarketListing[]) => void;
 };
 
 let activeSocket: Socket | null = null;
@@ -126,6 +128,10 @@ export function notifyRemotePremiumPix(config: PremiumPixConfig): void {
   listeners.forEach((l) => l.onPremiumPixUpdated?.(config));
 }
 
+export function notifyRemoteMarketListings(listings: MarketListing[]): void {
+  listeners.forEach((l) => l.onMarketListingsUpdated?.(listings));
+}
+
 export function emitRoomTelemetryPing(roomId: RoomId, latencyMs = 28): void {
   if (activeSocket && activeSocket.connected && roomId) {
     activeSocket.emit('room:telemetry_ping', { roomId, latencyMs });
@@ -146,6 +152,7 @@ export function emitStatePatchToServer(patch: StateSyncPatchPayload): void {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+      keepalive: true,
     }).catch(() => undefined);
   }
 }

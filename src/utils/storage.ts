@@ -13,8 +13,22 @@ import {
 import type { AccountCountryOption } from '../types/game';
 import { emitStatePatchToServer } from '../core/state/socketBridge';
 import {
+  ADMIN_CREATED_AT,
+  ADMIN_INITIAL_LEVEL,
+  LOGIN_XP_REWARD,
+  awardLoginXp,
+  canonicalCharacterKey,
+  cleanCharacterName,
+  collapsedCharacterKey,
+  getLevelProgressMetrics,
+  normalizeLevelAndXp,
+  validateCharacterName,
+} from './levelSystem';
+import {
+  AccessoryBodySlot,
   AvatarDisplayMode,
   AvatarGender,
+  ClothingCategory,
   ClothingItem,
   EquippedOutfit,
   FurnitureDef,
@@ -35,6 +49,7 @@ import {
   StaffRoleTier,
   UserAccount,
   WorldModerationState,
+  FacePreset,
 } from '../types/game';
 
 export const ADMIN_OWNER_EMAIL = 'miranda88686673@gmail.com';
@@ -46,9 +61,48 @@ export const SESSION_KEY = 'starlight_atelier_session_v1';
 export const WORLD_KEY = 'starlight_atelier_world_v1';
 export const PLAYER_PREFIX = 'starlight_atelier_player_v1_';
 export const DMS_KEY = 'starlight_atelier_dms_v1';
+export const FACE_PRESETS_KEY = 'starlight_atelier_face_presets_v1';
 const REMOVED_STAFF_IDS_KEY = 'starlight_atelier_removed_staff_v1';
 const ROOMS_STORAGE_KEY = 'starlight_atelier_rooms_v1';
 const REALTIME_CHANNEL_NAME = 'starlight_atelier_realtime_v1';
+
+export function getSavedFacePresets(): FacePreset[] {
+  try {
+    const raw = localStorage.getItem(FACE_PRESETS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveFacePreset(preset: FacePreset): FacePreset[] {
+  try {
+    const current = getSavedFacePresets();
+    const existingIdx = current.findIndex((p) => p.id === preset.id);
+    let next: FacePreset[];
+    if (existingIdx >= 0) {
+      next = [...current];
+      next[existingIdx] = preset;
+    } else {
+      next = [preset, ...current];
+    }
+    localStorage.setItem(FACE_PRESETS_KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return [];
+  }
+}
+
+export function deleteFacePreset(presetId: string): FacePreset[] {
+  try {
+    const current = getSavedFacePresets();
+    const next = current.filter((p) => p.id !== presetId);
+    localStorage.setItem(FACE_PRESETS_KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return [];
+  }
+}
 
 export const SERVER_REGION_META: Record<
   ServerRegion,
@@ -206,8 +260,8 @@ export function canManageCommunityInServer(
 
 /** Infere o servidor regional principal a partir do país configurado no perfil */
 export function inferServerRegionFromCountry(countryCode?: string): ServerRegion {
-  if (countryCode === 'ES' || countryCode === 'AR') return 'ES';
-  if (countryCode === 'US') return 'EN';
+  if (countryCode === 'ES' || countryCode === 'AR' || countryCode === 'MX') return 'ES';
+  if (countryCode === 'US' || countryCode === 'GB' || countryCode === 'CA') return 'EN';
   return 'BR';
 }
 
@@ -221,6 +275,165 @@ export function isItemCompatibleWithGender(
   return resolvedItemGender === bodyGender;
 }
 
+/** Determina a parte anatômica onde um acessório é equipado (permite múltiplos acessórios simultâneos) */
+export function getAccessoryBodySlot(
+  item: Pick<ClothingItem, 'id' | 'name' | 'templateId' | 'threeSpec' | 'accessorySlot'>,
+): AccessoryBodySlot {
+  if (item.accessorySlot) return item.accessorySlot;
+  const sil = item.threeSpec?.garmentSilhouette;
+  if (sil === 'acc_dragon' || sil === 'acc_white_tiger') return 'companion';
+  if (sil === 'acc_eyepatch' || sil === 'acc_sunglasses') return 'face';
+  if (sil === 'acc_watch') return 'arm';
+  if (sil === 'acc_scepter' || sil === 'acc_bag') return 'hand';
+  if (sil === 'acc_necklace') return 'neck';
+  if (sil === 'acc_earrings') return 'ear';
+  if (sil === 'acc_crown' || sil === 'acc_hat') return 'head';
+
+  const hint = `${item.id} ${item.templateId ?? ''} ${item.name}`.toLowerCase();
+  if (
+    hint.includes('dragao') ||
+    hint.includes('dragon') ||
+    hint.includes('tigre') ||
+    hint.includes('tiger') ||
+    hint.includes('pet')
+  ) {
+    return 'companion';
+  }
+  if (hint.includes('tapa-olho') || hint.includes('tapa olho') || hint.includes('eyepatch') || hint.includes('oculos') || hint.includes('óculos')) return 'face';
+  if (hint.includes('relogio') || hint.includes('relógio') || hint.includes('watch') || hint.includes('bracelete') || hint.includes('pulseira')) return 'arm';
+  if (hint.includes('cetro') || hint.includes('scepter') || hint.includes('bolsa') || hint.includes('bag')) return 'hand';
+  if (hint.includes('colar') || hint.includes('necklace') || hint.includes('gargantilha')) return 'neck';
+  if (hint.includes('brinco') || hint.includes('ear')) return 'ear';
+  return 'head';
+}
+
+export const ACCESSORY_SLOT_LABELS: Record<AccessoryBodySlot, string> = {
+  head: 'Cabeça',
+  ear: 'Orelha',
+  face: 'Rosto',
+  neck: 'Pescoço',
+  arm: 'Braço',
+  hand: 'Mão',
+  companion: 'Ao Lado (Mascote)',
+};
+
+/** Retorna todos os acessórios equipados (unindo legado `acessorios` + mapa `acessoriosSlots`) */
+export function getEquippedAccessoriesList(
+  equipped: EquippedOutfit | undefined,
+  catalogMapOrArray: Map<string, ClothingItem> | ClothingItem[],
+): Array<{ slot: AccessoryBodySlot; item: ClothingItem }> {
+  if (!equipped) return [];
+  const lookup = (id: string): ClothingItem | undefined =>
+    catalogMapOrArray instanceof Map
+      ? catalogMapOrArray.get(id)
+      : catalogMapOrArray.find((c) => c.id === id);
+
+  const slotsMap: Partial<Record<AccessoryBodySlot, string>> = {
+    ...(equipped.acessoriosSlots ?? {}),
+  };
+
+  if (equipped.acessorios) {
+    const legacyItem = lookup(equipped.acessorios);
+    if (legacyItem) {
+      const legacySlot = getAccessoryBodySlot(legacyItem);
+      if (!slotsMap[legacySlot]) {
+        slotsMap[legacySlot] = legacyItem.id;
+      }
+    }
+  }
+
+  const results: Array<{ slot: AccessoryBodySlot; item: ClothingItem }> = [];
+  const seenIds = new Set<string>();
+  (Object.entries(slotsMap) as Array<[AccessoryBodySlot, string | undefined]>).forEach(
+    ([slot, id]) => {
+      if (!id || seenIds.has(id)) return;
+      const item = lookup(id);
+      if (!item) return;
+      seenIds.add(id);
+      results.push({ slot, item });
+    },
+  );
+  return results;
+}
+
+/** Verifica se uma peça ou acessório está equipado no avatar */
+export function isClothingItemEquipped(
+  equipped: EquippedOutfit | undefined,
+  item: Pick<ClothingItem, 'id' | 'category'>,
+): boolean {
+  if (!equipped) return false;
+  if (item.category === 'acessorios') {
+    if (equipped.acessorios === item.id) return true;
+    const slotValues = Object.values(equipped.acessoriosSlots ?? {});
+    return slotValues.includes(item.id);
+  }
+  return equipped[item.category] === item.id;
+}
+
+/** Alterna uma peça mantendo múltiplos acessórios equipados em partes distintas do corpo */
+export function toggleItemInEquippedOutfit(
+  equipped: EquippedOutfit,
+  item: ClothingItem,
+  catalog?: ClothingItem[],
+): EquippedOutfit {
+  const nextEquipped: EquippedOutfit = {
+    ...equipped,
+    acessoriosSlots: equipped.acessoriosSlots ? { ...equipped.acessoriosSlots } : undefined,
+  };
+
+  if (item.category === 'acessorios') {
+    const targetSlot = getAccessoryBodySlot(item);
+    const nextSlots: Partial<Record<AccessoryBodySlot, string>> = {
+      ...(nextEquipped.acessoriosSlots ?? {}),
+    };
+
+    // Preserva acessório legado em seu próprio slot antes de alterar o slot alvo
+    if (nextEquipped.acessorios && catalog) {
+      const legacyItem = catalog.find((c) => c.id === nextEquipped.acessorios);
+      if (legacyItem) {
+        const legacySlot = getAccessoryBodySlot(legacyItem);
+        if (!nextSlots[legacySlot]) {
+          nextSlots[legacySlot] = legacyItem.id;
+        }
+      }
+    }
+
+    const currentlyEquippedInSlot = nextSlots[targetSlot] === item.id || (!nextSlots[targetSlot] && nextEquipped.acessorios === item.id);
+    if (currentlyEquippedInSlot) {
+      delete nextSlots[targetSlot];
+      if (nextEquipped.acessorios === item.id) {
+        const remaining = Object.values(nextSlots).find((v): v is string => Boolean(v));
+        if (remaining) nextEquipped.acessorios = remaining;
+        else delete nextEquipped.acessorios;
+      }
+    } else {
+      nextSlots[targetSlot] = item.id;
+      nextEquipped.acessorios = item.id;
+    }
+
+    if (Object.keys(nextSlots).length > 0) {
+      nextEquipped.acessoriosSlots = nextSlots;
+    } else {
+      delete nextEquipped.acessoriosSlots;
+    }
+    return nextEquipped;
+  }
+
+  const currentInSlot = nextEquipped[item.category];
+  if (currentInSlot === item.id) {
+    delete nextEquipped[item.category];
+  } else {
+    nextEquipped[item.category] = item.id;
+    if (item.category === 'vestidos') {
+      delete nextEquipped.blusas;
+      delete nextEquipped.calcas;
+    } else if (item.category === 'blusas' || item.category === 'calcas') {
+      delete nextEquipped.vestidos;
+    }
+  }
+  return nextEquipped;
+}
+
 /** Desequipa automaticamente qualquer roupa incompatível ao alternar o modelo de corpo (Masculino/Feminino) */
 export function unequipIncompatibleClothes(
   equipped: EquippedOutfit,
@@ -230,7 +443,17 @@ export function unequipIncompatibleClothes(
   const nextEquipped: EquippedOutfit = {};
   const removedNames: string[] = [];
 
-  (Object.keys(equipped) as Array<keyof EquippedOutfit>).forEach((slot) => {
+  const mainCategories: ClothingCategory[] = [
+    'cabelo',
+    'blusas',
+    'casacos',
+    'vestidos',
+    'calcas',
+    'sapatos',
+    'acessorios',
+  ];
+
+  mainCategories.forEach((slot) => {
     const itemId = equipped[slot];
     if (!itemId) return;
     const item = catalog.find((c) => c.id === itemId);
@@ -241,6 +464,25 @@ export function unequipIncompatibleClothes(
       removedNames.push(item.name);
     }
   });
+
+  if (equipped.acessoriosSlots) {
+    const keptSlots: Partial<Record<AccessoryBodySlot, string>> = {};
+    (Object.entries(equipped.acessoriosSlots) as Array<[AccessoryBodySlot, string | undefined]>).forEach(
+      ([subSlot, itemId]) => {
+        if (!itemId) return;
+        const item = catalog.find((c) => c.id === itemId);
+        if (!item) return;
+        if (isItemCompatibleWithGender(item.gender ?? item.genderStyle, nextGender)) {
+          keptSlots[subSlot] = itemId;
+        } else if (!removedNames.includes(item.name)) {
+          removedNames.push(item.name);
+        }
+      },
+    );
+    if (Object.keys(keptSlots).length > 0) {
+      nextEquipped.acessoriosSlots = keptSlots;
+    }
+  }
 
   return { nextEquipped, removedNames };
 }
@@ -303,6 +545,7 @@ const DEFAULT_ITEM_CROP_BOXES: Record<
 > = {
   cabelo: { x: 64, y: 18, width: 152, height: 150 },
   blusas: { x: 64, y: 130, width: 152, height: 146 },
+  casacos: { x: 58, y: 126, width: 164, height: 192 },
   vestidos: { x: 56, y: 128, width: 168, height: 282 },
   calcas: { x: 64, y: 214, width: 152, height: 248 },
   sapatos: { x: 76, y: 386, width: 128, height: 122 },
@@ -412,7 +655,7 @@ export function normalizeDisplayName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-/** Verifica exclusividade global (case-insensitive) para username e displayName entre contas, bots e comunidade */
+/** Verifica exclusividade global (case-insensitive e anti-cópia) para nome único do personagem */
 export function checkGlobalNameConflict(params: {
   accounts: UserAccount[];
   world: WorldModerationState;
@@ -421,8 +664,11 @@ export function checkGlobalNameConflict(params: {
   excludeAccountId?: string;
 }): string | null {
   const { accounts, world, username, displayName, excludeAccountId } = params;
-  const targetUser = normalizeUsername(username);
-  const targetDisplay = normalizeDisplayName(displayName);
+  const candidate = cleanCharacterName(displayName || username);
+  const targetKey = canonicalCharacterKey(candidate);
+  const targetCollapsed = collapsedCharacterKey(candidate);
+  const userKey = canonicalCharacterKey(username);
+  const userCollapsed = collapsedCharacterKey(username);
 
   const excludeAccount = excludeAccountId
     ? accounts.find((a) => a.id === excludeAccountId)
@@ -431,36 +677,41 @@ export function checkGlobalNameConflict(params: {
     ? normalizeUsername(excludeAccount.username)
     : undefined;
 
-  const userTakenInAccounts = accounts.some(
-    (a) => a.id !== excludeAccountId && normalizeUsername(a.username) === targetUser,
-  );
-  const userTakenInWorld = world.users.some(
-    (u) =>
-      u.id !== excludeAccountId &&
-      (!excludeOldUser || normalizeUsername(u.username) !== excludeOldUser) &&
-      normalizeUsername(u.username) === targetUser,
-  );
+  const conflictInAccounts = accounts.some((a) => {
+    if (a.id === excludeAccountId) return false;
+    const keys = [
+      canonicalCharacterKey(a.username),
+      canonicalCharacterKey(a.displayName),
+      collapsedCharacterKey(a.username),
+      collapsedCharacterKey(a.displayName),
+    ];
+    return (
+      keys.includes(targetKey) ||
+      keys.includes(targetCollapsed) ||
+      keys.includes(userKey) ||
+      keys.includes(userCollapsed)
+    );
+  });
 
-  if (userTakenInAccounts || userTakenInWorld) {
-    return `O nome de usuário "${targetUser}" já está em uso por outro jogador ou avatar.`;
-  }
+  const conflictInWorld = world.users.some((u) => {
+    if (u.id === excludeAccountId) return false;
+    if (excludeOldUser && normalizeUsername(u.username) === excludeOldUser) return false;
+    const keys = [
+      canonicalCharacterKey(u.username),
+      canonicalCharacterKey(u.displayName ?? u.username),
+      collapsedCharacterKey(u.username),
+      collapsedCharacterKey(u.displayName ?? u.username),
+    ];
+    return (
+      keys.includes(targetKey) ||
+      keys.includes(targetCollapsed) ||
+      keys.includes(userKey) ||
+      keys.includes(userCollapsed)
+    );
+  });
 
-  const displayTakenInAccounts = accounts.some(
-    (a) =>
-      a.id !== excludeAccountId &&
-      (normalizeDisplayName(a.displayName) === targetDisplay ||
-        normalizeUsername(a.username) === targetDisplay),
-  );
-  const displayTakenInWorld = world.users.some(
-    (u) =>
-      u.id !== excludeAccountId &&
-      (!excludeOldUser || normalizeUsername(u.username) !== excludeOldUser) &&
-      (normalizeDisplayName(u.displayName ?? u.username) === targetDisplay ||
-        normalizeUsername(u.username) === targetDisplay),
-  );
-
-  if (displayTakenInAccounts || displayTakenInWorld) {
-    return `O nome "${displayName.trim()}" já está em uso por outro jogador ou avatar.`;
+  if (conflictInAccounts || conflictInWorld) {
+    return `O nome de personagem "${candidate}" já está em uso. Cada conta tem seu nome próprio exclusivo.`;
   }
 
   return null;
@@ -494,28 +745,8 @@ export function createDefaultPlayerState(
   seedForIp: string = 'guest_session',
 ): PlayerProgressState {
   const genderStarter = STARTER_IDS_BY_GENDER[avatarGender] ?? STARTER_IDS_BY_GENDER.feminino;
-  const defaultEquippedByGender: Record<AvatarGender, EquippedOutfit> = {
-    feminino: {
-      cabelo: STARTER_IDS_BY_GENDER.feminino.cabelo,
-      blusas: STARTER_IDS_BY_GENDER.feminino.blusas,
-      calcas: STARTER_IDS_BY_GENDER.feminino.calcas,
-      sapatos: STARTER_IDS_BY_GENDER.feminino.sapatos,
-    },
-    masculino: {
-      cabelo: STARTER_IDS_BY_GENDER.masculino.cabelo,
-      blusas: STARTER_IDS_BY_GENDER.masculino.blusas,
-      calcas: STARTER_IDS_BY_GENDER.masculino.calcas,
-      sapatos: STARTER_IDS_BY_GENDER.masculino.sapatos,
-    },
-    neutro: {
-      cabelo: STARTER_IDS_BY_GENDER.neutro.cabelo,
-      blusas: STARTER_IDS_BY_GENDER.neutro.blusas,
-      calcas: STARTER_IDS_BY_GENDER.neutro.calcas,
-      sapatos: STARTER_IDS_BY_GENDER.neutro.sapatos,
-    },
-  };
-
   const defaultCountry = getCountryMeta('BR');
+  const isPrimaryAdmin = seedForIp === 'acc_admin_owner';
 
   const starterFurnitureIds = FURNITURE_CATALOG.filter((f) => f.starter).map((f) => f.id);
   const starterRoomIds = PURCHASABLE_ROOMS_CATALOG.filter((r) => r.starter).map((r) => r.id);
@@ -525,16 +756,22 @@ export function createDefaultPlayerState(
 
   return {
     catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
+    level: isPrimaryAdmin ? ADMIN_INITIAL_LEVEL : 1,
+    xp: 0,
     starcoins: 1200,
     ownedItemIds: [...genderStarter.owned],
     ownedFurnitureIds: starterFurnitureIds,
     ownedRoomTemplateIds: starterRoomIds,
     ownedWallpaperIds: starterWallpaperIds,
-    equipped: defaultEquippedByGender[avatarGender],
+    equipped: {},
     skinTone: 'pessego',
     avatarGender,
     avatarDisplayMode: 'medoll',
-    bio: 'Explorando estilos 3D na Starplaza e decorando minha Suíte no Starlight Atelier.',
+    profileBanner: {
+      presetId: 'atelier_aurora',
+      motionSpeed: 'slow',
+    },
+    bio: 'Explorando estilos 3D na Starplaza e decorando minha Suíte no Nocturne Vale Club.',
     presenceStatus: 'online',
     countryCode: defaultCountry.code,
     timezone: defaultCountry.timezone,
@@ -562,7 +799,7 @@ function createSeededAccounts(): UserAccount[] {
   return [
     {
       id: 'acc_admin_owner',
-      username: 'vitor',
+      username: 'Vitor',
       displayName: 'Vitor',
       email: ADMIN_OWNER_EMAIL,
       password: '@manuel868673',
@@ -572,7 +809,7 @@ function createSeededAccounts(): UserAccount[] {
       staffRoleTitle: 'Administrador Geral',
       isVip: true,
       isPrimaryOwner: true,
-      createdAt: '01/01/2025',
+      createdAt: ADMIN_CREATED_AT,
     },
   ];
 }
@@ -617,14 +854,25 @@ function clearRemovedStaffId(accountId: string): void {
 }
 
 /** Estado compartilhado padrão da sala e moderação */
+function buildDefaultLegendaryLaunchMap(baseTs: number = Date.now()): Record<string, number> {
+  return {
+    legendary_coroa_2023: baseTs,
+    legendary_coroa_2024: baseTs,
+    legendary_coroa_2025: baseTs,
+    legendary_coroa_2026: baseTs,
+    legendary_dragaozinho: baseTs,
+    legendary_tigre_branco: baseTs,
+  };
+}
+
 export function createDefaultWorldState(): WorldModerationState {
   const seededAccounts = createSeededAccounts();
   const seededStaffUsers: MockUser[] = seededAccounts.map((acc) => ({
     id: acc.id,
-    username: normalizeUsername(acc.username),
+    username: acc.username,
     displayName: acc.displayName,
-    level: acc.staffRoleTier === 'admin' ? 50 : 38,
-    starcoins: acc.staffRoleTier === 'admin' ? 4500 : 2200,
+    level: acc.isPrimaryOwner || acc.id === 'acc_admin_owner' ? ADMIN_INITIAL_LEVEL : 1,
+    starcoins: acc.staffRoleTier === 'admin' ? 4500 : 1200,
     status: 'active',
     joinedAt: acc.createdAt,
     role: acc.role,
@@ -637,14 +885,16 @@ export function createDefaultWorldState(): WorldModerationState {
   return {
     catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
     globalNotice:
-      'Bem-vinda ao Starlight Atelier 3D! 400 novas peças Three.js (Livres AM, VIP & Lendárias) e Lounge Party Oficial.',
+      'Bem-vinda ao Nocturne Vale Club 3D! Lounge Party Oficial e decorações exclusivas na Starplaza.',
     serverNotices: {
-      BR: 'Encontro Oficial no Lounge Party! Explore o novo catálogo 3D na Starplaza.',
-      ES: '¡Encuentro oficial en Lounge Party! Explora las 400 nuevas prendas 3D.',
-      EN: 'Official Meetup at Lounge Party! Explore the new Three.js 3D collections.',
+      BR: 'Encontro Oficial no Lounge Party! Explore as salas 3D e móveis da Starplaza.',
+      ES: '¡Encuentro oficial en Lounge Party! Explora las salas 3D y muebles de Starplaza.',
+      EN: 'Official Meetup at Lounge Party! Explore the 3D rooms and Starplaza furniture.',
     },
     users: [...seededStaffUsers],
     deletedItemIds: [],
+    soldOutItemIds: [],
+    legendaryLaunchTimestamps: buildDefaultLegendaryLaunchMap(),
     customClothingCatalog: [],
     customFurnitureCatalog: [],
     customRoomCatalog: [],
@@ -723,11 +973,13 @@ export function loadAccounts(): UserAccount[] {
       );
       const isPrimaryOwner =
         Boolean(rawAcc.isPrimaryOwner) || rawAcc.id === 'acc_admin_owner';
-      const cleanUsername = normalizeUsername(rawAcc.username ?? 'estilista');
-      const displayName =
-        typeof rawAcc.displayName === 'string' && rawAcc.displayName.trim()
-          ? rawAcc.displayName
-          : seedMatch?.displayName ?? cleanUsername;
+      const unifiedBase =
+        cleanCharacterName(rawAcc.displayName || rawAcc.username || '') ||
+        seedMatch?.displayName ||
+        'estilista';
+      const resolvedCreatedAt = isPrimaryOwner
+        ? ADMIN_CREATED_AT
+        : rawAcc.createdAt ?? new Date().toLocaleDateString('pt-BR');
 
       const rawTierStr = rawAcc.staffRoleTier as string | undefined;
       const normalizedTier = normalizeStaffTier(rawTierStr) ?? seedMatch?.staffRoleTier;
@@ -763,7 +1015,9 @@ export function loadAccounts(): UserAccount[] {
         : rawAcc.email ?? 'estilista@starlightatelier.com';
 
       if (
-        rawAcc.displayName !== displayName ||
+        rawAcc.username !== unifiedBase ||
+        rawAcc.displayName !== unifiedBase ||
+        rawAcc.createdAt !== resolvedCreatedAt ||
         Boolean(rawAcc.isPrimaryOwner) !== isPrimaryOwner ||
         rawAcc.email !== resolvedEmail ||
         rawAcc.staffRoleTier !== staffRoleTier ||
@@ -776,8 +1030,8 @@ export function loadAccounts(): UserAccount[] {
 
       return {
         id: rawAcc.id ?? `acc_${Date.now()}`,
-        username: rawAcc.username ?? 'estilista',
-        displayName,
+        username: unifiedBase,
+        displayName: unifiedBase,
         email: resolvedEmail,
         password: rawAcc.password ?? '',
         password_hash: rawAcc.password_hash,
@@ -790,7 +1044,7 @@ export function loadAccounts(): UserAccount[] {
         isVip,
         isBot: false,
         isPrimaryOwner,
-        createdAt: rawAcc.createdAt ?? new Date().toLocaleDateString('pt-BR'),
+        createdAt: resolvedCreatedAt,
       };
     });
 
@@ -863,8 +1117,15 @@ export function loadWorldState(): WorldModerationState {
       };
     });
 
-      // Sincroniza todas as contas registradas (matching por ID primeiro para preservar edições de username)
+      // Sincroniza todas as contas registradas (matching por ID primeiro para preservar edições de nome único)
     for (const acc of accounts) {
+      const isPrimaryOwner = Boolean(acc.isPrimaryOwner) || acc.id === 'acc_admin_owner';
+      const accProgress = loadPlayerProgress(acc.id, acc.avatarGender);
+      const { level: syncedLevel } = normalizeLevelAndXp(
+        accProgress.level,
+        accProgress.xp,
+        isPrimaryOwner,
+      );
       const existingIdx = existingUsers.findIndex(
         (u) =>
           u.id === acc.id ||
@@ -873,10 +1134,10 @@ export function loadWorldState(): WorldModerationState {
       if (existingIdx === -1) {
         existingUsers.unshift({
           id: acc.id,
-          username: normalizeUsername(acc.username),
+          username: acc.username,
           displayName: acc.displayName,
-          level: acc.staffRoleTier === 'admin' ? 50 : acc.staffRoleTier ? 38 : 1,
-          starcoins: acc.staffRoleTier === 'admin' ? 4500 : 1200,
+          level: syncedLevel,
+          starcoins: accProgress.starcoins,
           status: 'active',
           joinedAt: acc.createdAt,
           role: acc.role,
@@ -889,8 +1150,12 @@ export function loadWorldState(): WorldModerationState {
         existingUsers[existingIdx] = {
           ...existingUsers[existingIdx],
           id: acc.id,
-          username: normalizeUsername(acc.username),
+          username: acc.username,
           displayName: acc.displayName,
+          level: isPrimaryOwner
+            ? Math.max(ADMIN_INITIAL_LEVEL, syncedLevel)
+            : syncedLevel,
+          joinedAt: acc.createdAt,
           role: acc.role,
           staffRoleTier: acc.staffRoleTier,
           serverRegion: acc.serverRegion ?? existingUsers[existingIdx].serverRegion,
@@ -900,21 +1165,35 @@ export function loadWorldState(): WorldModerationState {
       }
     }
 
-    const isV3World = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
+    const isCurrentWorldSchema = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
     const filteredCustomClothes = Array.isArray(parsed.customClothingCatalog)
       ? parsed.customClothingCatalog.filter((c) => Boolean(c?.threeSpec))
       : [];
+    const cleanedNewsPosts = Array.isArray(parsed.newsPosts)
+      ? parsed.newsPosts.filter((p) => !p.id.startsWith('news_seed_'))
+      : [];
 
-    return {
+    const savedLaunchTimestamps =
+      parsed.legendaryLaunchTimestamps &&
+      typeof parsed.legendaryLaunchTimestamps === 'object'
+        ? parsed.legendaryLaunchTimestamps
+        : undefined;
+    const mergedLaunchTimestamps: Record<string, number> = {
+      ...buildDefaultLegendaryLaunchMap(),
+      ...(savedLaunchTimestamps ?? {}),
+    };
+
+    const migratedWorld: WorldModerationState = {
       catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
       globalNotice:
-        typeof parsed.globalNotice === 'string' && isV3World
+        typeof parsed.globalNotice === 'string' && parsed.globalNotice.trim()
           ? parsed.globalNotice
           : fallback.globalNotice,
-      serverNotices: isV3World ? (parsed.serverNotices ?? fallback.serverNotices) : fallback.serverNotices,
+      serverNotices: parsed.serverNotices ?? fallback.serverNotices,
       users: existingUsers,
-      deletedItemIds:
-        isV3World && Array.isArray(parsed.deletedItemIds) ? parsed.deletedItemIds : [],
+      deletedItemIds: Array.isArray(parsed.deletedItemIds) ? parsed.deletedItemIds : [],
+      soldOutItemIds: Array.isArray(parsed.soldOutItemIds) ? parsed.soldOutItemIds : [],
+      legendaryLaunchTimestamps: mergedLaunchTimestamps,
       customClothingCatalog: filteredCustomClothes,
       customFurnitureCatalog: Array.isArray(parsed.customFurnitureCatalog)
         ? parsed.customFurnitureCatalog
@@ -937,10 +1216,7 @@ export function loadWorldState(): WorldModerationState {
       bannedWords: Array.isArray(parsed.bannedWords)
         ? parsed.bannedWords
         : fallback.bannedWords,
-      newsPosts:
-        Array.isArray(parsed.newsPosts) && parsed.newsPosts.length > 0
-          ? parsed.newsPosts
-          : fallback.newsPosts,
+      newsPosts: cleanedNewsPosts,
       lastDesignerCreationAt:
         typeof parsed.lastDesignerCreationAt === 'number'
           ? parsed.lastDesignerCreationAt
@@ -954,6 +1230,15 @@ export function loadWorldState(): WorldModerationState {
           ? parsed.lastDesignerAuditAt
           : fallback.lastDesignerAuditAt,
     };
+
+    if (!isCurrentWorldSchema) {
+      try {
+        window.localStorage.setItem(WORLD_KEY, JSON.stringify(migratedWorld));
+      } catch {
+        // Silencioso
+      }
+    }
+    return migratedWorld;
   } catch {
     return fallback;
   }
@@ -1068,8 +1353,8 @@ export function getStaffAccountsWithProgress(liveOverride?: {
 }
 
 /**
- * Atualiza username e Nome de Exibição da conta no localStorage (Fonte Única de Verdade)
- * aplicando exclusividade global (case-insensitive) e taxa obrigatória de 500 SC (quando player altera).
+ * Atualiza o Nome Único do Personagem (displayName === username) aplicando
+ * exclusividade global (case-insensitive e anti-cópia).
  */
 export function updateAccountIdentity(
   accountId: string,
@@ -1083,27 +1368,12 @@ export function updateAccountIdentity(
       feeCharged: number;
     }
   | { ok: false; error: string } {
-  const nextUsername = normalizeUsername(input.username);
-  const nextDisplayName = input.displayName.trim().replace(/\s+/g, ' ');
+  const unifiedName = cleanCharacterName(input.displayName || input.username);
   const shouldChargeFee = input.chargeFee !== false;
 
-  if (nextDisplayName.length < 2 || nextDisplayName.length > 40) {
-    return {
-      ok: false,
-      error: 'O nome de exibição deve ter entre 2 e 40 caracteres.',
-    };
-  }
-  if (nextUsername.length < 3 || nextUsername.length > 24) {
-    return {
-      ok: false,
-      error: 'O nome de usuário deve ter entre 3 e 24 caracteres.',
-    };
-  }
-  if (!/^[a-z0-9_]+$/.test(nextUsername)) {
-    return {
-      ok: false,
-      error: 'Use apenas letras minúsculas, números ou underline (_) no nome de usuário.',
-    };
+  const formatErr = validateCharacterName(unifiedName);
+  if (formatErr) {
+    return { ok: false, error: formatErr };
   }
 
   const accounts = loadAccounts();
@@ -1113,14 +1383,14 @@ export function updateAccountIdentity(
   }
 
   const oldUsername = normalizeUsername(targetAccount.username);
-  const oldDisplayNorm = normalizeDisplayName(targetAccount.displayName);
-  const nextDisplayNorm = normalizeDisplayName(nextDisplayName);
-  const hasChanged = nextUsername !== oldUsername || nextDisplayNorm !== oldDisplayNorm;
+  const oldCanonical = canonicalCharacterKey(targetAccount.displayName || targetAccount.username);
+  const nextCanonical = canonicalCharacterKey(unifiedName);
+  const hasChanged = nextCanonical !== oldCanonical || unifiedName !== targetAccount.displayName;
 
   if (shouldChargeFee && !hasChanged) {
     return {
       ok: false,
-      error: `Nenhuma alteração detectada. Modifique o nome para aplicar a taxa de ${NAME_CHANGE_FEE_SC} AM.`,
+      error: 'Digite um novo nome diferente do atual para alterar o nome do personagem.',
     };
   }
 
@@ -1128,8 +1398,8 @@ export function updateAccountIdentity(
   const conflictError = checkGlobalNameConflict({
     accounts,
     world,
-    username: nextUsername,
-    displayName: nextDisplayName,
+    username: unifiedName,
+    displayName: unifiedName,
     excludeAccountId: accountId,
   });
   if (conflictError) {
@@ -1142,7 +1412,7 @@ export function updateAccountIdentity(
   if (feeToDeduct > 0 && currentProgress.starcoins < feeToDeduct) {
     return {
       ok: false,
-      error: `Saldo insuficiente! Alterar o nome do avatar exige ${NAME_CHANGE_FEE_SC} AM (seu saldo: ${currentProgress.starcoins} AM).`,
+      error: 'Não foi possível concluir a alteração de nome neste momento.',
     };
   }
 
@@ -1157,8 +1427,8 @@ export function updateAccountIdentity(
 
   const updatedAccount: UserAccount = {
     ...targetAccount,
-    username: nextUsername,
-    displayName: nextDisplayName,
+    username: unifiedName,
+    displayName: unifiedName,
   };
 
   saveAccounts(
@@ -1173,14 +1443,16 @@ export function updateAccountIdentity(
         ? {
             ...u,
             id: accountId,
-            username: nextUsername,
-            displayName: nextDisplayName,
+            username: unifiedName,
+            displayName: unifiedName,
             starcoins: nextProgress.starcoins,
           }
         : u,
     ),
   };
   saveWorldState(nextWorld);
+
+  const nextUsername = normalizeUsername(unifiedName);
 
   // Se o @username mudou, atualiza referências em DMs, salas e lista de amigos
   if (oldUsername !== nextUsername && typeof window !== 'undefined') {
@@ -1285,20 +1557,10 @@ export function createStaffAccount(input: {
 }):
   | { ok: true; account: UserAccount; world: WorldModerationState }
   | { ok: false; error: string } {
-  const normalizedUsername = normalizeUsername(input.username);
-  const trimmedDisplay = input.displayName.trim();
-
-  if (trimmedDisplay.length < 2 || trimmedDisplay.length > 40) {
-    return { ok: false, error: 'O nome de exibição deve ter entre 2 e 40 caracteres.' };
-  }
-  if (normalizedUsername.length < 3 || normalizedUsername.length > 24) {
-    return { ok: false, error: 'O nome de usuário deve ter entre 3 e 24 caracteres.' };
-  }
-  if (!/^[a-z0-9_]+$/.test(normalizedUsername)) {
-    return {
-      ok: false,
-      error: 'Use apenas letras minúsculas, números ou underline (_) no nome de usuário.',
-    };
+  const unifiedName = cleanCharacterName(input.displayName || input.username);
+  const nameErr = validateCharacterName(unifiedName);
+  if (nameErr) {
+    return { ok: false, error: nameErr };
   }
 
   const accounts = loadAccounts();
@@ -1307,8 +1569,8 @@ export function createStaffAccount(input: {
   const conflictError = checkGlobalNameConflict({
     accounts,
     world,
-    username: normalizedUsername,
-    displayName: trimmedDisplay,
+    username: unifiedName,
+    displayName: unifiedName,
   });
 
   if (conflictError) {
@@ -1319,11 +1581,12 @@ export function createStaffAccount(input: {
   }
 
   const serverRegion = STAFF_ROLE_SERVER_MAP[input.staffRoleTier];
+  const emailSlug = normalizeUsername(unifiedName).replace(/[^a-z0-9_]/g, '') || 'staff';
   const newAccount: UserAccount = {
     id: `acc_staff_human_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-    username: normalizedUsername,
-    displayName: trimmedDisplay,
-    email: `${normalizedUsername}@starlightatelier.com`,
+    username: unifiedName,
+    displayName: unifiedName,
+    email: `${emailSlug}_${Date.now()}@starlightatelier.com`,
     password: 'staff123',
     avatarGender: input.avatarGender,
     role: 'admin',
@@ -1347,6 +1610,8 @@ export function createStaffAccount(input: {
 
   const staffProgress: PlayerProgressState = {
     ...baseProgress,
+    level: 1,
+    xp: 0,
     starcoins: input.staffRoleTier === 'admin' ? 4000 : 2500,
     ownedItemIds: Array.from(new Set([...baseProgress.ownedItemIds, ...equippedIds])),
     equipped: { ...input.equipped },
@@ -1355,7 +1620,7 @@ export function createStaffAccount(input: {
     customAvatarUrl: input.customAvatarUrl,
     avatarDisplayMode:
       input.avatarDisplayMode === 'photo' && input.customAvatarUrl ? 'photo' : 'medoll',
-    bio: input.bio.trim() || 'Integrante oficial da equipe Starlight Atelier.',
+    bio: input.bio.trim() || 'Integrante oficial da equipe Nocturne Vale Club.',
     presenceStatus: input.presenceStatus,
     countryCode: countryMeta.code,
     timezone: countryMeta.timezone,
@@ -1371,7 +1636,7 @@ export function createStaffAccount(input: {
         id: newAccount.id,
         username: newAccount.username,
         displayName: newAccount.displayName,
-        level: 38,
+        level: 1,
         starcoins: staffProgress.starcoins,
         status: 'active',
         joinedAt: newAccount.createdAt,
@@ -1572,9 +1837,26 @@ export function toggleUserVipStatus(userId: string): WorldModerationState {
 export function addCustomClothingToWorld(item: ClothingItem): WorldModerationState {
   const world = loadWorldState();
   const current = world.customClothingCatalog ?? [];
+  const isLeg = Boolean(item.isLegendary || item.itemClass === 'legendary');
+  const launchTs = item.launchedAt ?? item.customCreatedAt ?? Date.now();
+  const normalizedItem: ClothingItem = isLeg
+    ? {
+        ...item,
+        isLegendary: true,
+        itemClass: 'legendary',
+        launchedAt: launchTs,
+        legendaryExpiresAt: item.legendaryExpiresAt ?? launchTs + 24 * 60 * 60 * 1000,
+      }
+    : item;
   const nextWorld: WorldModerationState = {
     ...world,
-    customClothingCatalog: [item, ...current.filter((c) => c.id !== item.id)],
+    customClothingCatalog: [normalizedItem, ...current.filter((c) => c.id !== normalizedItem.id)],
+    legendaryLaunchTimestamps: isLeg
+      ? {
+          ...(world.legendaryLaunchTimestamps ?? {}),
+          [normalizedItem.id]: launchTs,
+        }
+      : world.legendaryLaunchTimestamps,
   };
   saveWorldState(nextWorld);
   return nextWorld;
@@ -1791,7 +2073,7 @@ export function syncAppearanceToAccount(
   });
 }
 
-/** Registra uma nova conta validando duplicidade de username e vinculando servidor regional */
+/** Registra uma nova conta validando nome único de personagem (1 por conta) e 1 e-mail único por conta */
 export function registerAccount(input: {
   username: string;
   displayName?: string;
@@ -1800,17 +2082,12 @@ export function registerAccount(input: {
   avatarGender: AvatarGender;
   serverRegion?: ServerRegion;
 }): { ok: true; account: UserAccount } | { ok: false; error: string } {
-  const normalized = normalizeUsername(input.username);
+  const unifiedName = cleanCharacterName(input.username || input.displayName || '');
+  const nameErr = validateCharacterName(unifiedName);
+  if (nameErr) {
+    return { ok: false, error: nameErr };
+  }
 
-  if (normalized.length < 3) {
-    return { ok: false, error: 'O nome de usuário deve ter pelo menos 3 caracteres.' };
-  }
-  if (!/^[a-z0-9_]+$/.test(normalized)) {
-    return {
-      ok: false,
-      error: 'Use apenas letras, números ou underline (_) no nome de usuário.',
-    };
-  }
   if (!input.email.includes('@') || input.email.trim().length < 5) {
     return { ok: false, error: 'Informe um e-mail válido.' };
   }
@@ -1822,7 +2099,7 @@ export function registerAccount(input: {
   if (emailAlreadyExists) {
     return {
       ok: false,
-      error: 'Este endereço de e-mail já está cadastrado em outra conta. O Starlight Atelier exige 1 e-mail único por conta.',
+      error: 'Este endereço de e-mail já foi utilizado em outra conta. Só é permitido 1 conta por e-mail.',
     };
   }
   if (input.password.length < 4) {
@@ -1830,14 +2107,11 @@ export function registerAccount(input: {
   }
 
   const world = loadWorldState();
-  const candidateDisplayName = input.displayName?.trim() || normalized;
-
-  // Garante exclusividade global (case-insensitive) de username e nome de exibição
   const conflictError = checkGlobalNameConflict({
     accounts,
     world,
-    username: normalized,
-    displayName: candidateDisplayName,
+    username: unifiedName,
+    displayName: unifiedName,
   });
 
   if (conflictError) {
@@ -1854,9 +2128,9 @@ export function registerAccount(input: {
 
   const newAccount: UserAccount = {
     id: `acc_${Date.now()}`,
-    username: normalized,
-    displayName: candidateDisplayName,
-    email: input.email.trim().toLowerCase(),
+    username: unifiedName,
+    displayName: unifiedName,
+    email: cleanedEmail,
     password: input.password,
     avatarGender: input.avatarGender,
     role: 'player',
@@ -1866,10 +2140,11 @@ export function registerAccount(input: {
 
   saveAccounts([...accounts, newAccount]);
 
-  // Inicializa progresso próprio com país/fuso/IP alinhados ao Servidor selecionado
   const basePlayer = createDefaultPlayerState(input.avatarGender, newAccount.id);
   const initialPlayer: PlayerProgressState = {
     ...basePlayer,
+    level: 1,
+    xp: 0,
     countryCode: countryMeta.code,
     timezone: countryMeta.timezone,
     simulatedIp: generateSimulatedIp(newAccount.id, countryMeta.code),
@@ -1901,28 +2176,35 @@ export function registerAccount(input: {
   return { ok: true, account: newAccount };
 }
 
-/** Realiza login verificando credenciais por username ou e-mail e status de banimento */
+/** Realiza login verificando credenciais por nome do personagem ou e-mail e concede XP de login */
 export function loginAccount(input: {
   username: string;
   password: string;
-}): { ok: true; account: UserAccount } | { ok: false; error: string } {
+}):
+  | {
+      ok: true;
+      account: UserAccount;
+      loginXpAward?: ReturnType<typeof awardLoginXp>;
+    }
+  | { ok: false; error: string } {
   const rawInput = input.username.trim();
-  const normalized = normalizeUsername(rawInput);
+  const normKey = canonicalCharacterKey(rawInput);
   const rawEmail = rawInput.toLowerCase();
   if (!rawInput || !input.password) {
-    return { ok: false, error: 'Preencha usuário (ou e-mail) e senha.' };
+    return { ok: false, error: 'Preencha o nome do personagem (ou e-mail) e senha.' };
   }
 
   const accounts = loadAccounts();
   const found = accounts.find(
     (acc) =>
-      normalizeUsername(acc.username) === normalized ||
+      canonicalCharacterKey(acc.username) === normKey ||
+      canonicalCharacterKey(acc.displayName) === normKey ||
       acc.email.trim().toLowerCase() === rawEmail,
   );
 
   const cleanedPass = input.password.trim();
   const isAdminTarget =
-    normalized === 'vitor' ||
+    normKey === 'vitor' ||
     rawEmail === ADMIN_OWNER_EMAIL ||
     (found && (found.id === 'acc_admin_owner' || found.isPrimaryOwner));
 
@@ -1940,10 +2222,9 @@ export function loginAccount(input: {
        cleanedPass === 'admin123'));
 
   if (!actualAccount || !passwordMatches) {
-    return { ok: false, error: 'Usuário, e-mail ou senha incorretos.' };
+    return { ok: false, error: 'Nome do personagem, e-mail ou senha incorretos.' };
   }
 
-  // Verifica se a conta foi banida pelo painel de Moderação
   const world = loadWorldState();
   const moderatedEntry = world.users.find(
     (u) =>
@@ -1957,8 +2238,35 @@ export function loginAccount(input: {
     };
   }
 
+  const isPrimaryAdmin =
+    Boolean(actualAccount.isPrimaryOwner) || actualAccount.id === 'acc_admin_owner';
+  const currentProgress = loadPlayerProgress(
+    actualAccount.id,
+    actualAccount.avatarGender,
+  );
+  const xpRes = awardLoginXp(
+    currentProgress.level,
+    currentProgress.xp,
+    LOGIN_XP_REWARD,
+    isPrimaryAdmin,
+  );
+  savePlayerProgress(actualAccount.id, {
+    ...currentProgress,
+    level: xpRes.level,
+    xp: xpRes.xp,
+    lastLoginXpAt: Date.now(),
+    lastLoginXpGained: xpRes.xpGained,
+  });
+
+  saveWorldState({
+    ...world,
+    users: world.users.map((u) =>
+      u.id === actualAccount.id ? { ...u, level: xpRes.level } : u,
+    ),
+  });
+
   setSessionAccountId(actualAccount.id);
-  return { ok: true, account: actualAccount };
+  return { ok: true, account: actualAccount, loginXpAward: xpRes };
 }
 
 /** Hidrata sessão e cache local após autenticação bem-sucedida na API centralizada */
@@ -2037,7 +2345,7 @@ export function loadPlayerProgress(
     const parsed = JSON.parse(raw) as Partial<PlayerProgressState>;
     const resolvedGender: AvatarGender = parsed.avatarGender ?? fallbackGender;
     const genderFallback = createDefaultPlayerState(resolvedGender, accountId);
-    const validCatalogIds = new Set(INITIAL_CLOTHING_CATALOG.map((item) => item.id));
+    // Preserva integralmente itens comprados/equipados em qualquer versão de catálogo
     const starterIds = STARTER_IDS_BY_GENDER[resolvedGender]?.owned ?? STARTER_IDS_BY_GENDER.feminino.owned;
     const starterFurnitureIds = FURNITURE_CATALOG.filter((f) => f.starter).map((f) => f.id);
     const starterRoomIds = PURCHASABLE_ROOMS_CATALOG.filter((r) => r.starter).map((r) => r.id);
@@ -2047,47 +2355,55 @@ export function loadPlayerProgress(
     const placedFurnitureIds = Array.isArray(parsed.suite?.items)
       ? parsed.suite.items.map((it) => it.furnitureId)
       : [];
+    const validCatalogIds = new Set(INITIAL_CLOTHING_CATALOG.map((item) => item.id));
+    try {
+      const worldRaw = window.localStorage.getItem(WORLD_KEY);
+      if (worldRaw) {
+        const wParsed = JSON.parse(worldRaw) as Partial<WorldModerationState>;
+        if (Array.isArray(wParsed.customClothingCatalog)) {
+          wParsed.customClothingCatalog.forEach((c) => {
+            if (c?.id) validCatalogIds.add(c.id);
+          });
+        }
+      }
+    } catch {
+      // Silencioso
+    }
+    const isKnownOrCustomItem = (id: unknown): id is string =>
+      typeof id === 'string' && id.trim().length > 0 && (validCatalogIds.has(id) || id.startsWith('custom_'));
 
-    // Migração v3: remove roupas e cabelos legados mantendo AM, VIP, foto de perfil e amigos
-    const isV3 = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
-    const cleanedOwnedItems = isV3 && Array.isArray(parsed.ownedItemIds)
+    const cleanedOwnedItems = Array.isArray(parsed.ownedItemIds)
       ? Array.from(
           new Set([
             ...starterIds,
-            ...parsed.ownedItemIds.filter((id) => validCatalogIds.has(id) || id.startsWith('custom_3d_')),
+            ...parsed.ownedItemIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
           ]),
         )
       : [...starterIds];
 
     const rawEq = parsed.equipped ?? {};
-    const cleanedEquipped: EquippedOutfit = isV3
-      ? {
-          cabelo:
-            rawEq.cabelo && (validCatalogIds.has(rawEq.cabelo) || rawEq.cabelo.startsWith('custom_3d_'))
-              ? rawEq.cabelo
-              : genderFallback.equipped.cabelo,
-          blusas:
-            rawEq.blusas && (validCatalogIds.has(rawEq.blusas) || rawEq.blusas.startsWith('custom_3d_'))
-              ? rawEq.blusas
-              : genderFallback.equipped.blusas,
-          vestidos:
-            rawEq.vestidos && (validCatalogIds.has(rawEq.vestidos) || rawEq.vestidos.startsWith('custom_3d_'))
-              ? rawEq.vestidos
-              : undefined,
-          calcas:
-            rawEq.calcas && (validCatalogIds.has(rawEq.calcas) || rawEq.calcas.startsWith('custom_3d_'))
-              ? rawEq.calcas
-              : genderFallback.equipped.calcas,
-          sapatos:
-            rawEq.sapatos && (validCatalogIds.has(rawEq.sapatos) || rawEq.sapatos.startsWith('custom_3d_'))
-              ? rawEq.sapatos
-              : genderFallback.equipped.sapatos,
-          acessorios:
-            rawEq.acessorios && (validCatalogIds.has(rawEq.acessorios) || rawEq.acessorios.startsWith('custom_3d_'))
+    const cleanedEquipped: EquippedOutfit =
+      parsed.equipped && typeof parsed.equipped === 'object'
+        ? {
+            cabelo: isKnownOrCustomItem(rawEq.cabelo) ? rawEq.cabelo : rawEq.cabelo || undefined,
+            blusas: isKnownOrCustomItem(rawEq.blusas) ? rawEq.blusas : rawEq.blusas || undefined,
+            casacos: isKnownOrCustomItem(rawEq.casacos) ? rawEq.casacos : rawEq.casacos || undefined,
+            vestidos: isKnownOrCustomItem(rawEq.vestidos) ? rawEq.vestidos : rawEq.vestidos || undefined,
+            calcas: isKnownOrCustomItem(rawEq.calcas) ? rawEq.calcas : rawEq.calcas || undefined,
+            sapatos: isKnownOrCustomItem(rawEq.sapatos) ? rawEq.sapatos : rawEq.sapatos || undefined,
+            acessorios: isKnownOrCustomItem(rawEq.acessorios)
               ? rawEq.acessorios
-              : undefined,
-        }
-      : { ...genderFallback.equipped };
+              : rawEq.acessorios || undefined,
+            acessoriosSlots:
+              rawEq.acessoriosSlots && typeof rawEq.acessoriosSlots === 'object'
+                ? Object.fromEntries(
+                    Object.entries(rawEq.acessoriosSlots).filter(
+                      ([, id]) => typeof id === 'string' && id.trim().length > 0,
+                    ),
+                  )
+                : undefined,
+          }
+        : { ...genderFallback.equipped };
 
     const countryMeta = getCountryMeta(parsed.countryCode ?? fallback.countryCode);
     const validPresence: PresenceStatus =
@@ -2095,8 +2411,20 @@ export function loadPlayerProgress(
         ? parsed.presenceStatus
         : 'online';
 
+    const isPrimaryAdmin = accountId === 'acc_admin_owner';
+    const { level: normalizedLevel, xp: normalizedXp } = normalizeLevelAndXp(
+      parsed.level,
+      parsed.xp,
+      isPrimaryAdmin,
+    );
+
     const migratedState: PlayerProgressState = {
       catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
+      level: normalizedLevel,
+      xp: normalizedXp,
+      lastLoginXpAt: typeof parsed.lastLoginXpAt === 'number' ? parsed.lastLoginXpAt : undefined,
+      lastLoginXpGained:
+        typeof parsed.lastLoginXpGained === 'number' ? parsed.lastLoginXpGained : undefined,
       starcoins: typeof parsed.starcoins === 'number' ? parsed.starcoins : fallback.starcoins,
       ownedItemIds: cleanedOwnedItems,
       ownedFurnitureIds: Array.isArray(parsed.ownedFurnitureIds)
@@ -2117,6 +2445,7 @@ export function loadPlayerProgress(
       equipped: cleanedEquipped,
       skinTone: parsed.skinTone ?? fallback.skinTone,
       avatarGender: resolvedGender,
+      faceCustomization: parsed.faceCustomization ?? fallback.faceCustomization,
       profilePic: typeof parsed.profilePic === 'string' ? parsed.profilePic : undefined,
       customAvatarUrl:
         typeof parsed.customAvatarUrl === 'string' ? parsed.customAvatarUrl : undefined,
@@ -2124,6 +2453,17 @@ export function loadPlayerProgress(
         parsed.avatarDisplayMode === 'photo' && (parsed.profilePic || parsed.customAvatarUrl)
           ? 'photo'
           : 'medoll',
+      profileBanner: parsed.profileBanner?.presetId
+        ? {
+            presetId: parsed.profileBanner.presetId,
+            customImageUrl:
+              typeof parsed.profileBanner.customImageUrl === 'string'
+                ? parsed.profileBanner.customImageUrl
+                : undefined,
+            motionSpeed:
+              parsed.profileBanner.motionSpeed === 'medium' ? 'medium' : 'slow',
+          }
+        : fallback.profileBanner,
       bio: typeof parsed.bio === 'string' ? parsed.bio : fallback.bio,
       presenceStatus: validPresence,
       countryCode: countryMeta.code,
@@ -2149,7 +2489,8 @@ export function loadPlayerProgress(
         : fallback.suite,
     };
 
-    if (!isV3) {
+    const isCurrentSchema = parsed.catalogSchemaVersion === CATALOG_SCHEMA_VERSION;
+    if (!isCurrentSchema) {
       try {
         window.localStorage.setItem(`${PLAYER_PREFIX}${accountId}`, JSON.stringify(migratedState));
       } catch {
@@ -2376,11 +2717,16 @@ export function resolvePublicProfileSummary(params: {
     });
   }
 
-  const ownedCount = progress.ownedItemIds.length;
-  const computedLevel =
-    mockMatch?.level ?? Math.max(1, 1 + Math.floor(ownedCount / 3));
-
   const resolvedAccount = isSelf ? currentUser : accountMatch;
+  const isPrimaryAdmin =
+    Boolean(resolvedAccount?.isPrimaryOwner) ||
+    resolvedAccount?.id === 'acc_admin_owner' ||
+    mockMatch?.id === 'acc_admin_owner';
+  const metrics = getLevelProgressMetrics(
+    progress.level ?? mockMatch?.level,
+    progress.xp ?? 0,
+    isPrimaryAdmin,
+  );
   const resolvedRole =
     resolvedAccount?.role ?? mockMatch?.role ?? fallbackAppearance?.role ?? 'player';
   const resolvedTier = resolvedAccount?.staffRoleTier ?? mockMatch?.staffRoleTier;
@@ -2396,17 +2742,27 @@ export function resolvePublicProfileSummary(params: {
     mockMatch?.serverRegion ??
     inferServerRegionFromCountry(countryMeta.code);
 
+  const unifiedResolvedName =
+    resolvedAccount?.displayName ||
+    resolvedAccount?.username ||
+    mockMatch?.displayName ||
+    cleanUsername;
+
   return {
     accountId: resolvedAccount?.id ?? mockMatch?.id,
-    username: resolvedAccount?.username ?? cleanUsername,
-    displayName:
-      resolvedAccount?.displayName ?? mockMatch?.displayName ?? cleanUsername,
+    username: unifiedResolvedName,
+    displayName: unifiedResolvedName,
+    createdAt: isPrimaryAdmin
+      ? ADMIN_CREATED_AT
+      : resolvedAccount?.createdAt ?? mockMatch?.joinedAt,
     role: resolvedRole,
     staffRoleTier: resolvedTier,
     staffRoleTitle: resolvedStaffTitle,
     serverRegion: resolvedServerRegion,
     isVip: isVipAccount(resolvedAccount) || Boolean(mockMatch?.isVip),
-    level: computedLevel,
+    level: metrics.level,
+    xp: metrics.xp,
+    xpRequired: metrics.xpRequired,
     starcoins: isSelf
       ? currentPlayerState.starcoins
       : mockMatch?.starcoins ?? progress.starcoins,
@@ -2440,6 +2796,12 @@ export function resolvePublicProfileSummary(params: {
     avatarDisplayMode: isSelf
       ? currentPlayerState.avatarDisplayMode
       : progress.avatarDisplayMode ?? fallbackAppearance?.avatarDisplayMode ?? 'medoll',
+    profileBanner: isSelf
+      ? currentPlayerState.profileBanner
+      : progress.profileBanner,
+    faceCustomization: isSelf
+      ? currentPlayerState.faceCustomization
+      : progress.faceCustomization,
     suite: progress.suite,
   };
 }

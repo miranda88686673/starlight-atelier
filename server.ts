@@ -42,6 +42,7 @@ const __dirname = path.dirname(__filename);
 const ALLOWED_CLOTHING_CATEGORIES = [
   'cabelo',
   'blusas',
+  'casacos',
   'vestidos',
   'calcas',
   'sapatos',
@@ -118,7 +119,7 @@ async function startServer() {
   const port = Number(process.env.PORT || 3000);
   const isProduction = process.env.NODE_ENV === 'production';
 
-  app.use(express.json({ limit: '12mb' }));
+  app.use(express.json({ limit: '16mb' }));
   app.use(express.text({ type: 'text/plain', limit: '64kb' }));
 
   app.get('/api/health', (_req: Request, res: Response) => {
@@ -248,6 +249,17 @@ async function startServer() {
     });
 
     const publicSnap = serverDb.getPublicSnapshot();
+    const syncPayload = {
+      worldState: publicSnap.worldState,
+      playerPatch: {
+        accountId: result.account.id,
+        progress: result.progress,
+      },
+      updatedAt: publicSnap.updatedAt,
+      version: publicSnap.version,
+    };
+    io.emit('state:updated', syncPayload);
+    io.emit('state_update', syncPayload);
     io.emit('presence:updated', {
       presences: publicSnap.presences,
       changedRecord: record,
@@ -257,6 +269,7 @@ async function startServer() {
       ok: true,
       account: result.account,
       progress: result.progress,
+      loginXpAward: result.loginXpAward,
       accounts: publicSnap.accounts,
       worldState: publicSnap.worldState,
     });
@@ -721,6 +734,144 @@ async function startServer() {
         },
       );
 
+      // ── MERCADO DE JOGADORES (COMPRA & VENDA EM AM) ──
+      app.get('/api/market/listings', (_req: Request, res: Response) => {
+        res.json({ ok: true, listings: serverDb.getMarketListings() });
+      });
+
+      app.post('/api/market/listings', (req: Request, res: Response) => {
+        const body = (req.body ?? {}) as {
+          sellerAccountId?: string;
+          itemId?: string;
+          price?: number;
+        };
+        const sellerId =
+          body.sellerAccountId || (req.headers['x-actor-id'] as string | undefined) || '';
+        const result = serverDb.createMarketListing({
+          sellerAccountId: sellerId,
+          itemId: body.itemId || '',
+          price: Number(body.price),
+        });
+        if (!result.ok) {
+          res.status(400).json({ ok: false, error: result.error });
+          return;
+        }
+        io.emit('market:updated', { listings: result.listings });
+        res.json({ ok: true, listing: result.listing, listings: result.listings });
+      });
+
+      app.delete('/api/market/listings/:id', (req: Request, res: Response) => {
+        const listingId = req.params.id;
+        const actorId = (req.headers['x-actor-id'] as string | undefined) || '';
+        const claimedRole = req.headers['x-staff-role'] as string | undefined;
+        const actorEmail = req.headers['x-actor-email'] as string | undefined;
+        const staffRole = actorId ? resolveActorRoleFromServer(actorId, claimedRole, actorEmail) : null;
+        const result = serverDb.cancelMarketListing({
+          listingId,
+          actorAccountId: actorId,
+          isAdmin: staffRole === 'admin',
+        });
+        if (!result.ok) {
+          res.status(400).json({ ok: false, error: result.error });
+          return;
+        }
+        io.emit('market:updated', { listings: result.listings });
+        res.json({ ok: true, listing: result.listing, listings: result.listings });
+      });
+
+      app.post('/api/market/listings/:id/buy', (req: Request, res: Response) => {
+        const listingId = req.params.id;
+        const body = (req.body ?? {}) as { buyerAccountId?: string };
+        const buyerId =
+          body.buyerAccountId || (req.headers['x-actor-id'] as string | undefined) || '';
+        const result = serverDb.buyMarketListing({
+          listingId,
+          buyerAccountId: buyerId,
+        });
+        if (!result.ok) {
+          res.status(400).json({ ok: false, error: result.error });
+          return;
+        }
+        const snap = serverDb.getPublicSnapshot();
+        io.emit('market:updated', { listings: result.listings });
+        const buyerPatch = {
+          worldState: snap.worldState,
+          playerPatch: { accountId: buyerId, progress: result.buyerProgress },
+          updatedAt: snap.updatedAt,
+          version: snap.version,
+        };
+        const sellerPatch = {
+          worldState: snap.worldState,
+          playerPatch: {
+            accountId: result.listing.sellerAccountId,
+            progress: result.sellerProgress,
+          },
+          updatedAt: snap.updatedAt,
+          version: snap.version,
+        };
+        io.emit('state:updated', buyerPatch);
+        io.emit('state_update', buyerPatch);
+        io.emit('state:updated', sellerPatch);
+        io.emit('state_update', sellerPatch);
+        res.json({
+          ok: true,
+          listing: result.listing,
+          listings: result.listings,
+          buyerProgress: result.buyerProgress,
+        });
+      });
+
+      app.post(
+        '/api/admin/grant-item',
+        requireStaffRole(['admin']),
+        (req: Request, res: Response) => {
+          const staffCtx = (req as Request & { staffContext?: StaffGuardContext }).staffContext;
+          const body = (req.body ?? {}) as {
+            targetAccountIdOrUsername?: string;
+            itemId?: string;
+            actorUsername?: string;
+          };
+          const actorAccount = staffCtx?.actorId
+            ? serverDb.findAccountById(staffCtx.actorId)
+            : undefined;
+          const result = serverDb.adminGrantItemToAccount({
+            actorId: staffCtx?.actorId || 'admin',
+            actorUsername:
+              body.actorUsername ||
+              actorAccount?.displayName ||
+              actorAccount?.username ||
+              'Admin',
+            targetAccountIdOrUsername: body.targetAccountIdOrUsername || '',
+            itemId: body.itemId || '',
+          });
+          if (!result.ok) {
+            res.status(400).json({ ok: false, error: result.error });
+            return;
+          }
+          const snap = serverDb.getPublicSnapshot();
+          const patchPayload = {
+            playerPatch: {
+              accountId: result.targetAccountId,
+              progress: result.updatedProgress,
+            },
+            updatedAt: snap.updatedAt,
+            version: snap.version,
+          };
+          io.emit('state:updated', patchPayload);
+          io.emit('state_update', patchPayload);
+          io.emit('audit:updated', {
+            logs: (snap.staff_audit_logs ?? []).slice(0, 100),
+            latest: result.auditEntry,
+          });
+          res.json({
+            ok: true,
+            targetAccountId: result.targetAccountId,
+            targetUsername: result.targetUsername,
+            updatedProgress: result.updatedProgress,
+          });
+        },
+      );
+
       // ── LOJA PREMIUM (AM & VIP · PIX + COMPROVANTE + CRÉDITO PELO COMMUNITY MANAGER) ──
       app.get('/api/premium-pix-config', (_req: Request, res: Response) => {
         res.json({ ok: true, config: serverDb.getPremiumPixConfig() });
@@ -1068,6 +1219,93 @@ async function startServer() {
           ok: false,
           error: 'Geração automática de itens por Bot Designer foi desativada.',
         });
+      });
+
+      // ── TRANSCRIÇÃO DE MICROFONE PARA CHAT DO JOGO (GEMINI 3.5 TRANSCRIBE) ──
+      app.post('/api/audio/transcribe', async (req: Request, res: Response) => {
+        try {
+          const body = (req.body ?? {}) as {
+            audioBase64?: string;
+            mimeType?: string;
+          };
+
+          if (!body.audioBase64 || typeof body.audioBase64 !== 'string') {
+            res.status(400).json({
+              ok: false,
+              error: 'Envie um áudio válido gravado pelo microfone.',
+            });
+            return;
+          }
+
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            res.status(503).json({
+              ok: false,
+              error:
+                'Chave de API do Gemini indisponível no servidor. Verifique Settings > Secrets.',
+            });
+            return;
+          }
+
+          const { mimeType: rawMime, data } = extractBase64Payload(
+            body.audioBase64,
+            body.mimeType || 'audio/webm',
+          );
+          if (!data || data.length < 32) {
+            res.status(400).json({
+              ok: false,
+              error: 'Gravação de áudio vazia ou muito curta.',
+            });
+            return;
+          }
+
+          // Remove parâmetros como ';codecs=opus' para manter MIME limpo (ex: 'audio/webm')
+          const cleanMimeType = rawMime.split(';')[0].trim() || 'audio/webm';
+
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          });
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.5-transcribe',
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data,
+                  },
+                },
+                {
+                  text:
+                    'Transcreva fielmente apenas o que o jogador falou neste áudio, no idioma falado (português do Brasil por padrão). ' +
+                    'Retorne somente o texto falado, sem aspas nem comentários extras. Se houver apenas silêncio ou ruído sem fala, retorne string vazia.',
+                },
+              ],
+            },
+          });
+
+          const rawText = (response.text ?? '')
+            .trim()
+            .replace(/^["'“”]+|["'“”]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .slice(0, 180);
+
+          res.json({ ok: true, text: rawText });
+        } catch (error) {
+          const errMsg =
+            error instanceof Error ? error.message : 'Falha ao transcrever áudio.';
+          console.error('[api/audio/transcribe] error:', errMsg);
+          res.status(500).json({
+            ok: false,
+            error: `Erro na transcrição de voz: ${errMsg}`,
+          });
+        }
       });
 
       app.post('/api/designer/analyze-photo', async (req: Request, res: Response) => {

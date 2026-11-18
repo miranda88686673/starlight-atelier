@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import type { AvatarGender, ClothingItem, FurnitureDef } from '../../types/game';
+import type {
+  AvatarGender,
+  ClothingItem,
+  FurnitureDef,
+  PurchasableWallpaperItem,
+  RoomBackdropTheme,
+} from '../../types/game';
 import {
   getCachedThumbnail,
   requestClothingThumbnail,
   requestFurnitureThumbnail,
+  requestRoomStageThumbnail,
 } from '../../three/thumbnailCache';
 
 interface ThreeClothingThumbProps {
@@ -105,4 +112,47 @@ export const ThreeFurnitureThumbnail: React.FC<ThreeFurnitureThumbProps> = ({
       draggable={false}
     />
   );
+};
+
+interface ThreeRoomThumbProps {
+  theme: RoomBackdropTheme;
+  wallpaper?: PurchasableWallpaperItem;
+  alt?: string;
+  className?: string;
+}
+
+export const ThreeRoomThumbnail: React.FC<ThreeRoomThumbProps> = ({
+  theme,
+  wallpaper,
+  alt = 'Prévia de sala 3D',
+  className = 'w-full h-full object-cover',
+}) => {
+  const cacheKey = `room_${theme}_${wallpaper?.id || 'base'}`;
+  const [url, setUrl] = useState<string | undefined>(() => getCachedThumbnail(cacheKey));
+
+  useEffect(() => {
+    const cached = getCachedThumbnail(cacheKey);
+    if (cached) {
+      setUrl(cached);
+      return;
+    }
+    setUrl(undefined);
+    const cancel = requestRoomStageThumbnail(theme, wallpaper, (dataUrl) => {
+      setUrl(dataUrl);
+    });
+    return cancel;
+  }, [theme, wallpaper, cacheKey]);
+
+  if (!url) {
+    return (
+      <div
+        className="w-full h-full flex items-center justify-center text-[11px] font-medium text-stone-400"
+        style={{ backgroundColor: wallpaper?.wallTopColor ?? '#21192E' }}
+      >
+        Renderizando 3D...
+      </div>
+    );
+  }
+
+  return <img src={url} alt={alt} className={className} draggable={false} />;
 };

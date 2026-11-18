@@ -11,6 +11,7 @@ import type {
   ClothingItem,
   DesignPattern,
   ItemGenderStyle,
+  MarketListing,
   PlayerProgressState,
   PremiumOrder,
   PremiumPixConfig,
@@ -142,6 +143,7 @@ export interface ServerDatabaseDocument {
   premium_pix_config?: PremiumPixConfig;
   room_health: Record<string, RoomHealthMetric>;
   password_reset_tokens?: PasswordResetTokenRecord[];
+  market_listings?: MarketListing[];
 }
 
 /** Subconjunto sincronizável via patch em tempo real */
@@ -159,6 +161,7 @@ export interface StateSyncPatchPayload {
   ban_reviews?: BanReviewRequest[];
   premium_orders?: PremiumOrder[];
   premium_pix_config?: PremiumPixConfig;
+  market_listings?: MarketListing[];
   djTrackUpdate?: {
     roomId: RoomId;
     track: RoomDjTrack | null;
@@ -191,6 +194,11 @@ export const DEFAULT_CLOTHING_ASSET_RIG: Record<
     bone_anchor: 'full_body',
     z_index: 42,
     crop_box: { x: 48, y: 122, width: 124, height: 215 },
+  },
+  casacos: {
+    bone_anchor: 'torso',
+    z_index: 44,
+    crop_box: { x: 48, y: 118, width: 124, height: 126 },
   },
   cabelo: {
     bone_anchor: 'head',

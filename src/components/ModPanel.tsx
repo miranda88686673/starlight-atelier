@@ -60,6 +60,8 @@ interface ModPanelProps {
   globalNotice: string;
   users: MockUser[];
   deletedItemIds: string[];
+  soldOutItemIds?: string[];
+  legendaryLaunchTimestamps?: Record<string, number>;
   bannedWords: string[];
   reports?: RoomReportEntry[];
   customClothingCatalog?: ClothingItem[];
@@ -86,6 +88,12 @@ interface ModPanelProps {
   onCreateCustomRoomTemplate?: (roomTpl: PurchasableRoomItem) => void;
   onCreateCustomWallpaper?: (wp: PurchasableWallpaperItem) => void;
   onDeleteCatalogItem: (itemId: string) => void;
+  onToggleSoldOutItem?: (itemId: string) => void;
+  onRelaunchLegendary24h?: (itemId: string) => void;
+  onAdminGrantItem?: (
+    targetAccountIdOrUsername: string,
+    itemId: string,
+  ) => Promise<{ ok: boolean; message: string }>;
   onRestoreAllItems: () => void;
   onResetAllDemoData: () => void;
   onAddBannedWord: (word: string) => void;
@@ -118,6 +126,8 @@ export const ModPanel: React.FC<ModPanelProps> = ({
   globalNotice,
   users,
   deletedItemIds,
+  soldOutItemIds = [],
+  legendaryLaunchTimestamps,
   bannedWords,
   reports,
   customClothingCatalog,
@@ -134,6 +144,9 @@ export const ModPanel: React.FC<ModPanelProps> = ({
   onCreateCustomRoomTemplate,
   onCreateCustomWallpaper,
   onDeleteCatalogItem,
+  onToggleSoldOutItem,
+  onRelaunchLegendary24h,
+  onAdminGrantItem,
   onRestoreAllItems,
   onResetAllDemoData,
   onAddBannedWord,
@@ -617,6 +630,8 @@ export const ModPanel: React.FC<ModPanelProps> = ({
           globalNotice={globalNotice}
           users={users}
           deletedItemIds={deletedItemIds}
+          soldOutItemIds={soldOutItemIds}
+          legendaryLaunchTimestamps={legendaryLaunchTimestamps}
           bannedWords={bannedWords}
           customClothingCatalog={customClothingCatalog}
           customFurnitureCatalog={customFurnitureCatalog}
@@ -628,6 +643,9 @@ export const ModPanel: React.FC<ModPanelProps> = ({
           onAssignStaffRole={onAssignStaffRole}
           onAssignAccountStaffRole={onAssignAccountStaffRole}
           onDeleteCatalogItem={onDeleteCatalogItem}
+          onToggleSoldOutItem={onToggleSoldOutItem}
+          onRelaunchLegendary24h={onRelaunchLegendary24h}
+          onAdminGrantItem={onAdminGrantItem}
           onRestoreAllItems={onRestoreAllItems}
           onResetAllDemoData={onResetAllDemoData}
           onAddBannedWord={onAddBannedWord}

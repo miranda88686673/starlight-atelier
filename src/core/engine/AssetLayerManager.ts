@@ -80,6 +80,7 @@ export class AssetLayerManager {
       'calcas',
       'blusas',
       'vestidos',
+      'casacos',
       'cabelo',
       'acessorios',
     ];

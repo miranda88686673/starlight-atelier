@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 import {
   Armchair,
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   FlipHorizontal2,
   Lock,
   Plus,
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DEFAULT_SUITE_ITEMS, SKIN_TONES } from '../data/catalog';
 import {
+  AvatarFaceCustomization,
   AvatarGender,
   CATEGORY_LABELS,
   ClothingCategory,
@@ -34,13 +34,29 @@ import {
 import {
   getFullFurnitureCatalog,
   getFullWallpaperCatalog,
+  isClothingItemEquipped,
   isItemCompatibleWithGender,
 } from '../utils/storage';
 import { ProfileAvatar } from './ProfileAvatar';
 import { StaffRoleBadge, VipBadge } from './StaffDirectory';
-import { FurnitureSvg } from './svg/FurnitureSvg';
-import { ItemPreviewSvg } from './svg/ItemPreviewSvg';
-import { MeDollSvg } from './svg/MeDollSvg';
+import { Suite3DViewport } from './three/Suite3DViewport';
+import { ThreeClothingThumbnail, ThreeFurnitureThumbnail } from './three/ThreeItemThumbnail';
+import { useThreeScene } from './three/ThreeSceneProvider';
+import { disposeObject3D } from '../three/studioEngine';
+import { updateAvatarPose } from '../three/avatar3d';
+import {
+  createAvatarAssemblyGroup,
+  syncAvatarAssemblyTransforms,
+  updateAvatarAssemblyEquipment,
+  type AvatarAssemblyGroup,
+} from '../three/clothing3d';
+import { loadBaseAvatarWithFallback } from '../three/gltfAvatarLoader';
+import { buildFurniture3D } from '../three/furniture3d';
+import {
+  buildRoomStage3D,
+  suitePxToWorld,
+  suiteThemeToBackdrop,
+} from '../three/roomScenes3d';
 
 interface SuiteRoomProps {
   username: string;
@@ -54,6 +70,7 @@ interface SuiteRoomProps {
   equipped: EquippedOutfit;
   skinTone: SkinToneId;
   avatarGender: AvatarGender;
+  faceCustomization?: AvatarFaceCustomization;
   deletedItemIds: string[];
   isAccountVip?: boolean;
   visitingProfile?: PublicProfileSummary | null;
@@ -99,11 +116,6 @@ const ROOM_THEMES: Record<
   },
 };
 
-const STAGE_WIDTH = 720;
-const STAGE_HEIGHT = 480;
-const AVATAR_STAGE_WIDTH = 136;
-const AVATAR_STAGE_HEIGHT = 252;
-
 const DEFAULT_AVATAR_POS: SuiteAvatarPosition = {
   x: 292,
   y: 138,
@@ -115,6 +127,7 @@ const WARDROBE_CATEGORIES: Array<'todas' | ClothingCategory> = [
   'todas',
   'cabelo',
   'blusas',
+  'casacos',
   'vestidos',
   'calcas',
   'sapatos',
@@ -128,7 +141,7 @@ const GENDER_STYLE_LABEL: Record<ItemGenderStyle, string> = {
 };
 
 /**
- * Módulo 3: Suíte 2D com Decoração Livre + Guarda-Roupa Integrado.
+ * Módulo 3: Suíte 3D Interativa (Three.js) com Decoração Livre + Armário Integrado.
  */
 export const SuiteRoom: React.FC<SuiteRoomProps> = ({
   username,
@@ -142,6 +155,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
   equipped,
   skinTone,
   avatarGender,
+  faceCustomization,
   deletedItemIds,
   isAccountVip = false,
   visitingProfile,
@@ -159,42 +173,15 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
   const displayEquipped = visitingProfile ? visitingProfile.equipped : equipped;
   const displaySkinTone = visitingProfile ? visitingProfile.skinTone : skinTone;
   const displayAvatarGender = visitingProfile ? visitingProfile.avatarGender : avatarGender;
+  const displayFaceCustomization = visitingProfile ? visitingProfile.faceCustomization : faceCustomization;
 
-  const stageRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<'armario' | 'moveis'>('armario');
   const [selectedCategory, setSelectedCategory] = useState<'todas' | ClothingCategory>('todas');
   const [genderFilter, setGenderFilter] = useState<'todos' | 'compativel'>('todos');
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  const [walkingPos, setWalkingPos] = useState<SuiteAvatarPosition | null>(null);
-  const [isWalking, setIsWalking] = useState(false);
-  const [floorMarker, setFloorMarker] = useState<{ x: number; y: number } | null>(null);
-  const walkRafRef = useRef<number | null>(null);
-  const floorMarkerTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (walkRafRef.current !== null) {
-        window.cancelAnimationFrame(walkRafRef.current);
-      }
-      if (floorMarkerTimerRef.current !== null) {
-        window.clearTimeout(floorMarkerTimerRef.current);
-      }
-    };
-  }, []);
-
-  const avatarPos = walkingPos ?? displaySuite.avatarPos ?? DEFAULT_AVATAR_POS;
-  const isAvatarSelected = !isVisiting && selectedId === '__avatar__';
-
-  const dragStateRef = useRef<{
-    targetId: string;
-    offsetX: number;
-    offsetY: number;
-    width: number;
-    height: number;
-    minY: number;
-  } | null>(null);
+  const avatarPos = displaySuite.avatarPos ?? DEFAULT_AVATAR_POS;
 
   const resolvedFurnitureCatalog = useMemo(
     () => furnitureCatalog ?? getFullFurnitureCatalog(),
@@ -278,218 +265,181 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
 
   const theme = ROOM_THEMES[displaySuite.theme] ?? ROOM_THEMES.paris_marfim;
 
+  const three = useThreeScene();
+  const visibleClothingCatalog = useMemo(
+    () => catalog.filter((c) => !deletedItemIds.includes(c.id)),
+    [catalog, deletedItemIds]
+  );
+
+  const avatarAssemblyRef = useRef<AvatarAssemblyGroup | null>(null);
+  const furnitureMapRef = useRef<Map<string, THREE.Group>>(new Map());
+  const floorMeshRef = useRef<THREE.Mesh | null>(null);
+  const selectionRingRef = useRef<THREE.Mesh | null>(null);
+  const currentAvatarWorldRef = useRef<{
+    x: number;
+    z: number;
+    rotY: number;
+    initialized: boolean;
+  }>({ x: 0, z: 0, rotY: 0, initialized: false });
+
+  const displayEquippedRef = useRef<EquippedOutfit>(displayEquipped);
+  displayEquippedRef.current = displayEquipped;
+  const visibleClothingRef = useRef<ClothingItem[]>(visibleClothingCatalog);
+  visibleClothingRef.current = visibleClothingCatalog;
+  const avatarPosRef = useRef<SuiteAvatarPosition>(avatarPos);
+  avatarPosRef.current = avatarPos;
+
+  // Injeta palco da Suíte (paredes, piso, iluminação arquitetônica) + anel seletor no ThreeSceneProvider
+  useEffect(() => {
+    if (!three.isReady) return;
+    const built = buildRoomStage3D({
+      theme: suiteThemeToBackdrop(displaySuite.theme),
+      wallpaper: activeWallpaper,
+      includeDjBooth: false,
+    });
+    floorMeshRef.current = built.floorMesh;
+    three.setEnvironmentProp('suite-stage', built.group);
+
+    if (!selectionRingRef.current) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.62, 0.72, 32),
+        new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide })
+      );
+      ring.name = 'Suite_SelectionRing';
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.015;
+      ring.visible = false;
+      selectionRingRef.current = ring;
+      three.setEnvironmentProp('suite-selection-ring', ring);
+    }
+
+    return () => {
+      floorMeshRef.current = null;
+    };
+  }, [three, three.isReady, displaySuite.theme, activeWallpaper]);
+
+  // Limpa props de ambiente e móveis ao sair da Suíte
+  useEffect(() => {
+    if (!three.isReady) return;
+    const furnMap = furnitureMapRef.current;
+    return () => {
+      three.setEnvironmentProp('suite-stage', null);
+      three.setEnvironmentProp('suite-selection-ring', null);
+      selectionRingRef.current = null;
+      three.clearFurniture(true);
+      furnMap.clear();
+    };
+  }, [three, three.isReady]);
+
+  // Carrega e injeta o Avatar 3D da Suíte (AvatarAssemblyGroup) no ThreeSceneProvider
+  useEffect(() => {
+    if (!three.isReady) return;
+    let cancelled = false;
+
+    const cleanupAvatar = () => {
+      if (avatarAssemblyRef.current) {
+        three.removeAvatar('suite-avatar', false);
+        avatarAssemblyRef.current.dispose();
+        avatarAssemblyRef.current = null;
+      }
+    };
+
+    loadBaseAvatarWithFallback({
+      gender: displayAvatarGender,
+      skinTone: displaySkinTone,
+      withShadowDisc: true,
+    }).then((loaded) => {
+      if (cancelled) {
+        loaded.gltfResult?.dispose();
+        if (loaded.proceduralRig) disposeObject3D(loaded.proceduralRig.root);
+        return;
+      }
+
+      cleanupAvatar();
+
+      const assembly = createAvatarAssemblyGroup(loaded);
+      if (!currentAvatarWorldRef.current.initialized) {
+        const startW = suitePxToWorld(avatarPosRef.current.x, avatarPosRef.current.y);
+        currentAvatarWorldRef.current.x = startW.x;
+        currentAvatarWorldRef.current.z = startW.z;
+        currentAvatarWorldRef.current.initialized = true;
+      }
+
+      const cur = currentAvatarWorldRef.current;
+      assembly.rootGroup.position.set(cur.x, 0, cur.z);
+      assembly.rootGroup.rotation.y = cur.rotY;
+
+      if (assembly.gltfResult?.mixer && assembly.gltfResult.animations[0]) {
+        assembly.gltfResult.mixer.clipAction(assembly.gltfResult.animations[0]).play();
+      } else if (assembly.proceduralRig) {
+        updateAvatarPose(assembly.proceduralRig, 'idle', 0);
+      }
+
+      three.injectAvatar('suite-avatar', assembly.rootGroup, false);
+      avatarAssemblyRef.current = assembly;
+
+      updateAvatarAssemblyEquipment(assembly, displayEquippedRef.current, visibleClothingRef.current);
+      syncAvatarAssemblyTransforms(assembly);
+    });
+
+    return () => {
+      cancelled = true;
+      cleanupAvatar();
+    };
+  }, [three, three.isReady, displayAvatarGender, displaySkinTone]);
+
+  // Sincroniza roupas e cabelo equipados no avatar injetado na Suíte
+  useEffect(() => {
+    const assembly = avatarAssemblyRef.current;
+    if (!assembly) return;
+    updateAvatarAssemblyEquipment(assembly, displayEquipped, visibleClothingCatalog);
+    syncAvatarAssemblyTransforms(assembly);
+  }, [displayEquipped, visibleClothingCatalog]);
+
+  // Injeta todos os modelos 3D de móveis da Suíte no ThreeSceneProvider
+  useEffect(() => {
+    if (!three.isReady) return;
+    three.clearFurniture(true);
+    furnitureMapRef.current.clear();
+
+    const byId = new Map(resolvedFurnitureCatalog.map((f) => [f.id, f]));
+    for (const placed of visiblePlacedItems) {
+      const def = byId.get(placed.furnitureId);
+      if (!def) continue;
+      const grp = buildFurniture3D(def);
+      grp.userData.instanceId = placed.instanceId;
+      const w = suitePxToWorld(placed.x, placed.y);
+      grp.position.set(w.x, 0, w.z);
+      const rotDeg = placed.rotationY ?? (placed.flipped ? 180 : 0);
+      grp.rotation.y = (rotDeg * Math.PI) / 180;
+      three.injectFurniture(placed.instanceId, grp);
+      furnitureMapRef.current.set(placed.instanceId, grp);
+    }
+
+    if (selectionRingRef.current) {
+      const selGrp = selectedId ? furnitureMapRef.current.get(selectedId) : undefined;
+      if (selGrp) {
+        selectionRingRef.current.visible = true;
+        selectionRingRef.current.position.set(selGrp.position.x, 0.015, selGrp.position.z);
+      } else {
+        selectionRingRef.current.visible = false;
+      }
+    }
+  }, [three, three.isReady, visiblePlacedItems, resolvedFurnitureCatalog, selectedId]);
+
   const getTimestamp = () =>
     new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-  const cancelSuiteWalk = () => {
-    if (walkRafRef.current !== null) {
-      window.cancelAnimationFrame(walkRafRef.current);
-      walkRafRef.current = null;
-    }
-    setWalkingPos(null);
-    setIsWalking(false);
-  };
-
-  const handleStageFloorClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isVisiting || !stageRef.current) return;
-    if (e.target !== stageRef.current) return;
-
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const scaleX = STAGE_WIDTH / stageRect.width;
-    const scaleY = STAGE_HEIGHT / stageRect.height;
-
-    const clickStageX = (e.clientX - stageRect.left) * scaleX;
-    const clickStageY = (e.clientY - stageRect.top) * scaleY;
-
-    // Caminha apenas quando o jogador clica na área do piso/tapete (y >= 265px)
-    if (clickStageY < 265) return;
-
-    const clampedFeetX = Math.max(
-      AVATAR_STAGE_WIDTH / 2,
-      Math.min(STAGE_WIDTH - AVATAR_STAGE_WIDTH / 2, clickStageX),
-    );
-    const clampedFeetY = Math.max(296, Math.min(STAGE_HEIGHT - 8, clickStageY));
-
-    const targetX = Math.max(
-      0,
-      Math.min(STAGE_WIDTH - AVATAR_STAGE_WIDTH, Math.round(clampedFeetX - AVATAR_STAGE_WIDTH / 2)),
-    );
-    const targetY = Math.max(
-      80,
-      Math.min(STAGE_HEIGHT - AVATAR_STAGE_HEIGHT, Math.round(clampedFeetY - AVATAR_STAGE_HEIGHT + 8)),
-    );
-
-    setFloorMarker({ x: clampedFeetX, y: clampedFeetY });
-    if (floorMarkerTimerRef.current !== null) {
-      window.clearTimeout(floorMarkerTimerRef.current);
-    }
-    floorMarkerTimerRef.current = window.setTimeout(() => setFloorMarker(null), 650);
-
-    const startPos = walkingPos ?? displaySuite.avatarPos ?? DEFAULT_AVATAR_POS;
-    const dx = targetX - startPos.x;
-    const dy = targetY - startPos.y;
-    const dist = Math.hypot(dx, dy);
-    const nextFlipped =
-      Math.abs(dx) > 4 ? dx < 0 : Boolean(startPos.flipped);
-
-    cancelSuiteWalk();
-
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (dist < 6 || prefersReducedMotion) {
-      onUpdateSuite({
-        ...suite,
-        avatarPos: {
-          ...startPos,
-          x: targetX,
-          y: targetY,
-          flipped: nextFlipped,
-        },
-        lastSavedAt: getTimestamp(),
-      });
-      return;
-    }
-
-    const durationMs = Math.max(260, Math.min(1650, dist * 3.1));
-    const startTime = performance.now();
-    setIsWalking(true);
-
-    const step = (now: number) => {
-      const elapsed = now - startTime;
-      const t = Math.min(1, elapsed / durationMs);
-      const eased = 1 - (1 - t) * (1 - t);
-      const curX = Math.round(startPos.x + dx * eased);
-      const curY = Math.round(startPos.y + dy * eased);
-
-      const framePos: SuiteAvatarPosition = {
-        ...startPos,
-        x: curX,
-        y: curY,
-        flipped: nextFlipped,
-      };
-      setWalkingPos(framePos);
-
-      if (t < 1) {
-        walkRafRef.current = window.requestAnimationFrame(step);
-      } else {
-        walkRafRef.current = null;
-        setWalkingPos(null);
-        setIsWalking(false);
-        onUpdateSuite({
-          ...suite,
-          avatarPos: {
-            ...startPos,
-            x: targetX,
-            y: targetY,
-            flipped: nextFlipped,
-          },
-          lastSavedAt: getTimestamp(),
-        });
-      }
-    };
-
-    walkRafRef.current = window.requestAnimationFrame(step);
-  };
-
-  const handlePointerDownDraggable = (
-    e: React.PointerEvent<HTMLDivElement>,
-    targetId: string,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    minY = 12,
-  ) => {
-    if (isVisiting) return;
-    e.stopPropagation();
-    if (targetId === '__avatar__') {
-      cancelSuiteWalk();
-    }
-    if (!stageRef.current) return;
-
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const scaleX = STAGE_WIDTH / stageRect.width;
-    const scaleY = STAGE_HEIGHT / stageRect.height;
-
-    const pointerStageX = (e.clientX - stageRect.left) * scaleX;
-    const pointerStageY = (e.clientY - stageRect.top) * scaleY;
-
-    setSelectedId(targetId);
-    dragStateRef.current = {
-      targetId,
-      offsetX: pointerStageX - x,
-      offsetY: pointerStageY - y,
-      width,
-      height,
-      minY,
-    };
-
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMoveDraggable = (e: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragStateRef.current;
-    if (!drag || !stageRef.current) return;
-
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const scaleX = STAGE_WIDTH / stageRect.width;
-    const scaleY = STAGE_HEIGHT / stageRect.height;
-
-    const rawX = (e.clientX - stageRect.left) * scaleX - drag.offsetX;
-    const rawY = (e.clientY - stageRect.top) * scaleY - drag.offsetY;
-
-    const clampedX = Math.max(0, Math.min(STAGE_WIDTH - drag.width, Math.round(rawX)));
-    const clampedY = Math.max(
-      drag.minY,
-      Math.min(STAGE_HEIGHT - drag.height, Math.round(rawY)),
-    );
-
-    if (drag.targetId === '__avatar__') {
-      onUpdateSuite({
-        ...suite,
-        avatarPos: {
-          ...avatarPos,
-          x: clampedX,
-          y: clampedY,
-        },
-        lastSavedAt: getTimestamp(),
-      });
-      return;
-    }
-
-    onUpdateSuite({
-      ...suite,
-      items: suite.items.map((item) =>
-        item.instanceId === drag.targetId
-          ? { ...item, x: clampedX, y: clampedY }
-          : item,
-      ),
-      lastSavedAt: getTimestamp(),
-    });
-  };
-
-  const handlePointerUpDraggable = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStateRef.current) {
-      dragStateRef.current = null;
-      try {
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch {
-        // Ignora caso o ponteiro já tenha sido liberado
-      }
-    }
-  };
 
   const handleAddFurniture = (def: FurnitureDef) => {
     if (def.isVipOnly && !isAccountVip) return;
     const newItem: PlacedFurniture = {
       instanceId: `inst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       furnitureId: def.id,
-      x: Math.round((STAGE_WIDTH - def.width) / 2),
-      y: Math.round((STAGE_HEIGHT - def.height) / 2) + 35,
+      x: Math.round((720 - def.width) / 2),
+      y: Math.round((480 - def.height) / 2) + 35,
       zIndex: def.defaultZ,
       flipped: false,
+      rotationY: 0,
     };
     setSelectedId(newItem.instanceId);
     onUpdateSuite(
@@ -502,74 +452,20 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
     );
   };
 
-  const handleBringForward = () => {
-    if (isAvatarSelected) {
-      onUpdateSuite({
-        ...suite,
-        avatarPos: {
-          ...avatarPos,
-          zIndex: Math.min(30, avatarPos.zIndex + 1),
-        },
-        lastSavedAt: getTimestamp(),
-      });
-      return;
-    }
+  const handleRotateBy = (delta: number) => {
     if (!selectedFurniture) return;
     onUpdateSuite({
       ...suite,
-      items: suite.items.map((item) =>
-        item.instanceId === selectedFurniture.instanceId
-          ? { ...item, zIndex: Math.min(30, item.zIndex + 1) }
-          : item,
-      ),
-      lastSavedAt: getTimestamp(),
-    });
-  };
-
-  const handleSendBackward = () => {
-    if (isAvatarSelected) {
-      onUpdateSuite({
-        ...suite,
-        avatarPos: {
-          ...avatarPos,
-          zIndex: Math.max(1, avatarPos.zIndex - 1),
-        },
-        lastSavedAt: getTimestamp(),
-      });
-      return;
-    }
-    if (!selectedFurniture) return;
-    onUpdateSuite({
-      ...suite,
-      items: suite.items.map((item) =>
-        item.instanceId === selectedFurniture.instanceId
-          ? { ...item, zIndex: Math.max(1, item.zIndex - 1) }
-          : item,
-      ),
-      lastSavedAt: getTimestamp(),
-    });
-  };
-
-  const handleFlipSelected = () => {
-    if (isAvatarSelected) {
-      onUpdateSuite({
-        ...suite,
-        avatarPos: {
-          ...avatarPos,
-          flipped: !avatarPos.flipped,
-        },
-        lastSavedAt: getTimestamp(),
-      });
-      return;
-    }
-    if (!selectedFurniture) return;
-    onUpdateSuite({
-      ...suite,
-      items: suite.items.map((item) =>
-        item.instanceId === selectedFurniture.instanceId
-          ? { ...item, flipped: !item.flipped }
-          : item,
-      ),
+      items: suite.items.map((item) => {
+        if (item.instanceId !== selectedFurniture.instanceId) return item;
+        const currentRot = item.rotationY ?? (item.flipped ? 180 : 0);
+        const nextRot = (currentRot + delta + 360) % 360;
+        return {
+          ...item,
+          rotationY: nextRot,
+          flipped: nextRot >= 90 && nextRot <= 270,
+        };
+      }),
       lastSavedAt: getTimestamp(),
     });
   };
@@ -721,45 +617,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
 
         {!isVisiting && (
           <div className="my-3 min-h-[40px] flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#FAF8F5] border border-[#EFEAE3]">
-            {isAvatarSelected ? (
-              <>
-                <span className="text-xs font-medium text-[#1C1917]">
-                  Selecionado: <strong>{username} (MeDoll na Suíte)</strong>{' '}
-                  <span className="text-[#6B645D] font-mono-num">
-                    ({avatarPos.x}px, {avatarPos.y}px · camada {avatarPos.zIndex})
-                  </span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleBringForward}
-                    title="Trazer MeDoll para frente"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                    Frente
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSendBackward}
-                    title="Enviar MeDoll para trás"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                    Trás
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleFlipSelected}
-                    title="Virar direção do avatar"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <FlipHorizontal2 className="w-3.5 h-3.5" />
-                    Virar
-                  </button>
-                </div>
-              </>
-            ) : selectedFurniture ? (
+            {selectedFurniture ? (
               <>
                 <span className="text-xs font-medium text-[#1C1917]">
                   Selecionado:{' '}
@@ -767,38 +625,37 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                     {resolvedFurnitureCatalog.find((f) => f.id === selectedFurniture.furnitureId)?.name}
                   </strong>{' '}
                   <span className="text-[#6B645D] font-mono-num">
-                    ({selectedFurniture.x}px, {selectedFurniture.y}px · camada{' '}
-                    {selectedFurniture.zIndex})
+                    ({selectedFurniture.rotationY ?? (selectedFurniture.flipped ? 180 : 0)}°)
                   </span>
                 </span>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleBringForward}
-                    title="Trazer para frente"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                    Frente
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSendBackward}
-                    title="Enviar para trás"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                    Trás
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleFlipSelected}
-                    title="Espelhar móvel"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
-                  >
-                    <FlipHorizontal2 className="w-3.5 h-3.5" />
-                    Girar
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleRotateBy(45)}
+                      title="Girar +45°"
+                      className="px-2 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
+                    >
+                      +45°
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRotateBy(90)}
+                      title="Girar +90°"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
+                    >
+                      <FlipHorizontal2 className="w-3.5 h-3.5" />
+                      +90°
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRotateBy(180)}
+                      title="Girar +180°"
+                      className="px-2 py-1 text-xs font-medium bg-white border border-[#E6E0D8] hover:border-[#C7BEB2] rounded-md cursor-pointer"
+                    >
+                      +180°
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={handleRemoveSelected}
@@ -812,274 +669,48 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
               </>
             ) : (
               <span className="text-xs text-[#6B645D]">
-                Arraste sua MeDoll ou os móveis pelo quarto e clique nas roupas do Armário ao lado para vestir em tempo real.
+                Clique no piso 3D para caminhar com sua MeDoll, arraste móveis ou vista roupas pelo Armário ao lado.
               </span>
             )}
           </div>
         )}
 
         <div className={`relative w-full overflow-hidden rounded-xl border border-[#DFD8CE] ${isVisiting ? 'mt-4' : ''}`}>
-          <div
-            ref={stageRef}
-            onPointerDown={() => setSelectedId(null)}
-            onClick={handleStageFloorClick}
-            className="relative w-full aspect-[3/2] select-none touch-none overflow-hidden"
-            style={{ backgroundColor: activeWallpaper?.wallTopColor ?? theme.wallBg }}
-          >
-            <svg
-              viewBox="0 0 720 480"
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              preserveAspectRatio="none"
-            >
-              <defs>
-                <linearGradient id="suiteWallGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="0%"
-                    stopColor={activeWallpaper?.wallTopColor ?? theme.wallBg}
-                  />
-                  <stop
-                    offset="100%"
-                    stopColor={activeWallpaper?.wallBottomColor ?? theme.wallBg}
-                  />
-                </linearGradient>
-                <linearGradient id="suiteFloorGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="0%"
-                    stopColor={activeWallpaper?.floorTopColor ?? theme.floorBg}
-                  />
-                  <stop
-                    offset="100%"
-                    stopColor={activeWallpaper?.floorBottomColor ?? theme.floorBg}
-                  />
-                </linearGradient>
-              </defs>
-
-              <rect x="0" y="0" width="720" height="295" fill="url(#suiteWallGrad)" />
-
-              {/* Textura / estampa do papel de parede ativo */}
-              {activeWallpaper?.pattern === 'striped' && (
-                <g opacity="0.24">
-                  {Array.from({ length: 18 }).map((_, idx) => (
-                    <rect
-                      key={idx}
-                      x={idx * 40}
-                      y="0"
-                      width="18"
-                      height="215"
-                      fill={activeWallpaper.accentColor}
-                    />
-                  ))}
-                </g>
-              )}
-              {activeWallpaper?.pattern === 'neon' && (
-                <g opacity="0.35">
-                  <line x1="0" y1="44" x2="720" y2="44" stroke={activeWallpaper.accentColor} strokeWidth="2.5" />
-                  <line x1="0" y1="168" x2="720" y2="168" stroke="#38BDF8" strokeWidth="1.5" />
-                  <circle cx="290" cy="108" r="54" fill={activeWallpaper.accentColor} opacity="0.22" />
-                  <circle cx="520" cy="96" r="68" fill="#38BDF8" opacity="0.18" />
-                </g>
-              )}
-              {activeWallpaper?.pattern === 'plaid' && (
-                <g opacity="0.22" stroke={activeWallpaper.accentColor} strokeWidth="1.5">
-                  {Array.from({ length: 12 }).map((_, idx) => (
-                    <line key={`v-${idx}`} x1={idx * 64} y1="0" x2={idx * 64} y2="215" />
-                  ))}
-                  {Array.from({ length: 5 }).map((_, idx) => (
-                    <line key={`h-${idx}`} x1="0" y1={idx * 44} x2="720" y2={idx * 44} />
-                  ))}
-                </g>
-              )}
-              {activeWallpaper?.pattern === 'sequin' && (
-                <g opacity="0.28">
-                  <path d="M0,120 Q220,40 460,150 T720,85" fill="none" stroke={activeWallpaper.accentColor} strokeWidth="2.4" />
-                  <path d="M80,180 Q320,90 640,175" fill="none" stroke={activeWallpaper.accentColor} strokeWidth="1.4" />
-                </g>
-              )}
-
-              <rect
-                x="0"
-                y="210"
-                width="720"
-                height="85"
-                fill={activeWallpaper?.wainscotColor ?? theme.wainscotBg}
-              />
-              <line
-                x1="0"
-                y1="210"
-                x2="720"
-                y2="210"
-                stroke={activeWallpaper?.accentColor ?? '#C8BEB1'}
-                strokeWidth="2"
-                opacity={activeWallpaper ? 0.65 : 1}
-              />
-              <rect
-                x="36"
-                y="224"
-                width="180"
-                height="56"
-                fill="none"
-                stroke={activeWallpaper?.accentColor ?? '#C8BEB1'}
-                strokeWidth="1.2"
-                opacity="0.6"
-              />
-              <rect
-                x="504"
-                y="224"
-                width="180"
-                height="56"
-                fill="none"
-                stroke={activeWallpaper?.accentColor ?? '#C8BEB1'}
-                strokeWidth="1.2"
-                opacity="0.6"
-              />
-
-              <g transform="translate(52, 42)">
-                <rect x="0" y="0" width="124" height="156" rx="2" fill="#DCEAF2" stroke="#D8CFC2" strokeWidth="6" />
-                <rect x="4" y="106" width="116" height="46" fill="#C4D4DC" />
-                <line x1="62" y1="0" x2="62" y2="156" stroke="#FFFFFF" strokeWidth="4" />
-                <line x1="0" y1="78" x2="124" y2="78" stroke="#FFFFFF" strokeWidth="4" />
-              </g>
-
-              <rect x="0" y="287" width="720" height="10" fill="#FFFFFF" opacity="0.6" />
-              <rect x="0" y="297" width="720" height="183" fill="url(#suiteFloorGrad)" />
-              <g
-                stroke={activeWallpaper?.accentColor ?? theme.floorLine}
-                strokeWidth="1.2"
-                opacity={activeWallpaper ? 0.35 : 0.65}
-              >
-                <line x1="0" y1="330" x2="720" y2="330" />
-                <line x1="0" y1="368" x2="720" y2="368" />
-                <line x1="0" y1="415" x2="720" y2="415" />
-                <line x1="120" y1="297" x2="40" y2="480" />
-                <line x1="240" y1="297" x2="200" y2="480" />
-                <line x1="360" y1="297" x2="360" y2="480" />
-                <line x1="480" y1="297" x2="520" y2="480" />
-                <line x1="600" y1="297" x2="680" y2="480" />
-              </g>
-            </svg>
-
-            {visiblePlacedItems.map((placed) => {
-              const def = resolvedFurnitureCatalog.find((f) => f.id === placed.furnitureId);
-              if (!def) return null;
-              const isSelected = placed.instanceId === selectedId;
-
-              return (
-                <div
-                  key={placed.instanceId}
-                  onPointerDown={(e) =>
-                    handlePointerDownDraggable(
-                      e,
-                      placed.instanceId,
-                      placed.x,
-                      placed.y,
-                      def.width,
-                      def.height,
-                      12,
-                    )
-                  }
-                  onPointerMove={handlePointerMoveDraggable}
-                  onPointerUp={handlePointerUpDraggable}
-                  onPointerCancel={handlePointerUpDraggable}
-                  style={{
-                    left: `${(placed.x / STAGE_WIDTH) * 100}%`,
-                    top: `${(placed.y / STAGE_HEIGHT) * 100}%`,
-                    width: `${(def.width / STAGE_WIDTH) * 100}%`,
-                    height: `${(def.height / STAGE_HEIGHT) * 100}%`,
-                    zIndex: placed.zIndex,
-                    transform: placed.flipped ? 'scaleX(-1)' : undefined,
-                  }}
-                  className={`absolute transition-shadow ${
-                    isVisiting
-                      ? 'cursor-default'
-                      : 'cursor-grab active:cursor-grabbing'
-                  } ${
-                    isSelected
-                      ? 'ring-2 ring-[#C8235D] ring-offset-2 ring-offset-transparent rounded-lg'
-                      : !isVisiting
-                        ? 'hover:drop-shadow-md'
-                        : ''
-                  }`}
-                  title={isVisiting ? def.name : `${def.name} — arraste para mover`}
-                >
-                  <FurnitureSvg
-                    furnitureId={def.id}
-                    furnitureDef={def}
-                    className="w-full h-full"
-                  />
-                </div>
-              );
-            })}
-
-            {floorMarker && (
-              <div
-                style={{
-                  left: `${(floorMarker.x / STAGE_WIDTH) * 100}%`,
-                  top: `${(floorMarker.y / STAGE_HEIGHT) * 100}%`,
-                }}
-                className="target-ring-pulse absolute -translate-x-1/2 -translate-y-1/2 w-12 h-4 rounded-full border-2 border-[#C8235D]/80 pointer-events-none z-20"
-                aria-hidden="true"
-              />
-            )}
-
-            <div
-              onPointerDown={(e) =>
-                handlePointerDownDraggable(
-                  e,
-                  '__avatar__',
-                  avatarPos.x,
-                  avatarPos.y,
-                  AVATAR_STAGE_WIDTH,
-                  AVATAR_STAGE_HEIGHT,
-                  80,
-                )
-              }
-              onPointerMove={handlePointerMoveDraggable}
-              onPointerUp={handlePointerUpDraggable}
-              onPointerCancel={handlePointerUpDraggable}
-              style={{
-                left: `${(avatarPos.x / STAGE_WIDTH) * 100}%`,
-                top: `${(avatarPos.y / STAGE_HEIGHT) * 100}%`,
-                width: `${(AVATAR_STAGE_WIDTH / STAGE_WIDTH) * 100}%`,
-                height: `${(AVATAR_STAGE_HEIGHT / STAGE_HEIGHT) * 100}%`,
-                zIndex: avatarPos.zIndex,
-              }}
-              className={`group absolute rounded-xl transition-shadow ${
-                isVisiting
-                  ? 'cursor-default'
-                  : 'cursor-grab active:cursor-grabbing'
-              } ${
-                isAvatarSelected
-                  ? 'ring-2 ring-[#C8235D] ring-offset-2 ring-offset-transparent'
-                  : !isVisiting
-                    ? 'hover:drop-shadow-md'
-                    : ''
-              }`}
-              title={
-                isVisiting
-                  ? displayUsername
-                  : `${displayUsername} — clique no chão para caminhar ou arraste para posicionar`
-              }
-            >
-              <div
-                className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[56%] h-3 rounded-full bg-black/20 blur-[2px] pointer-events-none"
-                aria-hidden="true"
-              />
-              <div
-                className="w-full h-full pointer-events-none"
-                style={{
-                  transform: avatarPos.flipped ? 'scaleX(-1)' : undefined,
-                }}
-              >
-                <MeDollSvg
-                  equipped={displayEquipped}
-                  skinTone={displaySkinTone}
-                  avatarGender={displayAvatarGender}
-                  deletedItemIds={deletedItemIds}
-                  isWalking={!isVisiting && isWalking}
-                />
-              </div>
-            </div>
-          </div>
+          <Suite3DViewport
+            selectedInstanceId={selectedId}
+            onSelectFurniture={(instanceId) => {
+              if (!isVisiting) setSelectedId(instanceId);
+            }}
+            onMoveFurniture={(instanceId, nextX, nextY) => {
+              if (isVisiting) return;
+              onUpdateSuite({
+                ...suite,
+                items: suite.items.map((item) =>
+                  item.instanceId === instanceId ? { ...item, x: nextX, y: nextY } : item,
+                ),
+                lastSavedAt: getTimestamp(),
+              });
+            }}
+            avatarPos={avatarPos}
+            onWalkAvatar={(nextX, nextY, facingRight) => {
+              if (isVisiting) return;
+              onUpdateSuite({
+                ...suite,
+                avatarPos: {
+                  ...avatarPos,
+                  x: nextX,
+                  y: nextY,
+                  flipped: !facingRight,
+                },
+                lastSavedAt: getTimestamp(),
+              });
+            }}
+            avatarAssemblyRef={avatarAssemblyRef}
+            furnitureMapRef={furnitureMapRef}
+            floorMeshRef={floorMeshRef}
+            selectionRingRef={selectionRingRef}
+            currentAvatarWorldRef={currentAvatarWorldRef}
+          />
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[#6B645D]">
@@ -1115,6 +746,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                   equipped={visitingProfile.equipped}
                   skinTone={visitingProfile.skinTone}
                   avatarGender={visitingProfile.avatarGender}
+                  faceCustomization={visitingProfile.faceCustomization}
                   customAvatarUrl={visitingProfile.customAvatarUrl}
                   avatarDisplayMode={visitingProfile.avatarDisplayMode}
                   deletedItemIds={deletedItemIds}
@@ -1320,7 +952,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                   ) : (
                     <div className="grid grid-cols-2 gap-2.5">
                       {wardrobeItems.map((item) => {
-                        const isEquipped = equipped[item.category] === item.id;
+                        const isEquipped = isClothingItemEquipped(equipped, item);
                         const itemGender = item.gender ?? item.genderStyle ?? 'unissex';
                         const compatible = isItemCompatibleWithGender(itemGender, avatarGender);
                         const vipLocked = Boolean(item.isVipOnly) && !isAccountVip;
@@ -1340,11 +972,11 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                                   : 'border-[#E6E0D8] bg-[#FAF8F5] hover:border-[#C7BEB2] hover:bg-white cursor-pointer'
                             }`}
                           >
-                            <div className="relative flex items-center justify-center h-20 bg-white rounded-lg border border-[#EFEAE3] mb-2 overflow-hidden">
-                              <ItemPreviewSvg
+                            <div className="relative flex items-center justify-center h-20 bg-white rounded-lg border border-[#EFEAE3] mb-2 overflow-hidden p-1">
+                              <ThreeClothingThumbnail
                                 item={item}
-                                previewGender={avatarGender}
-                                className="w-16 h-16 transition-transform duration-200 group-hover:scale-105"
+                                genderHint={avatarGender}
+                                className="w-16 h-16 object-contain transition-transform duration-200 group-hover:scale-105"
                               />
                               {item.isVipOnly && (
                                 <div className="absolute top-1 left-1 flex flex-col items-start gap-0.5">
@@ -1424,11 +1056,10 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-14 h-12 bg-white rounded-lg border border-[#EFEAE3] p-1 flex items-center justify-center shrink-0">
-                            <FurnitureSvg
-                              furnitureId={furn.id}
-                              furnitureDef={furn}
-                              className="w-full h-full"
+                          <div className="w-14 h-12 bg-white rounded-lg border border-[#EFEAE3] p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                            <ThreeFurnitureThumbnail
+                              def={furn}
+                              className="w-full h-full object-contain"
                             />
                           </div>
                           <div className="min-w-0">
@@ -1482,11 +1113,10 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                           className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-dashed border-[#DFD8CE] bg-[#FAF8F5]/60"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-12 h-10 bg-white rounded-lg border border-[#EFEAE3] p-1 flex items-center justify-center shrink-0">
-                              <FurnitureSvg
-                                furnitureId={furn.id}
-                                furnitureDef={furn}
-                                className="w-full h-full"
+                            <div className="w-12 h-10 bg-white rounded-lg border border-[#EFEAE3] p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                              <ThreeFurnitureThumbnail
+                                def={furn}
+                                className="w-full h-full object-contain"
                               />
                             </div>
                             <div className="min-w-0">
