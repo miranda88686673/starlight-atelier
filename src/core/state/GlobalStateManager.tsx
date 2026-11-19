@@ -47,6 +47,11 @@ import {
   notifyRemoteRoomHealth,
   notifyRemoteRoomTerminated,
   notifyRemoteSupportTickets,
+  notifyRoomChatBroadcast,
+  notifyRoomPresenceDelta,
+  notifyRoomPresenceRemoved,
+  notifyRoomSnapshotSync,
+  notifySupportModMessages,
   runWithRemoteSyncLock,
   setActiveSyncSocket,
 } from './socketBridge';
@@ -56,9 +61,12 @@ import type {
   MarketListing,
   PremiumOrder,
   PremiumPixConfig,
+  RoomAvatarPresence,
+  RoomChatMessage,
   RoomDjTrack,
   RoomHealthMetric,
   RoomId,
+  SupportModMessage,
   SupportTicket,
   UserAccount,
 } from '../../types/game';
@@ -69,6 +77,8 @@ import {
   WORLD_KEY,
 } from '../../utils/storage';
 import { AI_LOGS_KEY } from '../../utils/aiBots';
+import { resilientApiRequest } from '../../utils/apiClient';
+import type { SharedRoomsSnapshot } from '../../utils/realtime';
 
 const AWAY_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutos
 const HEARTBEAT_INTERVAL_MS = 25_000;
@@ -85,6 +95,7 @@ interface GlobalStateContextValue {
   premiumOrders: PremiumOrder[];
   premiumPixConfig: PremiumPixConfig;
   marketListings: MarketListing[];
+  supportModMessages: SupportModMessage[];
   roomHealthList: RoomHealthMetric[];
   lastTerminatedNotice: RoomTerminatedNotice | null;
   clearTerminatedNotice: () => void;
@@ -96,6 +107,7 @@ interface GlobalStateContextValue {
   refreshPremiumOrders: () => Promise<void>;
   refreshPremiumPixConfig: () => Promise<void>;
   refreshMarketListings: () => Promise<void>;
+  refreshSupportModMessages: () => Promise<void>;
   refreshRoomHealth: () => Promise<void>;
   bindHeartbeatUser: (
     account: UserAccount | null,
@@ -104,6 +116,35 @@ interface GlobalStateContextValue {
 }
 
 const GlobalStateContext = createContext<GlobalStateContextValue | null>(null);
+
+/** Normaliza `lastSeen` de presenças vindas do servidor para o relógio local (evita sumiço por fuso/clock skew entre PCs) */
+function normalizeRoomsSnapshotPresences(
+  snap: SharedRoomsSnapshot,
+): SharedRoomsSnapshot {
+  const localNow = Date.now();
+  const normalizedPresences: Record<string, RoomAvatarPresence> = {};
+  for (const [cid, pres] of Object.entries(snap.presences ?? {})) {
+    if (!pres || !pres.clientId) continue;
+    normalizedPresences[cid] = {
+      ...pres,
+      lastSeen: localNow,
+    };
+  }
+  return {
+    ...snap,
+    presences: normalizedPresences,
+  };
+}
+
+function readCachedRoomsFromLocal(): SharedRoomsSnapshot | null {
+  try {
+    const raw = window.localStorage.getItem(ROOMS_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as SharedRoomsSnapshot;
+  } catch {
+    return null;
+  }
+}
 
 function applySnapshotToLocalCache(snapshot: ServerDatabaseDocument): boolean {
   if (typeof window === 'undefined') return false;
@@ -145,7 +186,7 @@ function applySnapshotToLocalCache(snapshot: ServerDatabaseDocument): boolean {
       if (snapshot.roomsSnapshot) {
         window.localStorage.setItem(
           ROOMS_STORAGE_KEY,
-          JSON.stringify(snapshot.roomsSnapshot),
+          JSON.stringify(normalizeRoomsSnapshotPresences(snapshot.roomsSnapshot)),
         );
       }
       if (Array.isArray(snapshot.staff_audit_logs)) {
@@ -184,7 +225,7 @@ function applyPatchToLocalCache(patch: StateSyncPatchPayload): void {
       if (patch.roomsSnapshot) {
         window.localStorage.setItem(
           ROOMS_STORAGE_KEY,
-          JSON.stringify(patch.roomsSnapshot),
+          JSON.stringify(normalizeRoomsSnapshotPresences(patch.roomsSnapshot)),
         );
       }
       if (patch.djTrackUpdate) {
@@ -249,6 +290,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     pixKey: '7198826894',
   });
   const [marketListings, setMarketListings] = useState<MarketListing[]>([]);
+  const [supportModMessages, setSupportModMessages] = useState<SupportModMessage[]>([]);
   const [roomHealthList, setRoomHealthList] = useState<RoomHealthMetric[]>([]);
   const [lastTerminatedNotice, setLastTerminatedNotice] =
     useState<RoomTerminatedNotice | null>(null);
@@ -312,6 +354,30 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       setIsSocketConnected(true);
       socket.emit('state:request_init');
       emitCurrentHeartbeat(true);
+      socket.emit('support:list_tickets', {}, (res: { ok?: boolean; tickets?: SupportTicket[] }) => {
+        if (res?.ok && Array.isArray(res.tickets)) {
+          setSupportTickets(res.tickets);
+          notifyRemoteSupportTickets(res.tickets);
+        }
+      });
+      socket.emit('premium:list_orders', {}, (res: { ok?: boolean; orders?: PremiumOrder[] }) => {
+        if (res?.ok && Array.isArray(res.orders)) {
+          setPremiumOrders(res.orders);
+          notifyRemotePremiumOrders(res.orders);
+        }
+      });
+      socket.emit('market:list_listings', {}, (res: { ok?: boolean; listings?: MarketListing[] }) => {
+        if (res?.ok && Array.isArray(res.listings)) {
+          setMarketListings(res.listings);
+          notifyRemoteMarketListings(res.listings);
+        }
+      });
+      socket.emit('support_mod:list_messages', {}, (res: { ok?: boolean; messages?: SupportModMessage[] }) => {
+        if (res?.ok && Array.isArray(res.messages)) {
+          setSupportModMessages(res.messages);
+          notifySupportModMessages(res.messages);
+        }
+      });
     });
 
     socket.on('disconnect', () => {
@@ -344,6 +410,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       if (Array.isArray(snapshot.market_listings)) {
         setMarketListings(snapshot.market_listings);
         notifyRemoteMarketListings(snapshot.market_listings);
+      }
+      if (Array.isArray(snapshot.support_mod_messages)) {
+        setSupportModMessages(snapshot.support_mod_messages);
+        notifySupportModMessages(snapshot.support_mod_messages);
       }
       if (snapshot.premium_pix_config?.pixKey) {
         setPremiumPixConfig(snapshot.premium_pix_config);
@@ -379,10 +449,9 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     };
 
-    // Hidratação imediata via REST enquanto WebSocket completa o handshake
-    void fetch('/api/state/snapshot')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { ok?: boolean; snapshot?: ServerDatabaseDocument } | null) => {
+    // Hidratação imediata via REST resiliente enquanto WebSocket completa o handshake
+    void resilientApiRequest<{ ok?: boolean; snapshot?: ServerDatabaseDocument }>('/api/state/snapshot')
+      .then((data) => {
         if (data?.ok && data.snapshot) {
           applyRemoteSnapshot(data.snapshot);
         }
@@ -492,6 +561,116 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!notice?.roomId) return;
       setLastTerminatedNotice(notice);
       notifyRemoteRoomTerminated(notice);
+    });
+
+    // Sincronização atômica em tempo real entre diferentes PCs / IPs na mesma sala
+    socket.on('room:presence_delta', (payload: { presence?: RoomAvatarPresence }) => {
+      if (!payload?.presence?.clientId) return;
+      const stampedPresence: RoomAvatarPresence = {
+        ...payload.presence,
+        lastSeen: Date.now(),
+      };
+      runWithRemoteSyncLock(() => {
+        const cached = readCachedRoomsFromLocal();
+        if (cached) {
+          try {
+            window.localStorage.setItem(
+              ROOMS_STORAGE_KEY,
+              JSON.stringify({
+                ...cached,
+                presences: {
+                  ...(cached.presences ?? {}),
+                  [stampedPresence.clientId]: stampedPresence,
+                },
+              }),
+            );
+          } catch {
+            // Silencioso
+          }
+        }
+      });
+      notifyRoomPresenceDelta(stampedPresence);
+    });
+
+    socket.on('room:presence_removed', (payload: { clientId?: string }) => {
+      const removedClientId = payload?.clientId;
+      if (!removedClientId) return;
+      runWithRemoteSyncLock(() => {
+        const cached = readCachedRoomsFromLocal();
+        if (cached && cached.presences?.[removedClientId]) {
+          const nextPresences = { ...cached.presences };
+          delete nextPresences[removedClientId];
+          try {
+            window.localStorage.setItem(
+              ROOMS_STORAGE_KEY,
+              JSON.stringify({ ...cached, presences: nextPresences }),
+            );
+          } catch {
+            // Silencioso
+          }
+        }
+      });
+      notifyRoomPresenceRemoved(removedClientId);
+    });
+
+    socket.on(
+      'room:chat_broadcast',
+      (payload: { roomId?: RoomId; message?: RoomChatMessage; senderClientId?: string | null }) => {
+        if (!payload?.roomId || !payload?.message) return;
+        const { roomId, message, senderClientId } = payload;
+        runWithRemoteSyncLock(() => {
+          const cached = readCachedRoomsFromLocal();
+          if (cached) {
+            const prevMsgs = cached.messagesByRoom?.[roomId] ?? [];
+            const alreadyHas = prevMsgs.some((m) => m.id === message.id);
+            const nextMsgs = alreadyHas ? prevMsgs : [...prevMsgs, message].slice(-80);
+            const nextPresences = { ...(cached.presences ?? {}) };
+            if (senderClientId && nextPresences[senderClientId] && message.senderRole !== 'system') {
+              nextPresences[senderClientId] = {
+                ...nextPresences[senderClientId],
+                lastMessage: message.text,
+                lastMessageAt: message.createdAt,
+                lastSeen: Date.now(),
+              };
+            }
+            try {
+              window.localStorage.setItem(
+                ROOMS_STORAGE_KEY,
+                JSON.stringify({
+                  ...cached,
+                  presences: nextPresences,
+                  messagesByRoom: {
+                    ...(cached.messagesByRoom ?? {}),
+                    [roomId]: nextMsgs,
+                  },
+                }),
+              );
+            } catch {
+              // Silencioso
+            }
+          }
+        });
+        notifyRoomChatBroadcast({ roomId, message, senderClientId });
+      },
+    );
+
+    socket.on('room:snapshot_sync', (payload: { roomsSnapshot?: SharedRoomsSnapshot }) => {
+      if (!payload?.roomsSnapshot) return;
+      const normalized = normalizeRoomsSnapshotPresences(payload.roomsSnapshot);
+      runWithRemoteSyncLock(() => {
+        try {
+          window.localStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(normalized));
+        } catch {
+          // Silencioso
+        }
+      });
+      notifyRoomSnapshotSync(normalized);
+    });
+
+    socket.on('support_mod:updated', (payload: { messages?: SupportModMessage[] }) => {
+      if (!Array.isArray(payload?.messages)) return;
+      setSupportModMessages(payload.messages);
+      notifySupportModMessages(payload.messages);
     });
 
     return () => {
@@ -649,18 +828,16 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     const role = resolveCoreStaffRole(actor);
     if (!role) return;
     try {
-      const res = await fetch('/api/staff/audit-logs', {
+      const data = await resilientApiRequest<{
+        ok?: boolean;
+        logs?: StaffAuditLogEntry[];
+      }>('/api/staff/audit-logs', {
         headers: {
           'x-actor-id': actor.id,
           'x-staff-role': role,
           'x-actor-email': actor.email,
         },
       });
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        ok?: boolean;
-        logs?: StaffAuditLogEntry[];
-      };
       if (data.ok && Array.isArray(data.logs)) {
         setStaffAuditLogs(data.logs);
         writeCachedAuditLogs(data.logs);
@@ -676,9 +853,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const refreshSupportTickets = useCallback(async () => {
     try {
-      const res = await fetch('/api/support/tickets');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; tickets?: SupportTicket[] };
+      const data = await resilientApiRequest<{ ok?: boolean; tickets?: SupportTicket[] }>(
+        '/api/support/tickets',
+        { socketEvent: 'support:list_tickets' },
+      );
       if (data.ok && Array.isArray(data.tickets)) {
         setSupportTickets(data.tickets);
       }
@@ -689,9 +867,9 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const refreshBanReviews = useCallback(async () => {
     try {
-      const res = await fetch('/api/ban-reviews');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; reviews?: BanReviewRequest[] };
+      const data = await resilientApiRequest<{ ok?: boolean; reviews?: BanReviewRequest[] }>(
+        '/api/ban-reviews',
+      );
       if (data.ok && Array.isArray(data.reviews)) {
         setBanReviews(data.reviews);
       }
@@ -702,9 +880,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const refreshPremiumOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/premium-orders');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; orders?: PremiumOrder[] };
+      const data = await resilientApiRequest<{ ok?: boolean; orders?: PremiumOrder[] }>(
+        '/api/premium-orders',
+        { socketEvent: 'premium:list_orders' },
+      );
       if (data.ok && Array.isArray(data.orders)) {
         setPremiumOrders(data.orders);
       }
@@ -715,9 +894,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const refreshPremiumPixConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/premium-pix-config');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; config?: PremiumPixConfig };
+      const data = await resilientApiRequest<{ ok?: boolean; config?: PremiumPixConfig }>(
+        '/api/premium-pix-config',
+        { socketEvent: 'premium:get_pix' },
+      );
       if (data.ok && data.config?.pixKey) {
         setPremiumPixConfig(data.config);
       }
@@ -728,9 +908,10 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const refreshMarketListings = useCallback(async () => {
     try {
-      const res = await fetch('/api/market/listings');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; listings?: MarketListing[] };
+      const data = await resilientApiRequest<{ ok?: boolean; listings?: MarketListing[] }>(
+        '/api/market/listings',
+        { socketEvent: 'market:list_listings' },
+      );
       if (data.ok && Array.isArray(data.listings)) {
         setMarketListings(data.listings);
       }
@@ -739,11 +920,25 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshSupportModMessages = useCallback(async () => {
+    try {
+      const data = await resilientApiRequest<{ ok?: boolean; messages?: SupportModMessage[] }>(
+        '/api/support-mod/messages',
+        { socketEvent: 'support_mod:list_messages' },
+      );
+      if (data.ok && Array.isArray(data.messages)) {
+        setSupportModMessages(data.messages);
+      }
+    } catch {
+      // Silencioso
+    }
+  }, []);
+
   const refreshRoomHealth = useCallback(async () => {
     try {
-      const res = await fetch('/api/rooms/health');
-      if (!res.ok) return;
-      const data = (await res.json()) as { ok?: boolean; metrics?: RoomHealthMetric[] };
+      const data = await resilientApiRequest<{ ok?: boolean; metrics?: RoomHealthMetric[] }>(
+        '/api/rooms/health',
+      );
       if (data.ok && Array.isArray(data.metrics)) {
         setRoomHealthList(data.metrics);
       }
@@ -764,6 +959,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       premiumOrders,
       premiumPixConfig,
       marketListings,
+      supportModMessages,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -775,6 +971,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshPremiumOrders,
       refreshPremiumPixConfig,
       refreshMarketListings,
+      refreshSupportModMessages,
       refreshRoomHealth,
       bindHeartbeatUser,
     }),
@@ -789,6 +986,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       premiumOrders,
       premiumPixConfig,
       marketListings,
+      supportModMessages,
       roomHealthList,
       lastTerminatedNotice,
       clearTerminatedNotice,
@@ -800,6 +998,7 @@ export const GlobalStateProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshPremiumOrders,
       refreshPremiumPixConfig,
       refreshMarketListings,
+      refreshSupportModMessages,
       refreshRoomHealth,
       bindHeartbeatUser,
     ],

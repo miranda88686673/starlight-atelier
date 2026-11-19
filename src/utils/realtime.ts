@@ -9,6 +9,10 @@ import {
 } from '../types/game';
 import {
   emitDjMediaSyncToServer,
+  emitRoomChatSend,
+  emitRoomMutation,
+  emitRoomPresenceLeave,
+  emitRoomPresenceUpsert,
   emitStatePatchToServer,
 } from '../core/state/socketBridge';
 import { normalizeUsername } from './storage';
@@ -16,7 +20,7 @@ import { normalizeUsername } from './storage';
 export const ROOMS_STORAGE_KEY = 'starlight_atelier_rooms_v1';
 const CHANNEL_NAME = 'starlight_atelier_realtime_v1';
 const TAB_CLIENT_KEY = 'starlight_atelier_tab_client_id';
-const PRESENCE_TTL_MS = 60_000;
+const PRESENCE_TTL_MS = 120_000;
 
 export interface RoomKickNotice {
   roomId: RoomId;
@@ -263,7 +267,7 @@ export function readRoomsSnapshot(): SharedRoomsSnapshot {
   }
 }
 
-function writeAndBroadcastSnapshot(
+function saveRoomsLocalAndBroadcastChannel(
   snapshot: SharedRoomsSnapshot,
   channel: BroadcastChannel | null,
 ): SharedRoomsSnapshot {
@@ -279,6 +283,14 @@ function writeAndBroadcastSnapshot(
       // Canal já fechado
     }
   }
+  return snapshot;
+}
+
+function writeAndBroadcastSnapshot(
+  snapshot: SharedRoomsSnapshot,
+  channel: BroadcastChannel | null,
+): SharedRoomsSnapshot {
+  saveRoomsLocalAndBroadcastChannel(snapshot, channel);
   emitStatePatchToServer({ roomsSnapshot: snapshot });
   return snapshot;
 }
@@ -291,20 +303,25 @@ export function createRealtimeChannel(): BroadcastChannel | null {
   return new BroadcastChannel(CHANNEL_NAME);
 }
 
-/** Atualiza ou insere a presença de um avatar em uma sala */
+/** Atualiza ou insere a presença de um avatar em uma sala (delta atômico sem sobrescrever outros IPs) */
 export function upsertAvatarPresence(
   presence: RoomAvatarPresence,
   channel: BroadcastChannel | null,
 ): SharedRoomsSnapshot {
   const current = readRoomsSnapshot();
+  const stamped: RoomAvatarPresence = { ...presence, lastSeen: Date.now() };
   const next: SharedRoomsSnapshot = {
     ...current,
     presences: {
       ...current.presences,
-      [presence.clientId]: { ...presence, lastSeen: Date.now() },
+      [stamped.clientId]: stamped,
     },
   };
-  return writeAndBroadcastSnapshot(next, channel);
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomPresenceUpsert(stamped)) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Remove a presença de uma aba quando o jogador sai da sala ou fecha a guia */
@@ -316,10 +333,12 @@ export function removeAvatarPresence(
   if (!current.presences[clientId]) return current;
   const nextPresences = { ...current.presences };
   delete nextPresences[clientId];
-  return writeAndBroadcastSnapshot(
-    { ...current, presences: nextPresences },
-    channel,
-  );
+  const next: SharedRoomsSnapshot = { ...current, presences: nextPresences };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomPresenceLeave(clientId)) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Publica mensagem no chat de uma sala e atualiza o balão de fala sobre o avatar */
@@ -331,7 +350,7 @@ export function appendRoomMessage(
 ): SharedRoomsSnapshot {
   const current = readRoomsSnapshot();
   const prevRoomMsgs = current.messagesByRoom[roomId] ?? [];
-  const nextRoomMsgs = [...prevRoomMsgs, message].slice(-60);
+  const nextRoomMsgs = [...prevRoomMsgs, message].slice(-80);
 
   const nextPresences = { ...current.presences };
   if (message.senderRole !== 'system' && message.text) {
@@ -356,17 +375,19 @@ export function appendRoomMessage(
     }
   }
 
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      presences: nextPresences,
-      messagesByRoom: {
-        ...current.messagesByRoom,
-        [roomId]: nextRoomMsgs,
-      },
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    presences: nextPresences,
+    messagesByRoom: {
+      ...current.messagesByRoom,
+      [roomId]: nextRoomMsgs,
     },
-    channel,
-  );
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomChatSend(roomId, message, senderClientId)) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Limpa o histórico de mensagens de uma sala (comando /limpar da Staff) */
@@ -377,25 +398,27 @@ export function clearRoomMessages(
   const current = readRoomsSnapshot();
   const allRooms = [...GLOBAL_ROOMS, ...current.customRooms];
   const roomDef = allRooms.find((r) => r.id === roomId);
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      messagesByRoom: {
-        ...current.messagesByRoom,
-        [roomId]: [
-          {
-            id: `msg_clear_${Date.now()}`,
-            roomId,
-            senderUsername: 'Moderação',
-            senderRole: 'system',
-            text: `Histórico do chat de ${roomDef?.name ?? 'sala'} limpo pela Staff.`,
-            createdAt: Date.now(),
-          },
-        ],
-      },
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    messagesByRoom: {
+      ...current.messagesByRoom,
+      [roomId]: [
+        {
+          id: `msg_clear_${Date.now()}`,
+          roomId,
+          senderUsername: 'Moderação',
+          senderRole: 'system',
+          text: `Histórico do chat de ${roomDef?.name ?? 'sala'} limpo pela Staff.`,
+          createdAt: Date.now(),
+        },
+      ],
     },
-    channel,
-  );
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomMutation({ type: 'clear_messages', roomId })) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Cria uma nova sala personalizada (Pública ou Privada) visível no Lobby global */
@@ -413,17 +436,19 @@ export function createCustomRoom(
     createdAt: Date.now(),
   };
 
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      customRooms: [room, ...current.customRooms],
-      messagesByRoom: {
-        ...current.messagesByRoom,
-        [room.id]: [welcomeMsg],
-      },
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    customRooms: [room, ...current.customRooms],
+    messagesByRoom: {
+      ...current.messagesByRoom,
+      [room.id]: [welcomeMsg],
     },
-    channel,
-  );
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomMutation({ type: 'create_custom', room })) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Remove uma sala personalizada e move eventuais participantes para o Lounge Principal */
@@ -447,15 +472,17 @@ export function deleteCustomRoom(
   const nextMessages = { ...current.messagesByRoom };
   delete nextMessages[roomId];
 
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      presences: nextPresences,
-      customRooms: current.customRooms.filter((r) => r.id !== roomId),
-      messagesByRoom: nextMessages,
-    },
-    channel,
-  );
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    presences: nextPresences,
+    customRooms: current.customRooms.filter((r) => r.id !== roomId),
+    messagesByRoom: nextMessages,
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (!emitRoomMutation({ type: 'delete_custom', roomId })) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Atualiza o aviso local de uma sala personalizada (permissão do Dono da Sala) */
@@ -483,17 +510,25 @@ export function updateCustomRoomNotice(
     createdAt: Date.now(),
   };
 
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      customRooms: nextRooms,
-      messagesByRoom: {
-        ...current.messagesByRoom,
-        [roomId]: [...prevMsgs, sysMsg].slice(-60),
-      },
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    customRooms: nextRooms,
+    messagesByRoom: {
+      ...current.messagesByRoom,
+      [roomId]: [...prevMsgs, sysMsg].slice(-80),
     },
-    channel,
-  );
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'update_custom',
+      roomId,
+      patch: { roomNotice: trimmed || null, byUsername },
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Atualiza ou remove a imagem de fundo do PC aplicada a uma sala customizada */
@@ -506,13 +541,21 @@ export function updateCustomRoomBackground(
   const nextRooms = current.customRooms.map((r) =>
     r.id === roomId ? { ...r, customBackgroundImageUrl } : r,
   );
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      customRooms: nextRooms,
-    },
-    channel,
-  );
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    customRooms: nextRooms,
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'update_custom',
+      roomId,
+      patch: { customBackgroundImageUrl: customBackgroundImageUrl ?? null },
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /** Expulsa um avatar intruso de uma sala para o Lounge Principal (privilégio do criador da sala) */
@@ -545,27 +588,37 @@ export function kickAvatarFromRoom(
     createdAt: Date.now(),
   };
 
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      presences: nextPresences,
-      messagesByRoom: {
-        ...current.messagesByRoom,
-        [roomId]: [...prevMsgs, kickMsg].slice(-60),
-      },
-      kicks: [
-        ...current.kicks,
-        {
-          roomId,
-          targetClientId,
-          targetUsername,
-          byUsername,
-          at: Date.now(),
-        },
-      ],
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    presences: nextPresences,
+    messagesByRoom: {
+      ...current.messagesByRoom,
+      [roomId]: [...prevMsgs, kickMsg].slice(-80),
     },
-    channel,
-  );
+    kicks: [
+      ...current.kicks,
+      {
+        roomId,
+        targetClientId,
+        targetUsername,
+        byUsername,
+        at: Date.now(),
+      },
+    ],
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'kick_avatar',
+      roomId,
+      targetClientId,
+      targetUsername,
+      byUsername,
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /**
@@ -640,7 +693,7 @@ export function clearRoomDjTrack(
 }
 
 /**
- * Atualiza configurações e móveis de salas oficiais (privilégio exclusivo de Administrador).
+ * Atualiza configurações, móveis e equipe de Suporte Oficial de salas oficiais (privilégio exclusivo de Administrador).
  */
 export function updateOfficialRoomSettings(
   roomIds: RoomId | RoomId[],
@@ -657,13 +710,25 @@ export function updateOfficialRoomSettings(
       ...updates,
     };
   }
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      officialOverrides: nextOverrides,
-    },
-    channel,
-  );
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    officialOverrides: nextOverrides,
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'update_official',
+      roomIds: ids,
+      updates: {
+        backdropTheme: updates.backdropTheme,
+        interactiveProps: updates.interactiveProps,
+        supportStaff: updates.supportStaff,
+      },
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 
 /**
@@ -678,12 +743,49 @@ export function updateCustomRoomProps(
   const nextRooms = current.customRooms.map((r) =>
     r.id === roomId ? { ...r, interactiveProps } : r,
   );
-  return writeAndBroadcastSnapshot(
-    {
-      ...current,
-      customRooms: nextRooms,
-    },
-    channel,
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    customRooms: nextRooms,
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'update_custom',
+      roomId,
+      patch: { interactiveProps },
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
+}
+
+/**
+ * Atualiza a equipe de empregos e taxas AM de uma sala criada por usuário (apenas Dono da Sala).
+ */
+export function updateCustomRoomEmployees(
+  roomId: RoomId,
+  employees: NonNullable<RoomDef['employees']>,
+  channel: BroadcastChannel | null,
+): SharedRoomsSnapshot {
+  const current = readRoomsSnapshot();
+  const nextRooms = current.customRooms.map((r) =>
+    r.id === roomId ? { ...r, employees } : r,
   );
+  const next: SharedRoomsSnapshot = {
+    ...current,
+    customRooms: nextRooms,
+  };
+  saveRoomsLocalAndBroadcastChannel(next, channel);
+  if (
+    !emitRoomMutation({
+      type: 'update_custom',
+      roomId,
+      patch: { employees },
+    })
+  ) {
+    emitStatePatchToServer({ roomsSnapshot: next });
+  }
+  return next;
 }
 

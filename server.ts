@@ -16,6 +16,7 @@ import type {
   PremiumOrderMessage,
   ServerRegion,
   SupportChatMessage,
+  SupportModMessage,
   SupportTicket,
 } from './src/types/game.ts';
 import {
@@ -119,8 +120,46 @@ async function startServer() {
   const port = Number(process.env.PORT || 3000);
   const isProduction = process.env.NODE_ENV === 'production';
 
+  app.use((req: Request, res: Response, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type,x-actor-id,x-staff-role,x-actor-email',
+    );
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '16mb' }));
   app.use(express.text({ type: 'text/plain', limit: '64kb' }));
+
+  app.use(
+    (
+      err: { status?: number; type?: string; message?: string } | null,
+      _req: Request,
+      res: Response,
+      next: (err?: unknown) => void,
+    ) => {
+      if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large')) {
+        res.status(err.status || 400).json({
+          ok: false,
+          error:
+            err.type === 'entity.too.large'
+              ? 'Arquivo ou imagem excedeu o limite máximo permitido.'
+              : 'Formato de dados inválido enviado ao servidor.',
+        });
+        return;
+      }
+      next(err);
+    },
+  );
 
   app.get('/api/health', (_req: Request, res: Response) => {
     const snap = serverDb.getPublicSnapshot();
@@ -250,6 +289,68 @@ async function startServer() {
 
     const publicSnap = serverDb.getPublicSnapshot();
     const syncPayload = {
+      worldState: publicSnap.worldState,
+      playerPatch: {
+        accountId: result.account.id,
+        progress: result.progress,
+      },
+      updatedAt: publicSnap.updatedAt,
+      version: publicSnap.version,
+    };
+    io.emit('state:updated', syncPayload);
+    io.emit('state_update', syncPayload);
+    io.emit('presence:updated', {
+      presences: publicSnap.presences,
+      changedRecord: record,
+    });
+
+    res.json({
+      ok: true,
+      account: result.account,
+      progress: result.progress,
+      loginXpAward: result.loginXpAward,
+      accounts: publicSnap.accounts,
+      worldState: publicSnap.worldState,
+    });
+  });
+
+  app.post('/api/auth/firebase-google', (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      firebaseUid?: string;
+      email?: string;
+      displayName?: string;
+      avatarGender?: 'feminino' | 'masculino' | 'neutro';
+      serverRegion?: 'BR' | 'ES' | 'EN';
+    };
+    if (!body.firebaseUid || !body.email) {
+      res.status(400).json({ ok: false, error: 'Dados da conta Google inválidos.' });
+      return;
+    }
+    const result = serverDb.authenticateOrRegisterGoogleUser({
+      firebaseUid: body.firebaseUid,
+      email: body.email,
+      displayName: body.displayName,
+      avatarGender: body.avatarGender,
+      serverRegion: body.serverRegion,
+    });
+    if (!result.ok) {
+      res.status(401).json(result);
+      return;
+    }
+
+    const record = serverDb.updatePresenceHeartbeat({
+      accountId: result.account.id,
+      username: result.account.username,
+      displayName: result.account.displayName,
+      lastInteractionAt: Date.now(),
+      socketConnected: true,
+      manualOffline: false,
+      serverRegion: result.account.serverRegion,
+    });
+
+    const publicSnap = serverDb.getPublicSnapshot();
+    const syncPayload = {
+      accounts: publicSnap.accounts,
       worldState: publicSnap.worldState,
       playerPatch: {
         accountId: result.account.id,
@@ -821,6 +922,134 @@ async function startServer() {
         });
       });
 
+      // ── PAGAMENTO DE SALÁRIO EM SALAS DOS USUÁRIOS (AM) ──
+      app.post('/api/rooms/pay-employee', (req: Request, res: Response) => {
+        const body = (req.body ?? {}) as {
+          roomId?: string;
+          ownerAccountId?: string;
+          employeeUserId?: string;
+          amount?: number;
+        };
+        const ownerId =
+          body.ownerAccountId || (req.headers['x-actor-id'] as string | undefined) || '';
+        if (!body.roomId || !ownerId || !body.employeeUserId) {
+          res.status(400).json({
+            ok: false,
+            error: 'Informe a sala, o proprietário e o funcionário para pagar.',
+          });
+          return;
+        }
+        const result = serverDb.payRoomEmployee({
+          roomId: body.roomId,
+          ownerAccountId: ownerId,
+          employeeUserId: body.employeeUserId,
+          amount: body.amount,
+        });
+        if (!result.ok) {
+          res.status(400).json({ ok: false, error: result.error });
+          return;
+        }
+
+        const snap = serverDb.getPublicSnapshot();
+        io.emit('room:snapshot_sync', { roomsSnapshot: result.roomsSnapshot });
+        const ownerPatch = {
+          worldState: result.worldState ?? snap.worldState,
+          playerPatch: { accountId: ownerId, progress: result.ownerProgress },
+          updatedAt: snap.updatedAt,
+          version: snap.version,
+        };
+        io.emit('state:updated', ownerPatch);
+        io.emit('state_update', ownerPatch);
+
+        const empAcc = serverDb
+          .getSnapshot()
+          .accounts.find(
+            (a) =>
+              a.id === body.employeeUserId ||
+              a.username.toLowerCase() === result.employeeUsername.toLowerCase(),
+          );
+        if (empAcc && empAcc.id !== ownerId) {
+          const empPatch = {
+            worldState: result.worldState ?? snap.worldState,
+            playerPatch: { accountId: empAcc.id, progress: result.employeeProgress },
+            updatedAt: snap.updatedAt,
+            version: snap.version,
+          };
+          io.emit('state:updated', empPatch);
+          io.emit('state_update', empPatch);
+        }
+
+        res.json({
+          ok: true,
+          amountPaid: result.amountPaid,
+          employeeUsername: result.employeeUsername,
+          jobTitle: result.jobTitle,
+          ownerProgress: result.ownerProgress,
+          roomsSnapshot: result.roomsSnapshot,
+        });
+      });
+
+      // ── COMUNICAÇÃO DIRETA SUPORTE OFICIAL ↔ MODERADORES (ABA MODERAÇÃO) ──
+      app.get('/api/support-mod/messages', (_req: Request, res: Response) => {
+        res.json({ ok: true, messages: serverDb.getSupportModMessages() });
+      });
+
+      app.post('/api/support-mod/messages', (req: Request, res: Response) => {
+        const body = (req.body ?? {}) as {
+          senderAccountId?: string;
+          senderUsername?: string;
+          text?: string;
+        };
+        const actorId =
+          body.senderAccountId || (req.headers['x-actor-id'] as string | undefined) || '';
+        const text = (body.text || '').trim().slice(0, 600);
+        if (!actorId || !text) {
+          res.status(400).json({ ok: false, error: 'Escreva uma mensagem válida.' });
+          return;
+        }
+        const acc = serverDb.findAccountById(actorId);
+        const staffRole = resolveActorRoleFromServer(
+          actorId,
+          req.headers['x-staff-role'] as string | undefined,
+          (req.headers['x-actor-email'] as string | undefined) || acc?.email,
+        );
+        const snap = serverDb.getSnapshot();
+        const normUname = (acc?.username || body.senderUsername || '').trim().toLowerCase();
+        const isOfficialSupport = Object.values(snap.roomsSnapshot?.officialOverrides ?? {}).some(
+          (ov) =>
+            Array.isArray(ov?.supportStaff) &&
+            ov.supportStaff.some((u) => u.trim().toLowerCase() === normUname),
+        );
+        if (!staffRole && !isOfficialSupport) {
+          res.status(403).json({
+            ok: false,
+            error: 'Acesso restrito à equipe de Suporte Oficial, Moderadores e Administrador.',
+          });
+          return;
+        }
+
+        const roleLabel =
+          staffRole === 'admin'
+            ? 'Administrador'
+            : staffRole === 'moderator'
+              ? 'Moderador'
+              : staffRole === 'cm'
+                ? 'Community Manager'
+                : 'Suporte Oficial';
+        const msg: SupportModMessage = {
+          id: `supmod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          senderAccountId: actorId,
+          senderUsername: acc?.username || body.senderUsername || 'Equipe',
+          senderRoleLabel: roleLabel,
+          isSupport: isOfficialSupport && !staffRole,
+          text,
+          createdAt: Date.now(),
+        };
+        const messages = serverDb.appendSupportModMessage(msg);
+        io.emit('support_mod:updated', { messages, latest: msg });
+        res.json({ ok: true, messages, latest: msg });
+      });
+
       app.post(
         '/api/admin/grant-item',
         requireStaffRole(['admin']),
@@ -1174,7 +1403,7 @@ async function startServer() {
             reviewedAt: now,
           };
 
-          // Se aprovado o desbanimento, libera a conta no snapshot de accounts
+          // Se aprovado o desbanimento, libera a conta e o usuário no worldState
           const snap = serverDb.getSnapshot();
           if (updated.status === 'approved_unban') {
             const nextAccounts = snap.accounts.map((acc) =>
@@ -1183,7 +1412,16 @@ async function startServer() {
                 ? { ...acc, banned: false, mutedUntil: undefined }
                 : acc,
             );
-            serverDb.applyPatch({ accounts: nextAccounts });
+            const nextWorldUsers = (snap.worldState?.users ?? []).map((u) =>
+              u.id === existing.targetAccountId ||
+              u.username.toLowerCase() === existing.targetUsername.toLowerCase()
+                ? { ...u, status: 'active' as const, banReason: undefined }
+                : u,
+            );
+            serverDb.applyPatch({
+              accounts: nextAccounts,
+              worldState: snap.worldState ? { ...snap.worldState, users: nextWorldUsers } : undefined,
+            });
           }
 
           const reviews = serverDb.upsertBanReview(updated);

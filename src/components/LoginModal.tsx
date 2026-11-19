@@ -23,6 +23,12 @@ import {
 import couplePortraitImg from '../assets/images/atelier_couple_portrait_1794768226559.jpg';
 import floralCrestImg from '../assets/images/atelier_floral_crest_1794768226415.jpg';
 import { useGlobalState } from '../core/state/GlobalStateManager';
+import { useFirebase } from '../context/FirebaseContext';
+import { notifyRemoteSupportTickets, subscribeRemoteSync } from '../core/state/socketBridge';
+import {
+  createSupportTicketInFirestore,
+  syncAuthenticatedUserToFirestore,
+} from '../firebase';
 import {
   AvatarGender,
   ServerRegion,
@@ -31,6 +37,7 @@ import {
   UserAccount,
 } from '../types/game';
 import { soundEngine } from '../utils/sound';
+import { resilientApiRequest } from '../utils/apiClient';
 import type { LoginXpAwardResult } from '../utils/levelSystem';
 import {
   ADMIN_OWNER_EMAIL,
@@ -250,6 +257,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
   // Sistema Oficial de Tickets Salvos (Tela Inicial -> Community Manager)
   const GUEST_TICKETS_STORAGE_KEY = 'starlight_guest_ticket_ids_v1';
   const { supportTickets, refreshSupportTickets } = useGlobalState();
+  const { firebaseUser, signInWithGoogle } = useFirebase();
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [helpUsername, setHelpUsername] = useState('');
   const [helpEmail, setHelpEmail] = useState('');
@@ -259,6 +267,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
   const [helpInput, setHelpInput] = useState('');
   const [helpLoading, setHelpLoading] = useState(false);
   const [helpFeedback, setHelpFeedback] = useState<string | null>(null);
+  const [helpFeedbackType, setHelpFeedbackType] = useState<'success' | 'error'>('success');
+  const [localTicketsOverlay, setLocalTicketsOverlay] = useState<SupportTicket[]>([]);
   const [selectedGuestTicketId, setSelectedGuestTicketId] = useState<string | null>(null);
   const [ticketReplyInput, setTicketReplyInput] = useState('');
   const [savedGuestTicketIds, setSavedGuestTicketIds] = useState<string[]>(() => {
@@ -275,16 +285,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     if (showHelpModal) {
       void refreshSupportTickets();
     }
+    return subscribeRemoteSync({
+      onSupportTicketUpdated: (tickets) => {
+        setLocalTicketsOverlay(tickets);
+      },
+    });
   }, [refreshSupportTickets, showHelpModal]);
+
+  const mergedSupportTickets = useMemo(() => {
+    const byId = new Map<string, SupportTicket>();
+    for (const t of supportTickets) byId.set(t.id, t);
+    for (const t of localTicketsOverlay) {
+      const existing = byId.get(t.id);
+      if (!existing || t.updatedAt >= existing.updatedAt) {
+        byId.set(t.id, t);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [supportTickets, localTicketsOverlay]);
 
   const myLoginTickets = useMemo(() => {
     const typedName = (helpUsername || loginUsername).trim().toLowerCase();
-    return supportTickets.filter(
+    return mergedSupportTickets.filter(
       (t) =>
         savedGuestTicketIds.includes(t.id) ||
         (typedName.length >= 2 && t.requesterUsername.trim().toLowerCase() === typedName),
     );
-  }, [helpUsername, loginUsername, savedGuestTicketIds, supportTickets]);
+  }, [helpUsername, loginUsername, savedGuestTicketIds, mergedSupportTickets]);
 
   const activeGuestTicket = useMemo(
     () => myLoginTickets.find((t) => t.id === selectedGuestTicketId) ?? null,
@@ -331,37 +358,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         text,
         createdAt: Date.now(),
       };
-      const res = await fetch('/api/support/tickets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterUsername: requester,
-          email: helpEmail.trim() || undefined,
-          category: helpCategory,
-          serverRegion: regServerRegion,
-          subject: (helpSubject.trim() || text).slice(0, 90),
-          messages: [firstMsg],
-        }),
-      });
-      const data = (await res.json()) as {
+      const payload = {
+        requesterUsername: requester,
+        email: helpEmail.trim() || undefined,
+        category: helpCategory,
+        serverRegion: regServerRegion,
+        subject: (helpSubject.trim() || text).slice(0, 90),
+        messages: [firstMsg],
+      };
+      const data = await resilientApiRequest<{
         ok?: boolean;
         ticket?: SupportTicket;
+        tickets?: SupportTicket[];
         error?: string;
-      };
+      }>('/api/support/tickets', {
+        method: 'POST',
+        body: payload,
+        socketEvent: 'support:create_ticket',
+        socketPayload: payload,
+      });
       if (data.ok && data.ticket) {
+        const nextList = Array.isArray(data.tickets)
+          ? data.tickets
+          : [data.ticket, ...mergedSupportTickets];
+        setLocalTicketsOverlay(nextList);
+        notifyRemoteSupportTickets(nextList);
         rememberGuestTicketId(data.ticket.id);
         setSelectedGuestTicketId(data.ticket.id);
         setHelpInput('');
         setHelpSubject('');
+        setHelpFeedbackType('success');
         setHelpFeedback(
           `Ticket #${data.ticket.id} enviado e salvo! O Community Manager responderá diretamente aqui e a conversa ficará visível para ambos.`,
         );
         soundEngine.playPurchase();
-        await refreshSupportTickets();
+        void refreshSupportTickets();
+        if (firebaseUser) {
+          void createSupportTicketInFirestore({
+            id: data.ticket.id,
+            requesterUsername: requester,
+            category: helpCategory,
+            serverRegion: regServerRegion,
+            subject: (helpSubject.trim() || text).slice(0, 90),
+            firstMessageText: text,
+          }).catch(() => undefined);
+        }
       } else {
+        setHelpFeedbackType('error');
         setHelpFeedback(data.error || 'Não foi possível criar o Ticket.');
       }
     } catch {
+      setHelpFeedbackType('error');
       setHelpFeedback('Erro de conexão ao enviar Ticket para o servidor.');
     } finally {
       setHelpLoading(false);
@@ -377,24 +424,45 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     try {
       const requester =
         helpUsername.trim() || activeGuestTicket.requesterUsername || 'Jogador';
-      const res = await fetch(`/api/support/tickets/${activeGuestTicket.id}/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          senderName: requester,
-          senderRole: 'player',
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{
+        ok?: boolean;
+        ticket?: SupportTicket;
+        tickets?: SupportTicket[];
+        error?: string;
+      }>(
+        `/api/support/tickets/${encodeURIComponent(activeGuestTicket.id)}/reply`,
+        {
+          method: 'POST',
+          body: {
+            text,
+            senderName: requester,
+            senderRole: 'player',
+          },
+          socketEvent: 'support:reply_ticket',
+          socketPayload: {
+            ticketId: activeGuestTicket.id,
+            text,
+            senderName: requester,
+            senderRole: 'player',
+          },
+        },
+      );
       if (data.ok) {
+        if (Array.isArray(data.tickets)) {
+          setLocalTicketsOverlay(data.tickets);
+          notifyRemoteSupportTickets(data.tickets);
+        }
         setTicketReplyInput('');
+        setHelpFeedbackType('success');
+        setHelpFeedback(null);
         soundEngine.playPurchase();
-        await refreshSupportTickets();
+        void refreshSupportTickets();
       } else {
+        setHelpFeedbackType('error');
         setHelpFeedback(data.error || 'Não foi possível enviar sua resposta.');
       }
     } catch {
+      setHelpFeedbackType('error');
       setHelpFeedback('Falha de rede ao enviar resposta no Ticket.');
     } finally {
       setHelpLoading(false);
@@ -413,15 +481,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     setAuthSubmitting(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier: loginUsername,
-          password: loginPassword,
-        }),
-      });
-      const data = (await res.json()) as {
+      const data = await resilientApiRequest<{
         ok?: boolean;
         error?: string;
         account?: UserAccount;
@@ -431,7 +491,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         worldState?: Parameters<
           typeof syncAccountAndProgressFromServer
         >[0]['worldState'];
-      };
+      }>('/api/auth/login', {
+        method: 'POST',
+        body: {
+          identifier: loginUsername,
+          password: loginPassword,
+        },
+      });
       if (data.ok && data.account) {
         syncAccountAndProgressFromServer({
           account: data.account,
@@ -443,8 +509,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         onAuthenticated(data.account, data.loginXpAward);
         return;
       }
-      if (res.status === 401 || res.status === 400) {
-        setErrorMsg(data.error || 'E-mail, nome do personagem ou senha inválidos.');
+      if (data.ok === false && data.error) {
+        setErrorMsg(data.error);
         soundEngine.playModAction();
         return;
       }
@@ -474,18 +540,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     setAuthSubmitting(true);
 
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: regUsername,
-          email: regEmail,
-          password: regPassword,
-          avatarGender: regAvatarGender,
-          serverRegion: regServerRegion,
-        }),
-      });
-      const data = (await res.json()) as {
+      const data = await resilientApiRequest<{
         ok?: boolean;
         error?: string;
         account?: UserAccount;
@@ -494,7 +549,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         worldState?: Parameters<
           typeof syncAccountAndProgressFromServer
         >[0]['worldState'];
-      };
+      }>('/api/auth/register', {
+        method: 'POST',
+        body: {
+          username: regUsername,
+          email: regEmail,
+          password: regPassword,
+          avatarGender: regAvatarGender,
+          serverRegion: regServerRegion,
+        },
+      });
       if (data.ok && data.account) {
         syncAccountAndProgressFromServer({
           account: data.account,
@@ -506,8 +570,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         onAuthenticated(data.account);
         return;
       }
-      if (res.status >= 400 && res.status < 500) {
-        setErrorMsg(data.error || 'Não foi possível concluir o cadastro.');
+      if (data.ok === false && data.error) {
+        setErrorMsg(data.error);
         soundEngine.playModAction();
         return;
       }
@@ -531,6 +595,70 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
     }
     soundEngine.playPurchase();
     onAuthenticated(fallback.account);
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (authSubmitting) return;
+    setErrorMsg(null);
+    setAuthSubmitting(true);
+    try {
+      const fbUser = await signInWithGoogle();
+      if (!fbUser.email) {
+        setErrorMsg('Sua conta Google não forneceu um endereço de e-mail.');
+        soundEngine.playModAction();
+        return;
+      }
+      const data = await resilientApiRequest<{
+        ok?: boolean;
+        error?: string;
+        account?: UserAccount;
+        progress?: Parameters<typeof syncAccountAndProgressFromServer>[0]['progress'];
+        loginXpAward?: LoginXpAwardResult;
+        accounts?: UserAccount[];
+        worldState?: Parameters<
+          typeof syncAccountAndProgressFromServer
+        >[0]['worldState'];
+      }>('/api/auth/firebase-google', {
+        method: 'POST',
+        body: {
+          firebaseUid: fbUser.uid,
+          email: fbUser.email,
+          displayName: fbUser.displayName ?? undefined,
+          avatarGender: regAvatarGender,
+          serverRegion: regServerRegion,
+        },
+      });
+      if (data.ok && data.account) {
+        syncAccountAndProgressFromServer({
+          account: data.account,
+          progress: data.progress,
+          accounts: data.accounts,
+          worldState: data.worldState,
+        });
+        if (data.progress) {
+          void syncAuthenticatedUserToFirestore({
+            uid: fbUser.uid,
+            account: data.account,
+            progress: data.progress,
+          }).catch(() => undefined);
+        }
+        soundEngine.playPurchase();
+        onAuthenticated(data.account, data.loginXpAward);
+        return;
+      }
+      setErrorMsg(data.error || 'Não foi possível concluir o login com Google.');
+      soundEngine.playModAction();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('popup-closed-by-user')) {
+        setErrorMsg('Login com Google cancelado.');
+      } else {
+        setErrorMsg('Não foi possível autenticar com o Google no momento.');
+      }
+      soundEngine.playModAction();
+    } finally {
+      setAuthSubmitting(false);
+    }
   };
 
   return (
@@ -566,7 +694,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
       {/* Container principal com os dois cartões editoriais estilo vidro fosco */}
       <div className="relative z-10 w-full max-w-[1080px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-7 items-stretch">
         {/* CARTÃO ESQUERDO: Apresentação / Mundo Virtual & Social */}
-        <section className="lg:col-span-6 bg-white/85 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between">
+        <section className="lg:col-span-6 bg-white/85 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between text-[#1E1815]">
           <div>
             {/* Topo: Logo Nocturne Vale Club */}
             <div className="flex items-center gap-3.5 pb-4 border-b border-gray-200/80">
@@ -627,7 +755,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
         </section>
 
         {/* CARTÃO DIREITO: Fichário de Login / Criar Nova Conta */}
-        <section className="lg:col-span-6 bg-white/90 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between">
+        <section className="lg:col-span-6 bg-white/90 backdrop-blur-md rounded-2xl p-6 sm:p-8 border border-white/50 shadow-2xl flex flex-col justify-between text-[#1E1815]">
           <div className="flex-1 flex flex-col">
             {/* Abas superiores em estilo fichário conectado ao corpo */}
             <div
@@ -783,6 +911,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                       {authSubmitting ? 'Autenticando...' : 'Entrar no Jogo'}
                     </span>
                   </button>
+
+                  <div className="relative py-1 flex items-center">
+                    <div className="flex-1 border-t border-[#D6CEC2]" />
+                    <span className="px-3 text-[11px] font-medium uppercase tracking-wider text-[#736961]">
+                      ou
+                    </span>
+                    <div className="flex-1 border-t border-[#D6CEC2]" />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={authSubmitting}
+                    onClick={() => void handleGoogleSignIn()}
+                    className="w-full inline-flex items-center justify-center gap-2.5 py-2.5 px-4 text-sm font-medium text-[#1E1815] bg-white hover:bg-[#F4F1EC] disabled:opacity-60 border border-[#CFC8BE] rounded-lg shadow-xs transition-colors cursor-pointer"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" aria-hidden="true">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      />
+                    </svg>
+                    <span>Entrar com Google (Firebase)</span>
+                  </button>
                 </form>
               ) : (
                 <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
@@ -810,7 +973,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           value={regUsername}
                           onChange={(e) => setRegUsername(e.target.value)}
                           placeholder="ex: SofiaStyle"
-                          className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="w-full pl-9 pr-3 py-2.5 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </div>
                     </label>
@@ -827,7 +990,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           value={regEmail}
                           onChange={(e) => setRegEmail(e.target.value)}
                           placeholder="voce@exemplo.com"
-                          className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="w-full pl-9 pr-3 py-2.5 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </div>
                     </label>
@@ -846,7 +1009,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder="Mínimo de 4 caracteres"
-                        className="w-full pl-9 pr-3 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        className="w-full pl-9 pr-3 py-2.5 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                       />
                     </div>
                   </label>
@@ -944,7 +1107,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
           aria-modal="true"
           aria-label="Redefinir senha"
         >
-          <div className="bg-[#FAF8F4] border border-[#D4C7B6] rounded-xl max-w-md w-full p-6 shadow-2xl">
+          <div className="bg-[#FAF8F4] text-[#1E1815] border border-[#D4C7B6] rounded-xl max-w-md w-full p-6 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[#E5DDD0]">
               <h3 className="font-display text-xl font-bold text-[#1E1815]">
                 Recuperação de Senha
@@ -988,19 +1151,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                     setForgotError(null);
                     setForgotLoading(true);
                     try {
-                      const res = await fetch('/api/auth/reset-password', {
+                      const data = await resilientApiRequest<{
+                        ok?: boolean;
+                        error?: string;
+                      }>('/api/auth/reset-password', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                        body: {
                           email: forgotEmail,
                           token: forgotToken,
                           newPassword: forgotNewPassword,
-                        }),
+                        },
                       });
-                      const data = (await res.json()) as {
-                        ok?: boolean;
-                        error?: string;
-                      };
                       if (data.ok) {
                         setForgotStep('done');
                         soundEngine.playPurchase();
@@ -1047,7 +1208,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         setForgotToken(e.target.value.toUpperCase())
                       }
                       placeholder="Ex: A1B2C3"
-                      className="mt-1.5 w-full px-3.5 py-2 text-sm font-mono uppercase bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                      className="mt-1.5 w-full px-3.5 py-2 text-sm font-mono uppercase text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <label className="block">
@@ -1061,7 +1222,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                       value={forgotNewPassword}
                       onChange={(e) => setForgotNewPassword(e.target.value)}
                       placeholder="Mínimo 4 caracteres"
-                      className="mt-1.5 w-full px-3.5 py-2 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                      className="mt-1.5 w-full px-3.5 py-2 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <div className="pt-2 flex items-center justify-end gap-2">
@@ -1089,16 +1250,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                     setForgotError(null);
                     setForgotLoading(true);
                     try {
-                      const res = await fetch('/api/auth/forgot-password', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: forgotEmail }),
-                      });
-                      const data = (await res.json()) as {
+                      const data = await resilientApiRequest<{
                         ok?: boolean;
                         error?: string;
                         previewToken?: string;
-                      };
+                      }>('/api/auth/forgot-password', {
+                        method: 'POST',
+                        body: { email: forgotEmail },
+                      });
                       if (data.ok) {
                         setForgotPreviewToken(data.previewToken ?? null);
                         setForgotStep('reset');
@@ -1120,8 +1279,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                   className="space-y-3"
                 >
                   <p className="text-xs text-[#4E433C]">
-                    Informe o e-mail cadastrado na sua conta do Starlight
-                    Atelier para gerar um código temporário de redefinição de
+                    Informe o e-mail cadastrado na sua conta do Nocturne Vale
+                    Club para gerar um código temporário de redefinição de
                     senha.
                   </p>
                   <label className="block">
@@ -1134,7 +1293,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="ex: voce@exemplo.com"
-                      className="mt-1.5 w-full px-3.5 py-2.5 text-sm bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                      className="mt-1.5 w-full px-3.5 py-2.5 text-sm text-[#1E1815] placeholder:text-[#736961] bg-[#EAE7E2] border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                     />
                   </label>
                   <div className="pt-2 flex items-center justify-end gap-2">
@@ -1166,9 +1325,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Central de Tickets Starlight Atelier"
+          aria-label="Central de Tickets Nocturne Vale Club"
         >
-          <div className="bg-[#FAF8F4] border border-[#D4C7B6] rounded-xl max-w-2xl w-full p-5 shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="bg-[#FAF8F4] text-[#1E1815] border border-[#D4C7B6] rounded-xl max-w-2xl w-full p-5 shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between pb-3 border-b border-[#E5DDD0]">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-[#3B2E28] text-white flex items-center justify-center">
@@ -1203,7 +1362,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
             </div>
 
             {helpFeedback && (
-              <div className="mt-3 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900">
+              <div
+                className={`mt-3 px-3 py-2 rounded-lg border text-xs font-medium ${
+                  helpFeedbackType === 'error'
+                    ? 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                }`}
+              >
                 {helpFeedback}
               </div>
             )}
@@ -1339,7 +1504,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         value={ticketReplyInput}
                         onChange={(e) => setTicketReplyInput(e.target.value)}
                         placeholder="Responder ao Community Manager..."
-                        className="flex-1 px-3 py-2 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                        className="flex-1 px-3 py-2 text-xs text-[#1E1815] placeholder:text-[#736961] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                       />
                       <button
                         type="submit"
@@ -1370,7 +1535,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           value={helpUsername}
                           onChange={(e) => setHelpUsername(e.target.value)}
                           placeholder="ex: clara_couture"
-                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="mt-1 w-full px-3 py-1.5 text-xs text-[#1E1815] placeholder:text-[#736961] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </label>
                       <label className="block">
@@ -1382,7 +1547,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           onChange={(e) =>
                             setHelpCategory(e.target.value as SupportTicket['category'])
                           }
-                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="mt-1 w-full px-3 py-1.5 text-xs text-[#1E1815] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         >
                           <option value="login">Login / Senha</option>
                           <option value="economia">Moedas AM &amp; VIP (Loja Premium)</option>
@@ -1402,7 +1567,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           value={helpSubject}
                           onChange={(e) => setHelpSubject(e.target.value)}
                           placeholder="Resumo rápido..."
-                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="mt-1 w-full px-3 py-1.5 text-xs text-[#1E1815] placeholder:text-[#736961] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </label>
                       <label className="block">
@@ -1414,7 +1579,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                           value={helpEmail}
                           onChange={(e) => setHelpEmail(e.target.value)}
                           placeholder="voce@exemplo.com"
-                          className="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
+                          className="mt-1 w-full px-3 py-1.5 text-xs text-[#1E1815] placeholder:text-[#736961] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334]"
                         />
                       </label>
                     </div>
@@ -1428,7 +1593,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onAuthenticated }) => {
                         value={helpInput}
                         onChange={(e) => setHelpInput(e.target.value)}
                         placeholder="Descreva sua dúvida ou solicitação. O Ticket ficará salvo para você e o Community Manager..."
-                        className="mt-1 w-full flex-1 px-3 py-2 text-xs bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] resize-none"
+                        className="mt-1 w-full flex-1 px-3 py-2 text-xs text-[#1E1815] placeholder:text-[#736961] bg-white border border-[#CFC8BE] rounded-lg focus:outline-none focus:border-[#761334] resize-none"
                       />
                     </label>
                     <button

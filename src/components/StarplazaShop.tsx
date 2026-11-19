@@ -713,7 +713,7 @@ export const StarplazaShop: React.FC<StarplazaShopProps> = ({
                     <p className="text-xs text-[#92400E] mt-0.5">
                       {isAccountVip
                         ? 'Seu Passe VIP está ativo! Todas as peças VIP estão prontas para compra e equipagem imediata.'
-                        : 'Itens exclusivos para membros VIP do Starlight Atelier. Ative seu passe na Loja Premium para equipar!'}
+                        : 'Itens exclusivos para membros VIP do Nocturne Vale Club. Ative seu passe na Loja Premium para equipar!'}
                     </p>
                   </div>
                 </div>

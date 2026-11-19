@@ -22,6 +22,8 @@ export interface DjPlaybackStatus {
   state: DjPlaybackState;
   needsAudioUnlock: boolean;
   errorCode?: number;
+  isEmbedBlocked?: boolean;
+  errorMessage?: string;
 }
 
 interface YTPlayerInstance {
@@ -35,6 +37,7 @@ interface YTPlayerInstance {
   isMuted?: () => boolean;
   setVolume: (volume: number) => void;
   getCurrentTime: () => number;
+  seekTo?: (seconds: number, allowSeekAhead?: boolean) => void;
   getPlayerState: () => number;
   getIframe?: () => HTMLIFrameElement;
   destroy: () => void;
@@ -220,7 +223,16 @@ export class DJMediaSyncController {
         },
         onError: (ev) => {
           this.clearAutoplayTimer();
-          this.emitStatus('error', false, ev.data);
+          const code = ev.data;
+          const isEmbed = code === 101 || code === 150;
+          const errorMessage = isEmbed
+            ? 'O proprietário deste vídeo bloqueou a reprodução externa (embed). Escolha outra música ou pule para a próxima.'
+            : code === 100
+              ? 'Vídeo não encontrado ou privado no YouTube.'
+              : code === 2
+                ? 'ID de vídeo do YouTube inválido.'
+                : 'Erro ao reproduzir vídeo do YouTube.';
+          this.emitStatus('error', false, code, isEmbed, errorMessage);
         },
       },
     });
@@ -237,8 +249,16 @@ export class DJMediaSyncController {
     state: DjPlaybackState,
     needsAudioUnlock: boolean,
     errorCode?: number,
+    isEmbedBlocked?: boolean,
+    errorMessage?: string,
   ): void {
-    this.onStatusCallback?.({ state, needsAudioUnlock, errorCode });
+    this.onStatusCallback?.({
+      state,
+      needsAudioUnlock,
+      errorCode,
+      isEmbedBlocked,
+      errorMessage,
+    });
   }
 
   private getEffectiveVolume(): number {

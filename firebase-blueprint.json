@@ -1,0 +1,499 @@
+{
+  "entities": {
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Dados privados da conta do jogador (PII isolada: e-mail, papel e região).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID do proprietário.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Nome único do personagem no clube.",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_.\\- ]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nome de exibição público do jogador.",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "E-mail verificado da conta (PII).",
+          "minLength": 5,
+          "maxLength": 160
+        },
+        "avatarGender": {
+          "type": "string",
+          "enum": ["feminino", "masculino", "neutro"]
+        },
+        "serverRegion": {
+          "type": "string",
+          "enum": ["BR", "ES", "EN"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["player"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "displayName",
+        "email",
+        "avatarGender",
+        "serverRegion",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Cartão público sem PII (nome, nível, gênero e região) exibido nas salas.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-zA-Z0-9_.\\- ]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32
+        },
+        "avatarGender": {
+          "type": "string",
+          "enum": ["feminino", "masculino", "neutro"]
+        },
+        "serverRegion": {
+          "type": "string",
+          "enum": ["BR", "ES", "EN"]
+        },
+        "level": {
+          "type": "integer"
+        },
+        "isVip": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "displayName",
+        "avatarGender",
+        "serverRegion",
+        "level",
+        "isVip",
+        "updatedAt"
+      ]
+    },
+    "PlayerProgress": {
+      "title": "PlayerProgress",
+      "description": "Progresso sincronizado na nuvem (moedas AM, nível, XP e aparência base).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "starcoins": {
+          "type": "integer"
+        },
+        "level": {
+          "type": "integer"
+        },
+        "xp": {
+          "type": "integer"
+        },
+        "skinTone": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "avatarGender": {
+          "type": "string",
+          "enum": ["feminino", "masculino", "neutro"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "starcoins",
+        "level",
+        "xp",
+        "skinTone",
+        "avatarGender",
+        "updatedAt"
+      ]
+    },
+    "SupportTicketDoc": {
+      "title": "SupportTicketDoc",
+      "description": "Ticket de atendimento salvo no Firestore para acompanhamento entre jogador e staff.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "requesterUsername": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48
+        },
+        "category": {
+          "type": "string",
+          "enum": ["login", "economia", "ban_review", "bug", "geral"]
+        },
+        "serverRegion": {
+          "type": "string",
+          "enum": ["BR", "ES", "EN"]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "answered", "resolved"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "authorUid",
+        "requesterUsername",
+        "category",
+        "serverRegion",
+        "subject",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportTicketMessageDoc": {
+      "title": "SupportTicketMessageDoc",
+      "description": "Mensagem individual da subcoleção de um Ticket de Suporte.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ticketId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ticketAuthorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["player", "cm", "admin"]
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ticketId",
+        "ticketAuthorUid",
+        "authorUid",
+        "senderRole",
+        "senderName",
+        "text",
+        "createdAt"
+      ]
+    },
+    "AdminRoleDoc": {
+      "title": "AdminRoleDoc",
+      "description": "Registro confiável de administradores autorizados no Firestore.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "grantedBy", "createdAt"]
+    },
+    "RoomChatMessageDoc": {
+      "title": "RoomChatMessageDoc",
+      "description": "Mensagem de bate-papo em tempo real sincronizada por sala na coleção Firestore messages.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderUsername": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 48
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["player", "admin", "system"]
+        },
+        "isVip": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "roomId",
+        "authorUid",
+        "senderUsername",
+        "senderRole",
+        "isVip",
+        "text",
+        "createdAt"
+      ]
+    },
+    "RoomDoc": {
+      "title": "RoomDoc",
+      "description": "Documento pai de sala no Firestore para ancorar a cabine de DJ em tempo real.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "roomId", "updatedAt"]
+    },
+    "RoomDjStateDoc": {
+      "title": "RoomDjStateDoc",
+      "description": "Estado em tempo real da cabine de DJ da sala (videoId, título, fila, play/pause e startedAt do servidor).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "videoId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 32
+        },
+        "youtubeUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 140
+        },
+        "addedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "isPlaying": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "queue": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "roomId",
+        "videoId",
+        "youtubeUrl",
+        "title",
+        "addedBy",
+        "updatedByUid",
+        "isPlaying",
+        "startedAt",
+        "updatedAt",
+        "queue"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivateProfile" },
+      "description": "Perfil privado com PII (e-mail) acessível apenas ao dono da conta ou administrador verificado."
+    },
+    "/publicProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Perfil público sem PII com nome de avatar, nível, VIP e servidor."
+    },
+    "/playerProgress/{userId}": {
+      "schema": { "$ref": "#/entities/PlayerProgress" },
+      "description": "Estado persistente de progresso do jogador sincronizado com o Firestore."
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicketDoc" },
+      "description": "Tickets de suporte abertos por jogadores autenticados."
+    },
+    "/supportTickets/{ticketId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/SupportTicketMessageDoc" },
+      "description": "Subcoleção de mensagens vinculadas ao ticket pai."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRoleDoc" },
+      "description": "Lista confiável de UIDs administradores gerenciada exclusivamente pelo admin raiz."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/RoomChatMessageDoc" },
+      "description": "Mensagens de chat em tempo real sincronizadas entre usuários na mesma sala."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/RoomDoc" },
+      "description": "Documento âncora de sala para sincronização em tempo real."
+    },
+    "/rooms/{roomId}/dj/{djDocId}": {
+      "schema": { "$ref": "#/entities/RoomDjStateDoc" },
+      "description": "Estado sincronizado da cabine de DJ da sala (YouTube IFrame videoId, título, startedAt e fila)."
+    }
+  }
+}

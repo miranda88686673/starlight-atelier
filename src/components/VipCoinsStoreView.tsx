@@ -21,6 +21,7 @@ import {
 } from '../types/game';
 import { useGlobalState } from '../core/state/GlobalStateManager';
 import { soundEngine } from '../utils/sound';
+import { resilientApiRequest } from '../utils/apiClient';
 import { VipBadge } from './StaffDirectory';
 import { ThreeClothingThumbnail } from './three/ThreeItemThumbnail';
 
@@ -93,7 +94,7 @@ const AM_PACKAGES = [
   },
   {
     id: 'am_1500',
-    title: 'Cofre Starlight',
+    title: 'Cofre Nocturne',
     amount: 1500,
     priceLabel: 'R$ 19,90',
     note: 'Inclui margem para móveis e vestidos',
@@ -232,30 +233,31 @@ export const VipCoinsStoreView: React.FC<VipCoinsStoreViewProps> = ({
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/premium-orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterAccountId: currentUser.id,
-          requesterUsername: currentUser.username,
-          requesterDisplayName: currentUser.displayName || currentUser.username,
-          packId: selectedPack.packId,
-          packTitle: selectedPack.packTitle,
-          priceLabel: selectedPack.priceLabel,
-          orderType: selectedPack.orderType,
-          amAmount: selectedPack.amAmount,
-          bonusAmAmount: selectedPack.bonusAmAmount,
-          receiptImageUrl: receiptDataUrl || undefined,
-          initialMessage:
-            checkoutMessage.trim() ||
-            `Pagamento PIX realizado para ${selectedPack.packTitle} (${selectedPack.priceLabel}).`,
-        }),
-      });
-      const data = (await res.json()) as {
+      const payload = {
+        requesterAccountId: currentUser.id,
+        requesterUsername: currentUser.username,
+        requesterDisplayName: currentUser.displayName || currentUser.username,
+        packId: selectedPack.packId,
+        packTitle: selectedPack.packTitle,
+        priceLabel: selectedPack.priceLabel,
+        orderType: selectedPack.orderType,
+        amAmount: selectedPack.amAmount,
+        bonusAmAmount: selectedPack.bonusAmAmount,
+        receiptImageUrl: receiptDataUrl || undefined,
+        initialMessage:
+          checkoutMessage.trim() ||
+          `Pagamento PIX realizado para ${selectedPack.packTitle} (${selectedPack.priceLabel}).`,
+      };
+      const data = await resilientApiRequest<{
         ok?: boolean;
         error?: string;
         order?: PremiumOrder;
-      };
+      }>('/api/premium-orders', {
+        method: 'POST',
+        body: payload,
+        socketEvent: 'premium:create_order',
+        socketPayload: payload,
+      });
       if (data.ok && data.order) {
         soundEngine.playPurchase();
         setCheckoutSuccessMsg('Analisaremos seu pedido chega em 24 horas');
@@ -278,19 +280,29 @@ export const VipCoinsStoreView: React.FC<VipCoinsStoreViewProps> = ({
     if (!text || submitting) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/premium-orders/${order.id}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          senderName: currentUser.displayName || currentUser.username,
-          actorId: currentUser.id,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/premium-orders/${encodeURIComponent(order.id)}/message`,
+        {
+          method: 'POST',
+          body: {
+            text,
+            senderName: currentUser.displayName || currentUser.username,
+            actorId: currentUser.id,
+          },
+          socketEvent: 'premium:message_order',
+          socketPayload: {
+            orderId: order.id,
+            text,
+            senderName: currentUser.displayName || currentUser.username,
+            actorId: currentUser.id,
+          },
+        },
+      );
       if (data.ok) {
         setOrderChatInputs((prev) => ({ ...prev, [order.id]: '' }));
         await refreshPremiumOrders();
+      } else if (data.error) {
+        setErrorMsg(data.error);
       }
     } finally {
       setSubmitting(false);

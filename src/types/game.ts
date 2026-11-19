@@ -1017,6 +1017,7 @@ export interface RoomDef {
     jobTitle: string;
     wage: number;
     period: 'hora' | 'semana' | 'mes';
+    lastPaidAt?: number;
   }>;
   supportStaff?: string[];
 }
@@ -1030,6 +1031,10 @@ export interface RoomAvatarPresence {
   isVip?: boolean;
   level?: number;
   officialRoleLabel?: string;
+  /** Cargo atribuído na sala customizada atual (apenas exibido dentro desta sala, sem emblema) */
+  roomJobTitle?: string;
+  /** Cargo oficial de Suporte na sala oficial atual (recebe emblema S dourado brilhante) */
+  isRoomSupport?: boolean;
   roomId: RoomId;
   /** Coordenada horizontal em percentual da largura do palco (8..92) */
   x: number;
@@ -1281,5 +1286,16 @@ export interface MarketListing {
   buyerAccountId?: string;
   buyerUsername?: string;
   soldAt?: number;
+}
+
+/** Mensagem no canal direto entre Suporte Oficial e Equipe de Moderadores na aba Moderação */
+export interface SupportModMessage {
+  id: string;
+  senderAccountId: string;
+  senderUsername: string;
+  senderRoleLabel: string;
+  isSupport: boolean;
+  text: string;
+  createdAt: number;
 }
 

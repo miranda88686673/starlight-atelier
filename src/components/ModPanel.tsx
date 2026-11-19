@@ -33,8 +33,11 @@ import type {
   UserRole,
 } from '../types/game';
 import { useGlobalState } from '../core/state/GlobalStateManager';
+import { subscribeRemoteSync } from '../core/state/socketBridge';
 import { resolveCoreStaffRole } from '../core/security/RoleGuard';
-import { isPrimaryAdminAccount } from '../utils/storage';
+import { isPrimaryAdminAccount, normalizeUsername } from '../utils/storage';
+import { readRoomsSnapshot } from '../utils/realtime';
+import { resilientApiRequest } from '../utils/apiClient';
 import { StaffDirectory, type StaffBotEditorPayload } from './StaffDirectory';
 import { AdminMasterPanel } from './staff/AdminMasterPanel';
 import { CommunityDevOpsPanel } from './staff/CommunityDevOpsPanel';
@@ -168,6 +171,31 @@ export const ModPanel: React.FC<ModPanelProps> = ({
   const coreRole = resolveCoreStaffRole(currentUser);
   const hasMasterKey = isPrimaryAdmin || coreRole === 'admin';
 
+  const checkIsOfficialSupport = () => {
+    const snap = readRoomsSnapshot();
+    const norm = normalizeUsername(currentUser.username);
+    return Object.values(snap.officialOverrides ?? {}).some(
+      (ov) =>
+        Array.isArray(ov?.supportStaff) &&
+        ov.supportStaff.some((u) => normalizeUsername(u) === norm),
+    );
+  };
+
+  const [isOfficialSupport, setIsOfficialSupport] = useState<boolean>(() =>
+    checkIsOfficialSupport(),
+  );
+
+  useEffect(() => {
+    setIsOfficialSupport(checkIsOfficialSupport());
+    return subscribeRemoteSync({
+      onInit: () => setIsOfficialSupport(checkIsOfficialSupport()),
+      onRoomSnapshotSync: () => setIsOfficialSupport(checkIsOfficialSupport()),
+      onPatch: (p) => {
+        if (p.roomsSnapshot) setIsOfficialSupport(checkIsOfficialSupport());
+      },
+    });
+  }, [currentUser.username]);
+
   // Sistema Oficial de Tickets Salvos dentro do jogo (Player <-> Community Manager)
   const [ticketOpen, setTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
@@ -207,14 +235,21 @@ export const ModPanel: React.FC<ModPanelProps> = ({
     if (hasMasterKey || coreRole === 'cm') {
       tabs.push({ id: 'cm', label: 'Central Community Manager', Icon: MessageSquareText });
     }
-    if (hasMasterKey || coreRole === 'moderator') {
-      tabs.push({ id: 'moderation', label: 'Moderação & Segurança', Icon: ShieldCheck });
+    if (hasMasterKey || coreRole === 'moderator' || isOfficialSupport) {
+      tabs.push({
+        id: 'moderation',
+        label:
+          isOfficialSupport && !hasMasterKey && coreRole !== 'moderator'
+            ? 'Suporte Oficial & Moderação'
+            : 'Moderação & Segurança',
+        Icon: ShieldCheck,
+      });
     }
     if (hasMasterKey || coreRole === 'designer') {
       tabs.push({ id: 'designer', label: 'Designer Global', Icon: Layers });
     }
     return tabs;
-  }, [coreRole, hasMasterKey]);
+  }, [coreRole, hasMasterKey, isOfficialSupport]);
 
   const defaultTabForRole: StaffPanelSubTab = useMemo(() => {
     if (initialSubTab && allowedTabs.some((t) => t.id === initialSubTab)) {
@@ -222,10 +257,10 @@ export const ModPanel: React.FC<ModPanelProps> = ({
     }
     if (hasMasterKey) return 'overview';
     if (coreRole === 'cm') return 'cm';
-    if (coreRole === 'moderator') return 'moderation';
+    if (coreRole === 'moderator' || isOfficialSupport) return 'moderation';
     if (coreRole === 'designer') return 'designer';
     return 'directory';
-  }, [allowedTabs, coreRole, hasMasterKey, initialSubTab]);
+  }, [allowedTabs, coreRole, hasMasterKey, initialSubTab, isOfficialSupport]);
 
   const [activeSubTab, setActiveSubTab] = useState<StaffPanelSubTab>(defaultTabForRole);
 
@@ -262,24 +297,25 @@ export const ModPanel: React.FC<ModPanelProps> = ({
         text,
         createdAt: Date.now(),
       };
-      const res = await fetch('/api/support/tickets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterAccountId: currentUser.id,
-          requesterUsername: currentUser.username,
-          email: currentUser.email,
-          category: newCategory,
-          serverRegion: currentUser.serverRegion || 'BR',
-          subject: (newSubject.trim() || text).slice(0, 90),
-          messages: [firstMsg],
-        }),
-      });
-      const data = (await res.json()) as {
+      const payload = {
+        requesterAccountId: currentUser.id,
+        requesterUsername: currentUser.username,
+        email: currentUser.email,
+        category: newCategory,
+        serverRegion: currentUser.serverRegion || 'BR',
+        subject: (newSubject.trim() || text).slice(0, 90),
+        messages: [firstMsg],
+      };
+      const data = await resilientApiRequest<{
         ok?: boolean;
         ticket?: SupportTicket;
         error?: string;
-      };
+      }>('/api/support/tickets', {
+        method: 'POST',
+        body: payload,
+        socketEvent: 'support:create_ticket',
+        socketPayload: payload,
+      });
       if (data.ok && data.ticket) {
         setSelectedTicketId(data.ticket.id);
         setNewSubject('');
@@ -305,16 +341,24 @@ export const ModPanel: React.FC<ModPanelProps> = ({
     if (!text) return;
     setTicketBusy(true);
     try {
-      const res = await fetch(`/api/support/tickets/${activeTicket.id}/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          senderName: currentUser.displayName || currentUser.username,
-          senderRole: 'player',
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/support/tickets/${encodeURIComponent(activeTicket.id)}/reply`,
+        {
+          method: 'POST',
+          body: {
+            text,
+            senderName: currentUser.displayName || currentUser.username,
+            senderRole: 'player',
+          },
+          socketEvent: 'support:reply_ticket',
+          socketPayload: {
+            ticketId: activeTicket.id,
+            text,
+            senderName: currentUser.displayName || currentUser.username,
+            senderRole: 'player',
+          },
+        },
+      );
       if (data.ok) {
         setReplyInput('');
         await refreshSupportTickets();
@@ -340,7 +384,9 @@ export const ModPanel: React.FC<ModPanelProps> = ({
           <p className="text-xs text-[#6B645D] mt-1">
             {coreRole
               ? `Cargo ativo: ${coreRole.toUpperCase()} · Operação sincronizada com a Central da Staff.`
-              : 'Consulte a equipe oficial da Staff ou abra um Ticket salvo com o Community Manager.'}
+              : isOfficialSupport
+                ? 'Cargo Oficial: SUPORTE (Emblema S Dourado) · Tire dúvidas dos jogadores e comunique-se com os Moderadores.'
+                : 'Consulte a equipe oficial da Staff ou abra um Ticket salvo com o Community Manager.'}
           </p>
         </div>
 
@@ -657,7 +703,7 @@ export const ModPanel: React.FC<ModPanelProps> = ({
         <CommunityDevOpsPanel currentUser={currentUser} />
       )}
 
-      {activeSubTab === 'moderation' && (hasMasterKey || coreRole === 'moderator') && (
+      {activeSubTab === 'moderation' && (hasMasterKey || coreRole === 'moderator' || isOfficialSupport) && (
         <ModeratorSupportPanel
           currentUser={currentUser}
           users={users}

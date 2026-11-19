@@ -11,6 +11,7 @@ import type {
   HeartbeatLifecycleStatus,
   PasswordResetTokenRecord,
   PresenceHeartbeatRecord,
+  RoomMutationPayload,
   ServerDatabaseDocument,
   StaffAuditLogEntry,
   StateSyncPatchPayload,
@@ -22,12 +23,17 @@ import type {
   PlayerProgressState,
   PremiumOrder,
   PremiumPixConfig,
+  RoomAvatarPresence,
+  RoomChatMessage,
+  RoomDef,
   RoomHealthMetric,
   ServerRegion,
+  SupportModMessage,
   SupportTicket,
   UserAccount,
   WorldModerationState,
 } from '../src/types/game.ts';
+import type { SharedRoomsSnapshot } from '../src/utils/realtime.ts';
 import {
   buildInitialPlayerProgressServer,
   createSeededServerAccounts,
@@ -48,6 +54,19 @@ import {
   normalizeLevelAndXp,
   validateCharacterName,
 } from '../src/utils/levelSystem.ts';
+
+export function isInfiniteAdminAccountServer(acc?: UserAccount | null): boolean {
+  if (!acc) return false;
+  const email = (acc.email || '').trim().toLowerCase();
+  return Boolean(
+    acc.isPrimaryOwner ||
+      acc.id === 'acc_admin_owner' ||
+      acc.role === 'admin' ||
+      acc.staffRoleTier === 'admin' ||
+      email === 'miranda88686673@gmail.com',
+  );
+}
+
 
 function resolveDbFilePath(): string {
   const cwdCandidate = path.resolve(process.cwd(), '.starlight_db.json');
@@ -239,6 +258,84 @@ function sanitizeRoomsSnapshotNoBots(
   };
 }
 
+function createDefaultRoomsSnapshotServer(): SharedRoomsSnapshot {
+  return {
+    presences: {},
+    messagesByRoom: {},
+    customRooms: [],
+    kicks: [],
+    djTracksByRoom: {},
+    officialOverrides: {},
+  };
+}
+
+function mergeRoomsSnapshot(
+  existing: ServerDatabaseDocument['roomsSnapshot'],
+  incoming: NonNullable<ServerDatabaseDocument['roomsSnapshot']>,
+): SharedRoomsSnapshot {
+  const cleanIncoming = sanitizeRoomsSnapshotNoBots(incoming) ?? createDefaultRoomsSnapshotServer();
+  if (!existing) return cleanIncoming;
+  const cleanExisting = sanitizeRoomsSnapshotNoBots(existing) ?? createDefaultRoomsSnapshotServer();
+  const now = Date.now();
+  const ROOM_PRESENCE_TTL_MS = 90_000;
+
+  // Mescla presenças sem apagar avatares de outros IPs/computadores
+  const mergedPresences: Record<string, RoomAvatarPresence> = {};
+  for (const [cid, pres] of Object.entries(cleanExisting.presences ?? {})) {
+    if (pres && now - (pres.lastSeen || 0) < ROOM_PRESENCE_TTL_MS) {
+      mergedPresences[cid] = pres;
+    }
+  }
+  for (const [cid, pres] of Object.entries(cleanIncoming.presences ?? {})) {
+    if (!pres) continue;
+    const prev = mergedPresences[cid];
+    if (!prev || (pres.lastSeen ?? 0) >= (prev.lastSeen ?? 0)) {
+      mergedPresences[cid] = { ...pres, lastSeen: now };
+    }
+  }
+
+  // Mescla customRooms por ID (preserva salas criadas por qualquer usuário)
+  const roomMap = new Map<string, RoomDef>();
+  for (const r of cleanExisting.customRooms ?? []) {
+    if (r?.id) roomMap.set(r.id, r);
+  }
+  for (const r of cleanIncoming.customRooms ?? []) {
+    if (r?.id) roomMap.set(r.id, r);
+  }
+
+  // Mescla mensagens de chat por ID
+  const mergedMessages: Record<string, RoomChatMessage[]> = {
+    ...(cleanExisting.messagesByRoom ?? {}),
+  };
+  for (const [rid, msgs] of Object.entries(cleanIncoming.messagesByRoom ?? {})) {
+    if (!Array.isArray(msgs)) continue;
+    const existingMsgs = mergedMessages[rid] ?? [];
+    const byId = new Map<string, RoomChatMessage>();
+    for (const m of existingMsgs) if (m?.id) byId.set(m.id, m);
+    for (const m of msgs) if (m?.id) byId.set(m.id, m);
+    mergedMessages[rid] = Array.from(byId.values())
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .slice(-80);
+  }
+
+  return {
+    presences: mergedPresences,
+    messagesByRoom: mergedMessages,
+    customRooms: Array.from(roomMap.values()),
+    kicks: [...(cleanExisting.kicks ?? []), ...(cleanIncoming.kicks ?? [])]
+      .filter((k) => now - (k.at || 0) < 30_000)
+      .slice(-40),
+    djTracksByRoom: {
+      ...(cleanExisting.djTracksByRoom ?? {}),
+      ...(cleanIncoming.djTracksByRoom ?? {}),
+    },
+    officialOverrides: {
+      ...(cleanExisting.officialOverrides ?? {}),
+      ...(cleanIncoming.officialOverrides ?? {}),
+    },
+  };
+}
+
 function createEmptyDb(): ServerDatabaseDocument {
   return {
     version: 1,
@@ -255,6 +352,7 @@ function createEmptyDb(): ServerDatabaseDocument {
     ban_reviews: [],
     premium_orders: [],
     market_listings: [],
+    support_mod_messages: [],
     premium_pix_config: {
       pixKey: DEFAULT_LOJA_PREMIUM_PIX_KEY,
     },
@@ -411,6 +509,9 @@ class NocturneValeServerDatabase {
         ban_reviews: Array.isArray(parsed.ban_reviews) ? parsed.ban_reviews : [],
         premium_orders: Array.isArray(parsed.premium_orders) ? parsed.premium_orders : [],
         market_listings: Array.isArray(parsed.market_listings) ? parsed.market_listings : [],
+        support_mod_messages: Array.isArray(parsed.support_mod_messages)
+          ? parsed.support_mod_messages
+          : [],
         premium_pix_config: hydratedPixConfig,
         room_health:
           parsed.room_health && typeof parsed.room_health === 'object'
@@ -765,6 +866,117 @@ class NocturneValeServerDatabase {
     };
   }
 
+  /** Autentica ou cria conta vinculada ao login Google (Firebase Auth) */
+  authenticateOrRegisterGoogleUser(input: {
+    firebaseUid: string;
+    email: string;
+    displayName?: string;
+    avatarGender?: UserAccount['avatarGender'];
+    serverRegion?: ServerRegion;
+  }):
+    | {
+        ok: true;
+        account: UserAccount;
+        progress: PlayerProgressState;
+        loginXpAward: ReturnType<typeof awardLoginXp>;
+      }
+    | { ok: false; error: string } {
+    const cleanedEmail = (input.email || '').trim().toLowerCase();
+    if (!cleanedEmail || !cleanedEmail.includes('@')) {
+      return { ok: false, error: 'E-mail Google inválido para autenticação.' };
+    }
+
+    let idx = this.doc.accounts.findIndex(
+      (a) => a.email.trim().toLowerCase() === cleanedEmail,
+    );
+
+    if (idx < 0) {
+      const rawBase =
+        cleanCharacterName(input.displayName || cleanedEmail.split('@')[0] || 'Player')
+          .replace(/[^a-zA-Z0-9_.\- ]/g, '')
+          .trim() || 'Player';
+      let candidate = rawBase.slice(0, 20);
+      if (candidate.length < 3) candidate = `Player_${candidate}`;
+      let suffix = 1;
+      while (
+        this.doc.accounts.some(
+          (a) =>
+            canonicalCharacterKey(a.username) === canonicalCharacterKey(candidate) ||
+            collapsedCharacterKey(a.username) === collapsedCharacterKey(candidate),
+        )
+      ) {
+        candidate = `${rawBase.slice(0, 16)}${suffix++}`;
+      }
+      const regRes = this.registerAccountServer({
+        username: candidate,
+        displayName: candidate,
+        email: cleanedEmail,
+        password: `fb_${input.firebaseUid}_${Date.now()}`,
+        avatarGender: input.avatarGender || 'feminino',
+        serverRegion: input.serverRegion || 'BR',
+      });
+      if (!regRes.ok) {
+        return regRes;
+      }
+      idx = this.doc.accounts.findIndex((a) => a.id === regRes.account.id);
+    }
+
+    const target = this.doc.accounts[idx];
+    const modEntry = this.doc.worldState?.users.find(
+      (u) =>
+        u.id === target.id ||
+        normalizeUsernameServer(u.username) === normalizeUsernameServer(target.username),
+    );
+    if (modEntry?.status === 'banned') {
+      return {
+        ok: false,
+        error: `Conta suspensa pela moderação${modEntry.banReason ? `: ${modEntry.banReason}` : '.'}`,
+      };
+    }
+
+    const isPrimaryAdmin =
+      Boolean(target.isPrimaryOwner) || target.id === 'acc_admin_owner';
+    const baseProgress =
+      this.doc.playersById[target.id] ??
+      buildInitialPlayerProgressServer(
+        target.id,
+        target.avatarGender,
+        target.serverRegion ?? 'BR',
+        isPrimaryAdmin,
+      );
+
+    const xpRes = awardLoginXp(
+      baseProgress.level ?? (isPrimaryAdmin ? ADMIN_INITIAL_LEVEL : 1),
+      baseProgress.xp ?? 0,
+      LOGIN_XP_REWARD,
+      isPrimaryAdmin,
+    );
+
+    const nextProgress: PlayerProgressState = {
+      ...baseProgress,
+      level: xpRes.level,
+      xp: xpRes.xp,
+      lastLoginXpAt: Date.now(),
+      lastLoginXpGained: xpRes.xpGained,
+    };
+
+    this.doc.playersById = {
+      ...this.doc.playersById,
+      [target.id]: nextProgress,
+    };
+
+    this.doc.version += 1;
+    this.doc.updatedAt = Date.now();
+    this.flushSaveNow();
+
+    return {
+      ok: true,
+      account: sanitizeAccountForClient(target),
+      progress: nextProgress,
+      loginXpAward: xpRes,
+    };
+  }
+
   /** Cria token temporário de recuperação de senha (TTL 15 min) */
   createPasswordResetToken(emailInput: string):
     | { ok: true; record: PasswordResetTokenRecord; account: UserAccount }
@@ -905,7 +1117,10 @@ class NocturneValeServerDatabase {
     }
 
     if (patch.roomsSnapshot) {
-      this.doc.roomsSnapshot = sanitizeRoomsSnapshotNoBots(patch.roomsSnapshot);
+      this.doc.roomsSnapshot = mergeRoomsSnapshot(
+        this.doc.roomsSnapshot,
+        patch.roomsSnapshot,
+      );
       changed = true;
     }
 
@@ -926,6 +1141,11 @@ class NocturneValeServerDatabase {
 
     if (Array.isArray(patch.market_listings)) {
       this.doc.market_listings = patch.market_listings.slice(0, 500);
+      changed = true;
+    }
+
+    if (Array.isArray(patch.support_mod_messages)) {
+      this.doc.support_mod_messages = patch.support_mod_messages.slice(-150);
       changed = true;
     }
 
@@ -1604,7 +1824,8 @@ class NocturneValeServerDatabase {
     if (buyerProgress.ownedItemIds.includes(listing.itemId)) {
       return { ok: false, error: 'Você já possui este item no seu guarda-roupa.' };
     }
-    if (buyerProgress.starcoins < listing.price) {
+    const isBuyerInfiniteAdmin = isInfiniteAdminAccountServer(buyer);
+    if (!isBuyerInfiniteAdmin && buyerProgress.starcoins < listing.price) {
       return {
         ok: false,
         error: `Saldo insuficiente: você precisa de ${listing.price.toLocaleString('pt-BR')} AM.`,
@@ -1645,10 +1866,12 @@ class NocturneValeServerDatabase {
       equipped: nextSellerEquipped,
     };
 
-    // Debita AM do comprador e adiciona item
+    // Debita AM do comprador e adiciona item (ou mantém AM infinito se admin)
     const nextBuyerProgress: PlayerProgressState = {
       ...buyerProgress,
-      starcoins: Math.max(0, buyerProgress.starcoins - listing.price),
+      starcoins: isBuyerInfiniteAdmin
+        ? buyerProgress.starcoins
+        : Math.max(0, buyerProgress.starcoins - listing.price),
       ownedItemIds: Array.from(new Set([...buyerProgress.ownedItemIds, listing.itemId])),
     };
 
@@ -1781,6 +2004,468 @@ class NocturneValeServerDatabase {
       this.flushSaveNow();
     }
     return changed;
+  }
+
+  private ensureRoomsSnapshot(): SharedRoomsSnapshot {
+    if (!this.doc.roomsSnapshot) {
+      this.doc.roomsSnapshot = createDefaultRoomsSnapshotServer();
+    }
+    return this.doc.roomsSnapshot;
+  }
+
+  /** Insere ou atualiza presença de um único avatar com carimbo de relógio do servidor */
+  upsertRoomPresence(rawPresence: RoomAvatarPresence): {
+    presence: RoomAvatarPresence;
+    roomsSnapshot: SharedRoomsSnapshot;
+  } {
+    const snap = this.ensureRoomsSnapshot();
+    const now = Date.now();
+    const nextPresences: Record<string, RoomAvatarPresence> = {};
+    for (const [cid, p] of Object.entries(snap.presences ?? {})) {
+      if (p && !p.isBot && !cid.startsWith('bot_live_') && !cid.startsWith('npc_') && now - (p.lastSeen || 0) < 90_000) {
+        nextPresences[cid] = p;
+      }
+    }
+
+    const customIds = new Set((snap.customRooms ?? []).map((r) => r.id));
+    const validRoom =
+      rawPresence.roomId === 'lounge_party' ||
+      rawPresence.roomId === 'lounge_party_es' ||
+      rawPresence.roomId === 'lounge_party_en' ||
+      rawPresence.roomId === 'ilha_brasil' ||
+      rawPresence.roomId === 'ilha_spanish' ||
+      rawPresence.roomId === 'ilha_english' ||
+      customIds.has(rawPresence.roomId);
+
+    const serverPresence: RoomAvatarPresence = {
+      ...rawPresence,
+      isBot: false,
+      roomId: validRoom ? rawPresence.roomId : 'lounge_party',
+      lastSeen: now,
+    };
+
+    nextPresences[serverPresence.clientId] = serverPresence;
+    const updatedSnap: SharedRoomsSnapshot = {
+      ...snap,
+      presences: nextPresences,
+    };
+    this.doc.roomsSnapshot = updatedSnap;
+    this.scheduleSave();
+    return { presence: serverPresence, roomsSnapshot: updatedSnap };
+  }
+
+  /** Remove presença de uma aba/socket da sala sem afetar demais jogadores */
+  removeRoomPresence(clientId: string): {
+    removed: boolean;
+    roomsSnapshot: SharedRoomsSnapshot;
+  } {
+    const snap = this.ensureRoomsSnapshot();
+    if (!snap.presences?.[clientId]) {
+      return { removed: false, roomsSnapshot: snap };
+    }
+    const nextPresences = { ...snap.presences };
+    delete nextPresences[clientId];
+    const updatedSnap: SharedRoomsSnapshot = {
+      ...snap,
+      presences: nextPresences,
+    };
+    this.doc.roomsSnapshot = updatedSnap;
+    this.scheduleSave();
+    return { removed: true, roomsSnapshot: updatedSnap };
+  }
+
+  /** Registra mensagem de chat em sala com deduplicação e sincronia de balão */
+  appendRoomChatMessage(params: {
+    roomId: string;
+    message: RoomChatMessage;
+    senderClientId?: string | null;
+  }): { message: RoomChatMessage; roomsSnapshot: SharedRoomsSnapshot } {
+    const snap = this.ensureRoomsSnapshot();
+    const now = Date.now();
+    const serverMsg: RoomChatMessage = {
+      ...params.message,
+      roomId: params.roomId,
+      createdAt: params.message.createdAt || now,
+    };
+
+    const prevMsgs = snap.messagesByRoom?.[params.roomId] ?? [];
+    const deduped = prevMsgs.some((m) => m.id === serverMsg.id)
+      ? prevMsgs
+      : [...prevMsgs, serverMsg].slice(-80);
+
+    const nextPresences = { ...(snap.presences ?? {}) };
+    if (serverMsg.senderRole !== 'system' && serverMsg.text) {
+      const normSender = normalizeUsernameServer(serverMsg.senderUsername);
+      if (params.senderClientId && nextPresences[params.senderClientId]) {
+        nextPresences[params.senderClientId] = {
+          ...nextPresences[params.senderClientId],
+          lastMessage: serverMsg.text,
+          lastMessageAt: now,
+          lastSeen: now,
+        };
+      }
+      for (const [cid, pres] of Object.entries(nextPresences)) {
+        if (pres && normalizeUsernameServer(pres.username) === normSender) {
+          nextPresences[cid] = {
+            ...pres,
+            lastMessage: serverMsg.text,
+            lastMessageAt: now,
+            lastSeen: now,
+          };
+        }
+      }
+    }
+
+    const updatedSnap: SharedRoomsSnapshot = {
+      ...snap,
+      presences: nextPresences,
+      messagesByRoom: {
+        ...(snap.messagesByRoom ?? {}),
+        [params.roomId]: deduped,
+      },
+    };
+    this.doc.roomsSnapshot = updatedSnap;
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.scheduleSave();
+    return { message: serverMsg, roomsSnapshot: updatedSnap };
+  }
+
+  /** Aplica mutação atômica em sala customizada ou oficial (móveis, tema, cargos, expulsão) */
+  mutateRoomData(action: RoomMutationPayload): SharedRoomsSnapshot {
+    const snap = this.ensureRoomsSnapshot();
+    const now = Date.now();
+    let updatedSnap: SharedRoomsSnapshot = snap;
+
+    if (action.type === 'create_custom') {
+      const exists = (snap.customRooms ?? []).some((r) => r.id === action.room.id);
+      const nextRooms = exists
+        ? snap.customRooms.map((r) => (r.id === action.room.id ? action.room : r))
+        : [action.room, ...(snap.customRooms ?? [])];
+      const welcomeMsg: RoomChatMessage = {
+        id: `msg_created_${now}`,
+        roomId: action.room.id,
+        senderUsername: 'Sistema',
+        senderRole: 'system',
+        text: `Sala "${action.room.name}" criada por ${action.room.creatorUsername ?? 'anfitriao'}.`,
+        createdAt: now,
+      };
+      updatedSnap = {
+        ...snap,
+        customRooms: nextRooms,
+        messagesByRoom: {
+          ...(snap.messagesByRoom ?? {}),
+          [action.room.id]: snap.messagesByRoom?.[action.room.id] ?? [welcomeMsg],
+        },
+      };
+    } else if (action.type === 'delete_custom') {
+      const nextPresences = { ...(snap.presences ?? {}) };
+      for (const [cid, p] of Object.entries(nextPresences)) {
+        if (p && p.roomId === action.roomId) {
+          nextPresences[cid] = { ...p, roomId: 'lounge_party', x: 50, y: 72 };
+        }
+      }
+      const nextMessages = { ...(snap.messagesByRoom ?? {}) };
+      delete nextMessages[action.roomId];
+      updatedSnap = {
+        ...snap,
+        presences: nextPresences,
+        customRooms: (snap.customRooms ?? []).filter((r) => r.id !== action.roomId),
+        messagesByRoom: nextMessages,
+      };
+    } else if (action.type === 'update_custom') {
+      const nextRooms = (snap.customRooms ?? []).map((r) => {
+        if (r.id !== action.roomId) return r;
+        const nextRoom = { ...r };
+        if (action.patch.roomNotice !== undefined) {
+          nextRoom.roomNotice = action.patch.roomNotice?.trim() || undefined;
+        }
+        if (action.patch.customBackgroundImageUrl !== undefined) {
+          nextRoom.customBackgroundImageUrl =
+            action.patch.customBackgroundImageUrl || undefined;
+        }
+        if (action.patch.interactiveProps !== undefined) {
+          nextRoom.interactiveProps = action.patch.interactiveProps;
+        }
+        if (action.patch.employees !== undefined) {
+          nextRoom.employees = action.patch.employees;
+        }
+        return nextRoom;
+      });
+
+      const nextMessages = { ...(snap.messagesByRoom ?? {}) };
+      if (action.patch.roomNotice !== undefined && action.patch.byUsername) {
+        const trimmed = action.patch.roomNotice?.trim() || '';
+        const prevMsgs = nextMessages[action.roomId] ?? [];
+        nextMessages[action.roomId] = [
+          ...prevMsgs,
+          {
+            id: `msg_rnotice_${now}`,
+            roomId: action.roomId,
+            senderUsername: 'Dono da Sala',
+            senderRole: 'system' as const,
+            text: trimmed
+              ? `${action.patch.byUsername} definiu o aviso da sala: "${trimmed}"`
+              : `${action.patch.byUsername} removeu o aviso da sala.`,
+            createdAt: now,
+          },
+        ].slice(-80);
+      }
+
+      updatedSnap = {
+        ...snap,
+        customRooms: nextRooms,
+        messagesByRoom: nextMessages,
+      };
+    } else if (action.type === 'update_official') {
+      const nextOverrides = { ...(snap.officialOverrides ?? {}) };
+      for (const id of action.roomIds) {
+        nextOverrides[id] = {
+          ...(nextOverrides[id] ?? {}),
+          ...action.updates,
+        };
+      }
+      updatedSnap = {
+        ...snap,
+        officialOverrides: nextOverrides,
+      };
+    } else if (action.type === 'kick_avatar') {
+      const nextPresences = { ...(snap.presences ?? {}) };
+      if (nextPresences[action.targetClientId]) {
+        nextPresences[action.targetClientId] = {
+          ...nextPresences[action.targetClientId],
+          roomId: 'lounge_party',
+          x: 50,
+          y: 74,
+        };
+      }
+      const prevMsgs = snap.messagesByRoom?.[action.roomId] ?? [];
+      updatedSnap = {
+        ...snap,
+        presences: nextPresences,
+        messagesByRoom: {
+          ...(snap.messagesByRoom ?? {}),
+          [action.roomId]: [
+            ...prevMsgs,
+            {
+              id: `msg_kick_${now}`,
+              roomId: action.roomId,
+              senderUsername: 'Moderação Local',
+              senderRole: 'system' as const,
+              text: `${action.targetUsername} foi expulsa desta sala pelo anfitrião ${action.byUsername}.`,
+              createdAt: now,
+            },
+          ].slice(-80),
+        },
+        kicks: [
+          ...(snap.kicks ?? []).filter((k) => now - (k.at || 0) < 30_000),
+          {
+            roomId: action.roomId,
+            targetClientId: action.targetClientId,
+            targetUsername: action.targetUsername,
+            byUsername: action.byUsername,
+            at: now,
+          },
+        ],
+      };
+    } else if (action.type === 'clear_messages') {
+      updatedSnap = {
+        ...snap,
+        messagesByRoom: {
+          ...(snap.messagesByRoom ?? {}),
+          [action.roomId]: [
+            {
+              id: `msg_clear_${now}`,
+              roomId: action.roomId,
+              senderUsername: 'Moderação',
+              senderRole: 'system' as const,
+              text: 'Histórico do chat da sala limpo pela Staff.',
+              createdAt: now,
+            },
+          ],
+        },
+      };
+    }
+
+    this.doc.roomsSnapshot = updatedSnap;
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.flushSaveNow();
+    return updatedSnap;
+  }
+
+  /** Paga salário em AM do dono da sala para um funcionário contratado na sala */
+  payRoomEmployee(params: {
+    roomId: string;
+    ownerAccountId: string;
+    employeeUserId: string;
+    amount?: number;
+  }):
+    | {
+        ok: true;
+        amountPaid: number;
+        employeeUsername: string;
+        jobTitle: string;
+        ownerProgress: PlayerProgressState;
+        employeeProgress: PlayerProgressState;
+        roomsSnapshot: SharedRoomsSnapshot;
+        worldState: WorldModerationState | null;
+      }
+    | { ok: false; error: string } {
+    const snap = this.ensureRoomsSnapshot();
+    const roomIdx = (snap.customRooms ?? []).findIndex((r) => r.id === params.roomId);
+    if (roomIdx < 0) {
+      return { ok: false, error: 'Sala personalizada não encontrada.' };
+    }
+    const room = snap.customRooms[roomIdx];
+    const ownerAcc = this.doc.accounts.find((a) => a.id === params.ownerAccountId);
+    if (!ownerAcc) {
+      return { ok: false, error: 'Conta do proprietário da sala não encontrada.' };
+    }
+    const isOwner =
+      (room.ownerId && room.ownerId === ownerAcc.id) ||
+      (room.creatorUsername &&
+        normalizeUsernameServer(room.creatorUsername) ===
+          normalizeUsernameServer(ownerAcc.username));
+    if (!isOwner) {
+      return { ok: false, error: 'Apenas o dono da sala pode pagar salários.' };
+    }
+
+    const employees = room.employees ?? [];
+    const empIdx = employees.findIndex(
+      (e) =>
+        e.userId === params.employeeUserId ||
+        normalizeUsernameServer(e.username) === normalizeUsernameServer(params.employeeUserId),
+    );
+    if (empIdx < 0) {
+      return { ok: false, error: 'Funcionário não encontrado na folha de cargos desta sala.' };
+    }
+    const emp = employees[empIdx];
+    const empAcc =
+      this.doc.accounts.find((a) => a.id === emp.userId) ??
+      this.doc.accounts.find(
+        (a) => normalizeUsernameServer(a.username) === normalizeUsernameServer(emp.username),
+      );
+    if (!empAcc) {
+      return { ok: false, error: 'Conta do funcionário não encontrada no servidor.' };
+    }
+
+    const payAmount = Math.round(Number(params.amount ?? emp.wage));
+    if (!Number.isFinite(payAmount) || payAmount < 1 || payAmount > 10_000_000) {
+      return { ok: false, error: 'Valor de salário inválido (mínimo 1 AM).' };
+    }
+
+    const ownerProg =
+      this.doc.playersById[ownerAcc.id] ??
+      buildInitialPlayerProgressServer(ownerAcc.id, ownerAcc.avatarGender, ownerAcc.serverRegion);
+
+    const isOwnerInfiniteAdmin = isInfiniteAdminAccountServer(ownerAcc);
+    if (!isOwnerInfiniteAdmin && ownerProg.starcoins < payAmount) {
+      return {
+        ok: false,
+        error: `Saldo insuficiente para pagar ${payAmount.toLocaleString('pt-BR')} AM (seu saldo: ${ownerProg.starcoins.toLocaleString('pt-BR')} AM).`,
+      };
+    }
+
+    const empProg =
+      this.doc.playersById[empAcc.id] ??
+      buildInitialPlayerProgressServer(empAcc.id, empAcc.avatarGender, empAcc.serverRegion);
+
+    const now = Date.now();
+    let nextOwnerProg: PlayerProgressState;
+    let nextEmpProg: PlayerProgressState;
+
+    if (ownerAcc.id === empAcc.id) {
+      nextOwnerProg = ownerProg;
+      nextEmpProg = ownerProg;
+    } else {
+      nextOwnerProg = {
+        ...ownerProg,
+        starcoins: isOwnerInfiniteAdmin
+          ? ownerProg.starcoins
+          : Math.max(0, ownerProg.starcoins - payAmount),
+      };
+      nextEmpProg = {
+        ...empProg,
+        starcoins: Math.max(0, empProg.starcoins + payAmount),
+      };
+    }
+
+    this.doc.playersById = {
+      ...this.doc.playersById,
+      [ownerAcc.id]: nextOwnerProg,
+      [empAcc.id]: nextEmpProg,
+    };
+
+    if (this.doc.worldState) {
+      this.doc.worldState = {
+        ...this.doc.worldState,
+        users: this.doc.worldState.users.map((u) => {
+          if (u.id === ownerAcc.id) return { ...u, starcoins: nextOwnerProg.starcoins };
+          if (u.id === empAcc.id) return { ...u, starcoins: nextEmpProg.starcoins };
+          return u;
+        }),
+      };
+    }
+
+    const nextEmployees = [...employees];
+    nextEmployees[empIdx] = { ...emp, lastPaidAt: now };
+    const nextCustomRooms = [...snap.customRooms];
+    nextCustomRooms[roomIdx] = { ...room, employees: nextEmployees };
+
+    const periodLabel =
+      emp.period === 'hora' ? 'hora' : emp.period === 'semana' ? 'semana' : 'mês';
+    const prevMsgs = snap.messagesByRoom?.[params.roomId] ?? [];
+    const nextSnap: SharedRoomsSnapshot = {
+      ...snap,
+      customRooms: nextCustomRooms,
+      messagesByRoom: {
+        ...(snap.messagesByRoom ?? {}),
+        [params.roomId]: [
+          ...prevMsgs,
+          {
+            id: `msg_salary_${now}_${Math.random().toString(36).slice(2, 5)}`,
+            roomId: params.roomId,
+            senderUsername: 'Folha da Sala',
+            senderRole: 'system' as const,
+            text: `💰 ${ownerAcc.username} pagou ${payAmount.toLocaleString('pt-BR')} AM (${emp.jobTitle} · taxa/${periodLabel}) para ${empAcc.username}.`,
+            createdAt: now,
+          },
+        ].slice(-80),
+      },
+    };
+    this.doc.roomsSnapshot = nextSnap;
+    this.doc.version += 1;
+    this.doc.updatedAt = now;
+    this.flushSaveNow();
+
+    return {
+      ok: true,
+      amountPaid: payAmount,
+      employeeUsername: empAcc.username,
+      jobTitle: emp.jobTitle,
+      ownerProgress: nextOwnerProg,
+      employeeProgress: nextEmpProg,
+      roomsSnapshot: nextSnap,
+      worldState: this.doc.worldState,
+    };
+  }
+
+  getSupportModMessages(): SupportModMessage[] {
+    return this.doc.support_mod_messages ?? [];
+  }
+
+  appendSupportModMessage(msg: SupportModMessage): SupportModMessage[] {
+    const current = this.doc.support_mod_messages ?? [];
+    if (current.some((m) => m.id === msg.id)) {
+      return current;
+    }
+    const next = [...current, msg].slice(-150);
+    this.doc.support_mod_messages = next;
+    this.doc.version += 1;
+    this.doc.updatedAt = Date.now();
+    this.flushSaveNow();
+    return next;
   }
 }
 

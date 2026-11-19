@@ -32,6 +32,7 @@ import { SuiteRoom } from './components/SuiteRoom';
 import { VipCoinsStoreView } from './components/VipCoinsStoreView';
 import { VisitorProfileModal } from './components/VisitorProfileModal';
 import { ThreeSceneProvider } from './components/three/ThreeSceneProvider';
+import { useFirebase } from './context/FirebaseContext';
 import { useGameRealtime } from './context/GameRealtimeContext';
 import { getActiveSyncSocket } from './core/state/socketBridge';
 import {
@@ -118,6 +119,7 @@ export default function App() {
     accountIsVip,
     publishNewsPost,
   } = useGameRealtime();
+  const { firebaseUser, signOutFirebase } = useFirebase();
 
   const [activeTab, setActiveTab] = useState<GameTab>('medoll');
   const [staffSubTab, setStaffSubTab] = useState<StaffPanelSubTab | undefined>(undefined);
@@ -188,6 +190,9 @@ export default function App() {
   const handleLogout = () => {
     soundEngine.playEquip();
     logoutAccount();
+    if (firebaseUser) {
+      void signOutFirebase().catch(() => undefined);
+    }
     setSentinelLockoutReason(null);
     setCurrentUser(null);
     setActiveTab('medoll');

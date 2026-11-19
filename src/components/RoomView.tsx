@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Armchair,
   Ban,
+  Briefcase,
+  Check,
+  Coins,
   Crown,
   Disc3,
   DoorOpen,
@@ -21,6 +24,7 @@ import {
   Shirt,
   Sparkles,
   Trash2,
+  UserCog,
   UserMinus,
   Users,
   Volume2,
@@ -76,11 +80,20 @@ import {
   setSavedExitedRoomsMode,
   SharedRoomsSnapshot,
   updateCustomRoomBackground,
+  updateCustomRoomEmployees,
   updateCustomRoomNotice,
   updateCustomRoomProps,
   updateOfficialRoomSettings,
   upsertAvatarPresence,
 } from '../utils/realtime';
+import { resilientApiRequest } from '../utils/apiClient';
+import {
+  clearRoomMessagesInFirestore,
+  sendRoomMessageToFirestore,
+  subscribeRoomDjStateFromFirestore,
+  syncRoomDjStateToFirestore,
+} from '../firebase';
+import { useFirebase } from '../context/FirebaseContext';
 import {
   evaluateMessageWithSentinelBot,
   getSentinelAiBotForServer,
@@ -99,6 +112,7 @@ import {
   isClothingItemEquipped,
   isPrimaryAdminAccount,
   isVipAccount,
+  loadAccounts,
   normalizeUsername,
 } from '../utils/storage';
 import { ChatBox, ChatModCapability } from './ChatBox';
@@ -463,6 +477,19 @@ export const RoomView: React.FC<RoomViewProps> = ({
   const [adminThemeScope, setAdminThemeScope] = useState<'all' | 'current'>('all');
   const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
 
+  // Estado dos Modais de Empregos & Cargos na Sala ("Empregos nesta sala" e "Gerenciar Cargo")
+  const [showRoomJobsModal, setShowRoomJobsModal] = useState(false);
+  const [showManageJobsModal, setShowManageJobsModal] = useState(false);
+  const [jobTargetUsername, setJobTargetUsername] = useState('');
+  const [jobTitleInput, setJobTitleInput] = useState('');
+  const [jobWageInput, setJobWageInput] = useState('50');
+  const [jobPeriodInput, setJobPeriodInput] = useState<'hora' | 'semana' | 'mes'>('hora');
+  const [jobFormError, setJobFormError] = useState<string | null>(null);
+  const [jobPayFeedback, setJobPayFeedback] = useState<string | null>(null);
+  const [payingEmployeeKey, setPayingEmployeeKey] = useState<string | null>(null);
+  const [officialSupportInput, setOfficialSupportInput] = useState('');
+  const [officialSupportScope, setOfficialSupportScope] = useState<'current' | 'all'>('current');
+
   // Estado da Barra Inferior (Dock): Roupas e Móveis Adquiridos
   const [showWardrobeDrawer, setShowWardrobeDrawer] = useState(false);
   const [showFurnitureDrawer, setShowFurnitureDrawer] = useState(false);
@@ -816,6 +843,49 @@ export const RoomView: React.FC<RoomViewProps> = ({
           setSnapshot(readRoomsSnapshot());
         }
       },
+      onRoomPresenceDelta: (presence) => {
+        setSnapshot((prev) => ({
+          ...prev,
+          presences: {
+            ...prev.presences,
+            [presence.clientId]: { ...presence, lastSeen: Date.now() },
+          },
+        }));
+      },
+      onRoomPresenceRemoved: (removedClientId) => {
+        setSnapshot((prev) => {
+          if (!prev.presences[removedClientId]) return prev;
+          const nextPresences = { ...prev.presences };
+          delete nextPresences[removedClientId];
+          return { ...prev, presences: nextPresences };
+        });
+      },
+      onRoomChatBroadcast: ({ roomId, message, senderClientId }) => {
+        setSnapshot((prev) => {
+          const prevMsgs = prev.messagesByRoom[roomId] ?? [];
+          if (prevMsgs.some((m) => m.id === message.id)) return prev;
+          const nextPresences = { ...prev.presences };
+          if (senderClientId && nextPresences[senderClientId] && message.senderRole !== 'system') {
+            nextPresences[senderClientId] = {
+              ...nextPresences[senderClientId],
+              lastMessage: message.text,
+              lastMessageAt: message.createdAt,
+              lastSeen: Date.now(),
+            };
+          }
+          return {
+            ...prev,
+            presences: nextPresences,
+            messagesByRoom: {
+              ...prev.messagesByRoom,
+              [roomId]: [...prevMsgs, message].slice(-80),
+            },
+          };
+        });
+      },
+      onRoomSnapshotSync: (roomsSnapshot) => {
+        setSnapshot(roomsSnapshot);
+      },
       onDjSynced: ({ roomId, track }) => {
         setSnapshot((prev) => {
           const nextTracks = { ...(prev.djTracksByRoom ?? {}) };
@@ -904,8 +974,10 @@ export const RoomView: React.FC<RoomViewProps> = ({
     rawY: number,
     ignoreSeatCollision = false,
   ): { x: number; y: number } => {
-    let x = Math.max(1, Math.min(99, Number(rawX.toFixed(1))));
-    let y = Math.max(1, Math.min(99, Number(rawY.toFixed(1))));
+    const minY = activeRoom.walkMinY ?? 40;
+    const maxY = activeRoom.walkMaxY ?? 92;
+    let x = Math.max(4, Math.min(96, Number(rawX.toFixed(1))));
+    let y = Math.max(minY, Math.min(maxY, Number(rawY.toFixed(1))));
     if (!ignoreSeatCollision && Array.isArray(activeRoom.interactiveProps)) {
       for (const prop of activeRoom.interactiveProps) {
         if (!prop.collidable) continue;
@@ -915,8 +987,8 @@ export const RoomView: React.FC<RoomViewProps> = ({
         const dist = Math.hypot(dx, dy);
         if (dist < radius) {
           const angle = dist > 0.01 ? Math.atan2(dy, dx) : Math.PI / 2;
-          x = Math.max(1, Math.min(99, Number((prop.x + Math.cos(angle) * (radius + 0.8)).toFixed(1))));
-          y = Math.max(1, Math.min(99, Number((prop.y + Math.sin(angle) * (radius + 0.8)).toFixed(1))));
+          x = Math.max(4, Math.min(96, Number((prop.x + Math.cos(angle) * (radius + 0.8)).toFixed(1))));
+          y = Math.max(minY, Math.min(maxY, Number((prop.y + Math.sin(angle) * (radius + 0.8)).toFixed(1))));
         }
       }
     }
@@ -959,6 +1031,27 @@ export const RoomView: React.FC<RoomViewProps> = ({
       .filter((p) => p.roomId === activeRoomId)
       .sort((a, b) => a.y - b.y);
   }, [snapshot.presences, activeRoomId]);
+
+  // Enriquece avatares apenas com o cargo válido DENTRO desta sala (Suporte Oficial em sala oficial, ou emprego simples local em sala de usuário)
+  const enrichedAvatarsInRoom = useMemo(() => {
+    return avatarsInRoom.map((av) => {
+      const avNorm = normalizeUsername(av.username);
+      if (isCurrentRoomOfficial) {
+        const isSup = (activeRoom.supportStaff ?? []).some(
+          (uname) => normalizeUsername(uname) === avNorm,
+        );
+        return isSup
+          ? { ...av, isRoomSupport: true, roomJobTitle: 'Suporte' }
+          : { ...av, isRoomSupport: false, roomJobTitle: undefined };
+      }
+      const emp = (activeRoom.employees ?? []).find(
+        (e) => normalizeUsername(e.username) === avNorm,
+      );
+      return emp
+        ? { ...av, isRoomSupport: false, roomJobTitle: emp.jobTitle }
+        : { ...av, isRoomSupport: false, roomJobTitle: undefined };
+    });
+  }, [avatarsInRoom, isCurrentRoomOfficial, activeRoom.supportStaff, activeRoom.employees]);
 
   const serverAvatarCounts = useMemo(() => {
     const counts: Record<ServerRegion, number> = { BR: 0, ES: 0, EN: 0 };
@@ -1198,14 +1291,214 @@ export const RoomView: React.FC<RoomViewProps> = ({
   // Permissões e Handlers de Movimentação e Rotação de Objetos via Cursor do Mouse
   const isCustomOwner = Boolean(
     activeRoom.isCustom &&
-      activeRoom.creatorUsername &&
-      normalizeUsername(activeRoom.creatorUsername) === normalizeUsername(currentUser.username),
+      ((activeRoom.ownerId && activeRoom.ownerId === currentUser.id) ||
+        (activeRoom.creatorUsername &&
+          normalizeUsername(activeRoom.creatorUsername) === normalizeUsername(currentUser.username))),
   );
   const canEditCurrentRoomProps = Boolean(
     (canManageOfficialRooms && isCurrentRoomOfficial) ||
       isCustomOwner ||
       currentUser.role === 'admin',
   );
+
+  // Handlers de Empregos na Sala (Dono em salas de usuário | Admin em salas oficiais)
+  const handleAddOrUpdateCustomJob = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeRoom.isCustom || !isCustomOwner) return;
+    setJobFormError(null);
+    setJobPayFeedback(null);
+
+    const cleanTarget = normalizeUsername(jobTargetUsername);
+    const cleanTitle = jobTitleInput.trim().slice(0, 32);
+    const numericWage = Math.max(0, Math.round(Number(jobWageInput || 0)));
+
+    if (!cleanTarget) {
+      setJobFormError('Informe o nome do personagem para atribuir o cargo.');
+      return;
+    }
+    if (!cleanTitle) {
+      setJobFormError('Informe o nome do cargo (ex: DJ Residente, Recepcionista).');
+      return;
+    }
+
+    const matchedAcc =
+      loadAccounts().find((a) => normalizeUsername(a.username) === cleanTarget) ??
+      getAccountByIdOrUsername(undefined, cleanTarget);
+    const matchedUser = users.find((u) => normalizeUsername(u.username) === cleanTarget);
+    const resolvedUserId = matchedAcc?.id ?? matchedUser?.id ?? cleanTarget;
+    const resolvedUsername = matchedAcc?.username ?? matchedUser?.username ?? jobTargetUsername.trim().replace(/^@+/, '');
+
+    const currentList = [...(activeRoom.employees ?? [])];
+    const existingIdx = currentList.findIndex(
+      (emp) => normalizeUsername(emp.username) === cleanTarget,
+    );
+    const nextEntry = {
+      userId: resolvedUserId,
+      username: resolvedUsername,
+      jobTitle: cleanTitle,
+      wage: numericWage,
+      period: jobPeriodInput,
+      lastPaidAt: existingIdx >= 0 ? currentList[existingIdx].lastPaidAt : undefined,
+    };
+
+    if (existingIdx >= 0) {
+      currentList[existingIdx] = nextEntry;
+    } else {
+      currentList.push(nextEntry);
+    }
+
+    const nextSnap = updateCustomRoomEmployees(activeRoom.id, currentList, channelRef.current);
+    setSnapshot(nextSnap);
+    setJobTargetUsername('');
+    setJobTitleInput('');
+    setJobPayFeedback(`Cargo "${cleanTitle}" atribuído a ${resolvedUsername} nesta sala.`);
+    soundEngine.playPurchase();
+  };
+
+  const handleRemoveCustomJob = (empUsername: string) => {
+    if (!activeRoom.isCustom || !isCustomOwner) return;
+    const cleanTarget = normalizeUsername(empUsername);
+    const nextList = (activeRoom.employees ?? []).filter(
+      (emp) => normalizeUsername(emp.username) !== cleanTarget,
+    );
+    const nextSnap = updateCustomRoomEmployees(activeRoom.id, nextList, channelRef.current);
+    setSnapshot(nextSnap);
+    setJobPayFeedback(`Cargo de ${empUsername} removido desta sala.`);
+    soundEngine.playModAction();
+  };
+
+  const handlePayEmployeeSalary = async (emp: NonNullable<RoomDef['employees']>[number]) => {
+    if (!activeRoom.isCustom || !isCustomOwner) return;
+    setJobFormError(null);
+    setJobPayFeedback(null);
+
+    if (emp.wage <= 0) {
+      setJobFormError('Defina uma taxa de AM maior que 0 para realizar o pagamento.');
+      return;
+    }
+    if (playerState.starcoins < emp.wage) {
+      setJobFormError(`Saldo insuficiente (${playerState.starcoins.toLocaleString('pt-BR')} AM) para pagar ${emp.wage.toLocaleString('pt-BR')} AM.`);
+      return;
+    }
+
+    setPayingEmployeeKey(emp.username);
+    const res = await resilientApiRequest<{
+      ok?: boolean;
+      error?: string;
+      amountPaid?: number;
+      employeeUsername?: string;
+      roomsSnapshot?: SharedRoomsSnapshot;
+    }>('/api/rooms/pay-employee', {
+      method: 'POST',
+      headers: { 'x-actor-id': currentUser.id },
+      body: {
+        roomId: activeRoom.id,
+        ownerAccountId: currentUser.id,
+        employeeUserId: emp.userId || emp.username,
+        amount: emp.wage,
+      },
+      socketEvent: 'room:pay_employee',
+      socketPayload: {
+        roomId: activeRoom.id,
+        ownerAccountId: currentUser.id,
+        employeeUserId: emp.userId || emp.username,
+        amount: emp.wage,
+      },
+    });
+    setPayingEmployeeKey(null);
+
+    if (!res.ok) {
+      setJobFormError(res.error || 'Não foi possível pagar o salário em AM.');
+      soundEngine.playModAction();
+      return;
+    }
+
+    if (res.roomsSnapshot) {
+      setSnapshot(res.roomsSnapshot);
+    }
+    setJobPayFeedback(
+      `Salário de ${emp.wage.toLocaleString('pt-BR')} AM pago com sucesso para ${emp.username}!`,
+    );
+    soundEngine.playPurchase();
+  };
+
+  const handleAddOfficialSupport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isCurrentRoomOfficial || !canManageOfficialRooms) return;
+    setJobFormError(null);
+    setJobPayFeedback(null);
+
+    const cleanTarget = normalizeUsername(officialSupportInput);
+    if (!cleanTarget) {
+      setJobFormError('Informe o nome do jogador para nomear como Suporte Oficial.');
+      return;
+    }
+
+    const matchedAcc =
+      loadAccounts().find((a) => normalizeUsername(a.username) === cleanTarget) ??
+      getAccountByIdOrUsername(undefined, cleanTarget);
+    const matchedUser = users.find((u) => normalizeUsername(u.username) === cleanTarget);
+    const resolvedUsername =
+      matchedAcc?.username ??
+      matchedUser?.username ??
+      officialSupportInput.trim().replace(/^@+/, '');
+
+    const targetRoomIds: RoomId[] =
+      officialSupportScope === 'all'
+        ? [
+            'lounge_party',
+            'lounge_party_es',
+            'lounge_party_en',
+            'ilha_brasil',
+            'ilha_spanish',
+            'ilha_english',
+          ]
+        : [activeRoom.id];
+
+    for (const rid of targetRoomIds) {
+      const targetRoom = allRooms.find((r) => r.id === rid);
+      const prevSupport = targetRoom?.supportStaff ?? [];
+      if (prevSupport.some((uname) => normalizeUsername(uname) === cleanTarget)) {
+        continue;
+      }
+      const nextSupport = [...prevSupport, resolvedUsername];
+      updateOfficialRoomSettings([rid], { supportStaff: nextSupport }, channelRef.current);
+    }
+
+    setSnapshot(readRoomsSnapshot());
+    setOfficialSupportInput('');
+    setJobPayFeedback(
+      `${resolvedUsername} recebeu o cargo oficial Suporte (emblema S dourado brilhante).`,
+    );
+    soundEngine.playPurchase();
+  };
+
+  const handleRemoveOfficialSupport = (targetUsername: string) => {
+    if (!isCurrentRoomOfficial || !canManageOfficialRooms) return;
+    const cleanTarget = normalizeUsername(targetUsername);
+    const targetRoomIds: RoomId[] =
+      officialSupportScope === 'all'
+        ? [
+            'lounge_party',
+            'lounge_party_es',
+            'lounge_party_en',
+            'ilha_brasil',
+            'ilha_spanish',
+            'ilha_english',
+          ]
+        : [activeRoom.id];
+
+    for (const rid of targetRoomIds) {
+      const targetRoom = allRooms.find((r) => r.id === rid);
+      const nextSupport = (targetRoom?.supportStaff ?? []).filter(
+        (uname) => normalizeUsername(uname) !== cleanTarget,
+      );
+      updateOfficialRoomSettings([rid], { supportStaff: nextSupport }, channelRef.current);
+    }
+    setSnapshot(readRoomsSnapshot());
+    setJobPayFeedback(`Cargo Suporte removido de ${targetUsername}.`);
+    soundEngine.playModAction();
+  };
 
   const handlePropMoved = (propId: string, xPct: number, yPct: number) => {
     if (!canEditCurrentRoomProps) return;
@@ -1350,6 +1643,29 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   const currentRoomDjTrack = snapshot.djTracksByRoom?.[activeRoomId];
   const hasActiveDjVideo = Boolean(currentRoomDjTrack?.videoId);
+  const { firebaseUser } = useFirebase();
+
+  useEffect(() => {
+    if (hasExitedRoom || !firebaseUser || !activeRoomId) return;
+    const unsub = subscribeRoomDjStateFromFirestore(activeRoomId, (firestoreTrack) => {
+      if (firestoreTrack) {
+        const localTrack = snapshot.djTracksByRoom?.[activeRoomId];
+        if (!localTrack || localTrack.videoId !== firestoreTrack.videoId || Math.abs(localTrack.startedAt - firestoreTrack.startedAt) > 4000) {
+          const nextSnap = setRoomDjTrack(activeRoomId, firestoreTrack, channelRef.current);
+          setSnapshot(nextSnap);
+        }
+      } else {
+        const localTrack = snapshot.djTracksByRoom?.[activeRoomId];
+        if (localTrack) {
+          const nextSnap = clearRoomDjTrack(activeRoomId, channelRef.current);
+          setSnapshot(nextSnap);
+        }
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, [hasExitedRoom, firebaseUser, activeRoomId]);
 
   // Controlador oficial YouTube IFrame API (DJMediaSyncController) montado enquanto o usuário estiver dentro de uma sala
   useEffect(() => {
@@ -1494,6 +1810,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
     djControllerRef.current?.unlockAudio();
     const nextSnap = setRoomDjTrack(activeRoomId, newTrack, channelRef.current);
     setSnapshot(nextSnap);
+    void syncRoomDjStateToFirestore(activeRoomId, newTrack).catch(() => undefined);
 
     const noticeSnap = appendRoomMessage(
       activeRoomId,
@@ -1526,12 +1843,14 @@ export const RoomView: React.FC<RoomViewProps> = ({
       return;
     }
     const nextQueue = [...(currentRoomDjTrack.queue ?? []), item];
+    const nextTrack = { ...currentRoomDjTrack, queue: nextQueue };
     const nextSnap = setRoomDjTrack(
       activeRoomId,
-      { ...currentRoomDjTrack, queue: nextQueue },
+      nextTrack,
       channelRef.current,
     );
     setSnapshot(nextSnap);
+    void syncRoomDjStateToFirestore(activeRoomId, nextTrack).catch(() => undefined);
   };
 
   const handleRemoveFromDjQueue = (queueItemId: string) => {
@@ -1539,12 +1858,14 @@ export const RoomView: React.FC<RoomViewProps> = ({
     const nextQueue = (currentRoomDjTrack.queue ?? []).filter(
       (q) => q.id !== queueItemId,
     );
+    const nextTrack = { ...currentRoomDjTrack, queue: nextQueue };
     const nextSnap = setRoomDjTrack(
       activeRoomId,
-      { ...currentRoomDjTrack, queue: nextQueue },
+      nextTrack,
       channelRef.current,
     );
     setSnapshot(nextSnap);
+    void syncRoomDjStateToFirestore(activeRoomId, nextTrack).catch(() => undefined);
   };
 
   const handlePlayNextFromDjQueue = () => {
@@ -1569,20 +1890,22 @@ export const RoomView: React.FC<RoomViewProps> = ({
       const q = currentRoomDjTrack?.queue ?? [];
       if (q.length > 0) {
         const [nextItem, ...rest] = q;
+        const nextTrack = {
+          videoId: nextItem.videoId,
+          youtubeUrl: nextItem.youtubeUrl,
+          title: nextItem.title,
+          addedBy: nextItem.addedBy,
+          startedAt: Date.now(),
+          isPlaying: true,
+          queue: rest,
+        };
         const nextSnap = setRoomDjTrack(
           activeRoomId,
-          {
-            videoId: nextItem.videoId,
-            youtubeUrl: nextItem.youtubeUrl,
-            title: nextItem.title,
-            addedBy: nextItem.addedBy,
-            startedAt: Date.now(),
-            isPlaying: true,
-            queue: rest,
-          },
+          nextTrack,
           channelRef.current,
         );
         setSnapshot(nextSnap);
+        void syncRoomDjStateToFirestore(activeRoomId, nextTrack).catch(() => undefined);
       } else if (currentRoomDjTrack?.isPlaying) {
         controller.syncTrack({
           video_id: currentRoomDjTrack.videoId,
@@ -1598,6 +1921,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
     soundEngine.playModAction();
     const nextSnap = clearRoomDjTrack(activeRoomId, channelRef.current);
     setSnapshot(nextSnap);
+    void syncRoomDjStateToFirestore(activeRoomId, null).catch(() => undefined);
 
     const noticeSnap = appendRoomMessage(
       activeRoomId,
@@ -1706,7 +2030,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
 
   const handleSendChatMessage = (
     text: string,
-  ): { blocked: boolean; reason?: string } => {
+  ): { blocked: boolean; reason?: string; messageId?: string } => {
     if (myMutedUntil && myMutedUntil > Date.now()) {
       return {
         blocked: true,
@@ -1783,13 +2107,14 @@ export const RoomView: React.FC<RoomViewProps> = ({
     }
 
     const nowTime = Date.now();
+    const messageId = `msg_${nowTime}_${Math.random().toString(36).slice(2, 5)}`;
     myLastSpeechRef.current = { text, at: nowTime };
 
     soundEngine.playEquip();
     let nextSnap = appendRoomMessage(
       activeRoomId,
       {
-        id: `msg_${nowTime}_${Math.random().toString(36).slice(2, 5)}`,
+        id: messageId,
         roomId: activeRoomId,
         senderUsername: currentUser.username,
         senderRole: currentUser.role,
@@ -1824,7 +2149,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
     }
 
     setSnapshot(nextSnap);
-    return { blocked: false };
+    return { blocked: false, messageId };
   };
 
   const applyRoomBanToTarget = (
@@ -1964,6 +2289,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
       soundEngine.playModAction();
       const cleared = clearRoomMessages(activeRoomId, channelRef.current);
       setSnapshot(cleared);
+      void clearRoomMessagesInFirestore(activeRoomId).catch(() => {});
       return null;
     }
 
@@ -1979,23 +2305,37 @@ export const RoomView: React.FC<RoomViewProps> = ({
         onStaffNotice(noticeText);
       }
       onUpdateServerNotice?.(activeRoomServer, noticeText);
+      const sysId = `msg_sys_${Date.now()}`;
+      const sysSender =
+        cmd === '/evento'
+          ? `Evento (${activeRoomServer})`
+          : `Comunicado (${activeRoomServer})`;
+      const sysText = `Publicado por ${currentUser.displayName || currentUser.username}: "${noticeText}"`.slice(
+        0,
+        180,
+      );
       const nextSnap = appendRoomMessage(
         activeRoomId,
         {
-          id: `msg_sys_${Date.now()}`,
+          id: sysId,
           roomId: activeRoomId,
-          senderUsername:
-            cmd === '/evento'
-              ? `Evento (${activeRoomServer})`
-              : `Comunicado (${activeRoomServer})`,
+          senderUsername: sysSender,
           senderRole: 'system',
-          text: `Publicado por ${currentUser.displayName || currentUser.username}: "${noticeText}"`,
+          text: sysText,
           createdAt: Date.now(),
         },
         null,
         channelRef.current,
       );
       setSnapshot(nextSnap);
+      void sendRoomMessageToFirestore({
+        id: sysId,
+        roomId: activeRoomId,
+        senderUsername: sysSender,
+        senderRole: 'system',
+        isVip: false,
+        text: sysText,
+      }).catch(() => {});
       return null;
     }
 
@@ -2166,7 +2506,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
                 room.id === 'ilha_spanish' ||
                 room.id === 'ilha_english';
               const creatorDisplayName = isOfficial
-                ? 'Starlight Atelier'
+                ? 'Nocturne Vale Club'
                 : room.creatorUsername || 'Avatar';
 
               return (
@@ -2672,19 +3012,67 @@ export const RoomView: React.FC<RoomViewProps> = ({
               {activeRoom.creatorUsername && (
                 <span className="text-[11px] text-[#6B645D] truncate">
                   · Dono:{' '}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onOpenPublicProfile(activeRoom.creatorUsername ?? '')
-                    }
-                    className="font-bold text-[#1C1917] hover:text-[#C8235D] hover:underline cursor-pointer"
-                  >
-                    {activeRoom.creatorUsername}
-                  </button>
+                  {isCurrentRoomOfficial ? (
+                    <strong className="font-bold text-[#92400E]">
+                      Nocturne Vale Club
+                    </strong>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenPublicProfile(activeRoom.creatorUsername ?? '')
+                      }
+                      className="font-bold text-[#1C1917] hover:text-[#C8235D] hover:underline cursor-pointer"
+                    >
+                      {activeRoom.creatorUsername}
+                    </button>
+                  )}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Botão visível para TODOS verem quem trabalha nesta sala */}
+              <button
+                type="button"
+                onClick={() => setShowRoomJobsModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1C1917] bg-[#FAF8F5] hover:bg-[#EFEAE3] border border-[#D6CFC7] rounded-lg shadow-2xs transition-colors cursor-pointer"
+                title="Ver quem possui emprego ou suporte oficial nesta sala"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-[#C8235D]" />
+                <span>Empregos nesta sala</span>
+                {((isCurrentRoomOfficial
+                  ? activeRoom.supportStaff?.length
+                  : activeRoom.employees?.length) ?? 0) > 0 && (
+                  <span className="font-mono-num text-[10px] px-1.5 py-0.2 bg-[#C8235D]/15 text-[#C8235D] rounded-md font-extrabold">
+                    {isCurrentRoomOfficial
+                      ? activeRoom.supportStaff?.length
+                      : activeRoom.employees?.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Botão Gerenciar Cargo: visível APENAS para o dono da sala criada pelo usuário OU Admin em salas oficiais */}
+              {((activeRoom.isCustom && isCustomOwner) ||
+                (isCurrentRoomOfficial && canManageOfficialRooms)) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJobFormError(null);
+                    setJobPayFeedback(null);
+                    setShowManageJobsModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#78350F] bg-[#FFFBEB] hover:bg-[#FEF3C7] border border-[#F59E0B]/60 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title={
+                    isCurrentRoomOfficial
+                      ? 'Somente Administradores: Nomear usuários para o cargo Suporte (S dourado brilhante)'
+                      : 'Somente Dono da Sala: Contratar, remover ou pagar salários em AM nesta sala'
+                  }
+                >
+                  <UserCog className="w-3.5 h-3.5 text-[#B45309]" />
+                  <span>Gerenciar Cargo</span>
+                </button>
+              )}
+
               {/* Botões exclusivos do Administrador para gerenciar temática e mobília das Salas Oficiais */}
               {canManageOfficialRooms && (
                 <button
@@ -2700,8 +3088,6 @@ export const RoomView: React.FC<RoomViewProps> = ({
                   </span>
                 </button>
               )}
-
-
 
               {activeRoom.isCustom && isCustomOwner && (
                 <label
@@ -2878,7 +3264,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
                     ? resolvedWallpaperCatalog.find((w) => w.id === activeRoom.wallpaperId)
                     : undefined
                 }
-                presences={avatarsInRoom}
+                presences={enrichedAvatarsInRoom}
                 currentClientId={clientId}
                 clothingCatalog={resolvedClothingCatalog}
                 djPlaying={Boolean(currentRoomDjTrack?.isPlaying)}
@@ -3203,7 +3589,7 @@ export const RoomView: React.FC<RoomViewProps> = ({
                 />
               )}
 
-              {avatarsInRoom.map((avatar) => {
+              {enrichedAvatarsInRoom.map((avatar) => {
                 const isSelf = avatar.clientId === clientId;
                 const displayX = isSelf ? myPos.x : avatar.x;
                 const displayY = isSelf ? myPos.y : avatar.y;
@@ -3287,11 +3673,31 @@ export const RoomView: React.FC<RoomViewProps> = ({
                     >
                       {avatar.role === 'admin' && (
                         <ShieldCheck
-                          className={`w-3 h-3 ${isSelf ? 'text-[#F59EB8]' : 'text-[#C8235D]'}`}
+                          className={`w-3 h-3 ${isSelf ? 'text-[#F59E0B]' : 'text-[#C8235D]'}`}
                         />
+                      )}
+                      {avatar.isRoomSupport && (
+                        <span
+                          className="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-yellow-600 text-[#451A03] font-black text-[8px] shadow-[0_0_8px_rgba(251,191,36,0.95)] ring-1 ring-yellow-200 animate-pulse inline-flex items-center justify-center shrink-0"
+                          title="Suporte Oficial"
+                        >
+                          S
+                        </span>
                       )}
                       <span>{avatar.username}</span>
                     </button>
+
+                    {avatar.roomJobTitle && (
+                      <span
+                        className={`mb-1 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
+                          avatar.isRoomSupport
+                            ? 'bg-[#1C1917]/90 text-amber-300 border border-amber-400/50'
+                            : 'bg-[#1C1917]/80 text-stone-200 border border-white/15'
+                        }`}
+                      >
+                        {avatar.roomJobTitle}
+                      </span>
+                    )}
 
                     <button
                       type="button"
@@ -3836,10 +4242,13 @@ export const RoomView: React.FC<RoomViewProps> = ({
         {/* Chat Lateral (4 colunas) */}
         <div className="lg:col-span-4">
           <ChatBox
+            roomId={activeRoomId}
             roomName={activeRoom.name}
             messages={roomMessages}
             presencesInRoom={avatarsInRoom}
             currentUsername={currentUser.username}
+            currentUserRole={currentUser.role}
+            currentUserIsVip={isVipAccount(currentUser)}
             modCapability={chatModCapability}
             modLabel={chatModLabel}
             sentinelLabel={
@@ -4125,6 +4534,458 @@ export const RoomView: React.FC<RoomViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal 2: Empregos nesta sala (Visível para TODOS os usuários) */}
+      {showRoomJobsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Empregos nesta sala"
+        >
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#DFD8CE] overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-6 py-4 bg-[#1C1917] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Briefcase className="w-5 h-5 text-[#F59E0B]" />
+                <div>
+                  <h3 className="text-base font-bold">
+                    Empregos nesta sala
+                  </h3>
+                  <p className="text-xs text-stone-300">
+                    {activeRoom.name} ·{' '}
+                    {isCurrentRoomOfficial
+                      ? 'Equipe Oficial de Suporte'
+                      : 'Cargos locais exibidos apenas dentro desta sala'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoomJobsModal(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-stone-300 hover:text-white cursor-pointer"
+                aria-label="Fechar modal de empregos"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-3">
+              {isCurrentRoomOfficial ? (
+                (activeRoom.supportStaff ?? []).length === 0 ? (
+                  <div className="p-6 text-center rounded-xl bg-[#FAF8F5] border border-dashed border-[#DFD8CE] text-xs text-[#6B645D]">
+                    Nenhum membro com cargo de <strong>Suporte</strong> nomeado nesta sala oficial no momento.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {(activeRoom.supportStaff ?? []).map((supName) => (
+                      <div
+                        key={supName}
+                        className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FCD34D] flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-yellow-600 text-[#451A03] font-black text-sm shadow-[0_0_12px_rgba(251,191,36,0.9)] ring-2 ring-yellow-200 animate-pulse flex items-center justify-center shrink-0">
+                            S
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-[#1C1917] truncate">
+                              {supName}
+                            </p>
+                            <p className="text-xs font-semibold text-[#92400E]">
+                              Cargo Oficial: Suporte · Tire dúvidas no chat ou moderação
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowRoomJobsModal(false);
+                            onOpenPublicProfile(supName);
+                          }}
+                          className="px-3 py-1.5 text-xs font-semibold bg-white border border-[#FCD34D] text-[#78350F] rounded-lg hover:bg-[#FEF3C7] shrink-0 cursor-pointer"
+                        >
+                          Ver Perfil
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (activeRoom.employees ?? []).length === 0 ? (
+                <div className="p-6 text-center rounded-xl bg-[#FAF8F5] border border-dashed border-[#DFD8CE] text-xs text-[#6B645D]">
+                  Ainda não há pessoas contratadas nesta sala.
+                  {isCustomOwner &&
+                    ' Clique em "Gerenciar Cargo" para contratar ou pagar colaboradores.'}
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {(activeRoom.employees ?? []).map((emp) => (
+                    <div
+                      key={emp.username}
+                      className="p-3.5 rounded-xl bg-[#FAF8F5] border border-[#E6E0D8] flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#1C1917] truncate">
+                          {emp.username}
+                        </p>
+                        <p className="text-xs font-semibold text-[#C8235D]">
+                          Cargo na sala: {emp.jobTitle}
+                        </p>
+                        <p className="text-[11px] text-[#6B645D] mt-0.5">
+                          Taxa combinada:{' '}
+                          <strong className="font-mono-num text-[#1C1917]">
+                            {emp.wage.toLocaleString('pt-BR')} AM
+                          </strong>{' '}
+                          / {emp.period === 'hora' ? 'hora' : emp.period === 'semana' ? 'semana' : 'mês'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowRoomJobsModal(false);
+                          onOpenPublicProfile(emp.username);
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white border border-[#E6E0D8] text-[#1C1917] rounded-lg hover:border-[#C8235D] shrink-0 cursor-pointer"
+                      >
+                        Perfil
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 bg-[#F5F2EC] border-t border-[#E6E0D8] flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowRoomJobsModal(false)}
+                className="px-4 py-1.5 text-xs font-semibold text-[#1C1917] bg-white border border-[#D6D3D1] rounded-lg hover:bg-[#FAF8F5] cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Gerenciar Cargo (Apenas Dono da sala de usuário OU Admin em sala oficial) */}
+      {showManageJobsModal &&
+        ((activeRoom.isCustom && isCustomOwner) ||
+          (isCurrentRoomOfficial && canManageOfficialRooms)) && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Gerenciar Cargo"
+          >
+            <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-[#DFD8CE] overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="px-6 py-4 bg-[#1C1917] text-white flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <UserCog className="w-5 h-5 text-[#F59E0B]" />
+                  <div>
+                    <h3 className="text-base font-bold">
+                      Gerenciar Cargo — {activeRoom.name}
+                    </h3>
+                    <p className="text-xs text-stone-300">
+                      {isCurrentRoomOfficial
+                        ? 'Administração: Nomear jogadores ao cargo Suporte com emblema S dourado brilhante (sem poderes punitivos).'
+                        : 'Dono da Sala: Contrate jogadores, defina taxa em AM (hora/semana/mês) e pague salários diretamente.'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManageJobsModal(false)}
+                  className="p-1 rounded-lg hover:bg-white/10 text-stone-300 hover:text-white cursor-pointer"
+                  aria-label="Fechar gerenciador de cargos"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-5">
+                {jobFormError && (
+                  <p className="text-xs font-semibold text-[#B91C1C] bg-[#FEF2F2] border border-[#FECACA] px-3 py-2 rounded-lg">
+                    {jobFormError}
+                  </p>
+                )}
+                {jobPayFeedback && (
+                  <p className="text-xs font-semibold text-[#065F46] bg-[#ECFDF5] border border-[#A7F3D0] px-3 py-2 rounded-lg flex items-center gap-1.5">
+                    <Check className="w-4 h-4 shrink-0" />
+                    <span>{jobPayFeedback}</span>
+                  </p>
+                )}
+
+                {isCurrentRoomOfficial ? (
+                  <>
+                    <form onSubmit={handleAddOfficialSupport} className="p-4 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#78350F] flex items-center gap-1.5">
+                          <span className="w-4 h-4 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-yellow-600 text-[#451A03] font-black text-[9px] inline-flex items-center justify-center">
+                            S
+                          </span>
+                          Conceder Cargo Oficial: Suporte
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setOfficialSupportScope('current')}
+                            className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                              officialSupportScope === 'current'
+                                ? 'bg-[#1C1917] text-white'
+                                : 'bg-white text-[#78350F] border border-[#FCD34D]'
+                            }`}
+                          >
+                            Apenas nesta sala
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOfficialSupportScope('all')}
+                            className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                              officialSupportScope === 'all'
+                                ? 'bg-[#1C1917] text-white'
+                                : 'bg-white text-[#78350F] border border-[#FCD34D]'
+                            }`}
+                          >
+                            Todas Salas Oficiais
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={officialSupportInput}
+                          onChange={(e) => setOfficialSupportInput(e.target.value)}
+                          placeholder="Nome do personagem (ex: maria)"
+                          className="flex-1 px-3 py-2 text-xs bg-white border border-[#FCD34D] rounded-lg focus:outline-none focus:border-[#B45309]"
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-2 text-xs font-bold text-white bg-[#B45309] hover:bg-[#92400E] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          Nomear Suporte
+                        </button>
+                      </div>
+
+                      {avatarsInRoom.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[10px] font-semibold text-[#92400E]">
+                            Na sala agora:
+                          </span>
+                          {avatarsInRoom.map((av) => (
+                            <button
+                              key={av.clientId}
+                              type="button"
+                              onClick={() => setOfficialSupportInput(av.username)}
+                              className="px-2 py-0.5 text-[11px] font-semibold bg-white border border-[#FCD34D] text-[#78350F] rounded hover:bg-[#FEF3C7] cursor-pointer"
+                            >
+                              {av.username}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </form>
+
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#57534E]">
+                        Suportes Ativos em {activeRoom.name} ({(activeRoom.supportStaff ?? []).length})
+                      </h4>
+                      {(activeRoom.supportStaff ?? []).length === 0 ? (
+                        <p className="text-xs text-[#6B645D] py-3">
+                          Nenhum usuário atribuído como Suporte nesta sala oficial.
+                        </p>
+                      ) : (
+                        (activeRoom.supportStaff ?? []).map((supName) => (
+                          <div
+                            key={supName}
+                            className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E6E0D8] flex items-center justify-between gap-2"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-6 h-6 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-yellow-600 text-[#451A03] font-black text-xs shadow-[0_0_10px_rgba(251,191,36,0.9)] ring-1 ring-yellow-200 animate-pulse flex items-center justify-center shrink-0">
+                                S
+                              </span>
+                              <div>
+                                <p className="text-xs font-bold text-[#1C1917]">{supName}</p>
+                                <p className="text-[11px] text-[#92400E] font-semibold">
+                                  Suporte Oficial · Destaque na aba Moderação
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveOfficialSupport(supName)}
+                              className="px-2.5 py-1 text-[11px] font-bold text-[#B91C1C] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] rounded-lg cursor-pointer"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <form onSubmit={handleAddOrUpdateCustomJob} className="p-4 rounded-xl bg-[#FAF8F5] border border-[#E6E0D8] space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#1C1917]">
+                          Dar Emprego &amp; Definir Salário em AM
+                        </span>
+                        <span className="text-[11px] font-semibold text-[#6B645D]">
+                          Seu saldo:{' '}
+                          <strong className="font-mono-num text-[#B45309]">
+                            {playerState.starcoins.toLocaleString('pt-BR')} AM
+                          </strong>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <input
+                          type="text"
+                          value={jobTargetUsername}
+                          onChange={(e) => setJobTargetUsername(e.target.value)}
+                          placeholder="Nome do avatar (ex: joao)"
+                          className="px-3 py-2 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                        />
+                        <input
+                          type="text"
+                          maxLength={32}
+                          value={jobTitleInput}
+                          onChange={(e) => setJobTitleInput(e.target.value)}
+                          placeholder="Cargo (ex: Barista, Segurança, DJ)"
+                          className="px-3 py-2 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={jobWageInput}
+                            onChange={(e) => setJobWageInput(e.target.value)}
+                            placeholder="Taxa de AM"
+                            className="w-full px-3 py-2 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                          />
+                          <span className="text-xs font-bold text-[#B45309] shrink-0">AM</span>
+                        </div>
+                        <select
+                          value={jobPeriodInput}
+                          onChange={(e) =>
+                            setJobPeriodInput(e.target.value as 'hora' | 'semana' | 'mes')
+                          }
+                          className="px-3 py-2 text-xs bg-white border border-[#E6E0D8] rounded-lg focus:outline-none focus:border-[#C8235D]"
+                        >
+                          <option value="hora">Por Hora</option>
+                          <option value="semana">Por Semana</option>
+                          <option value="mes">Por Mês</option>
+                        </select>
+                      </div>
+
+                      {avatarsInRoom.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-semibold text-[#6B645D]">
+                            Selecionar avatar presente:
+                          </span>
+                          {avatarsInRoom
+                            .filter(
+                              (av) =>
+                                normalizeUsername(av.username) !==
+                                normalizeUsername(currentUser.username),
+                            )
+                            .map((av) => (
+                              <button
+                                key={av.clientId}
+                                type="button"
+                                onClick={() => setJobTargetUsername(av.username)}
+                                className="px-2 py-0.5 text-[11px] font-semibold bg-white border border-[#E6E0D8] rounded hover:border-[#C8235D] cursor-pointer"
+                              >
+                                {av.username}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <span className="text-[10px] text-[#6B645D]">
+                          Cargos de sala não recebem emblema especial e aparecem apenas dentro desta sala.
+                        </span>
+                        <button
+                          type="submit"
+                          className="px-4 py-2 text-xs font-bold text-white bg-[#C8235D] hover:bg-[#A61B4B] rounded-lg transition-colors cursor-pointer shrink-0"
+                        >
+                          Salvar Cargo
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#57534E]">
+                        Funcionários Contratados ({(activeRoom.employees ?? []).length})
+                      </h4>
+                      {(activeRoom.employees ?? []).length === 0 ? (
+                        <p className="text-xs text-[#6B645D] py-2">
+                          Nenhum colaborador contratado nesta sala ainda.
+                        </p>
+                      ) : (
+                        (activeRoom.employees ?? []).map((emp) => (
+                          <div
+                            key={emp.username}
+                            className="p-3.5 rounded-xl bg-white border border-[#E6E0D8] flex flex-wrap items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-[#1C1917]">
+                                {emp.username} ·{' '}
+                                <span className="text-[#C8235D]">{emp.jobTitle}</span>
+                              </p>
+                              <p className="text-[11px] text-[#6B645D] mt-0.5">
+                                Taxa:{' '}
+                                <strong className="font-mono-num text-[#1C1917]">
+                                  {emp.wage.toLocaleString('pt-BR')} AM
+                                </strong>{' '}
+                                / {emp.period === 'hora' ? 'hora' : emp.period === 'semana' ? 'semana' : 'mês'}
+                                {emp.lastPaidAt &&
+                                  ` · Último pagamento: ${new Date(emp.lastPaidAt).toLocaleString('pt-BR')}`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                disabled={payingEmployeeKey === emp.username || emp.wage <= 0}
+                                onClick={() => void handlePayEmployeeSalary(emp)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg cursor-pointer"
+                              >
+                                <Coins className="w-3.5 h-3.5" />
+                                <span>
+                                  {payingEmployeeKey === emp.username
+                                    ? 'Pagando...'
+                                    : `Pagar ${emp.wage.toLocaleString('pt-BR')} AM`}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomJob(emp.username)}
+                                className="px-2.5 py-1.5 text-[11px] font-bold text-[#B91C1C] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] rounded-lg cursor-pointer"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="px-6 py-3 bg-[#F5F2EC] border-t border-[#E6E0D8] flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowManageJobsModal(false)}
+                  className="px-4 py-1.5 text-xs font-semibold text-[#1C1917] bg-white border border-[#D6D3D1] rounded-lg hover:bg-[#FAF8F5] cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
     </div>
   );

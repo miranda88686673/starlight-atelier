@@ -165,3 +165,25 @@ export function validateCharacterName(raw: string): string | null {
   }
   return null;
 }
+
+/** Retorna true se a conta for a conta administradora raiz com AM infinito */
+export function isInfiniteAdminAccount(
+  account?: {
+    id?: string;
+    email?: string;
+    role?: string;
+    staffRoleTier?: string;
+    isPrimaryOwner?: boolean;
+  } | null,
+): boolean {
+  if (!account) return false;
+  const email = (account.email || '').trim().toLowerCase();
+  return Boolean(
+    account.isPrimaryOwner ||
+      account.id === 'acc_admin_owner' ||
+      account.role === 'admin' ||
+      account.staffRoleTier === 'admin' ||
+      email === 'miranda88686673@gmail.com',
+  );
+}
+

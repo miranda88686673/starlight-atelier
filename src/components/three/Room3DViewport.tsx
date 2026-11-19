@@ -61,6 +61,8 @@ interface ProjectedLabel {
   username: string;
   level?: number;
   officialRoleLabel?: string;
+  roomJobTitle?: string;
+  isRoomSupport?: boolean;
   screenX: number;
   screenY: number;
   headScreenX: number;
@@ -214,6 +216,15 @@ export const Room3DViewport: React.FC<Room3DViewportProps> = ({
       }
 
       noiseNode = whiteNoise;
+
+      if (audioCtx.state === 'suspended') {
+        const resumeAudio = () => {
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+          }
+        };
+        window.addEventListener('pointerdown', resumeAudio, { once: true });
+      }
     } catch {
       // Audio restrictions
     }
@@ -754,6 +765,8 @@ export const Room3DViewport: React.FC<Room3DViewportProps> = ({
             username: p.username,
             level: p.level ?? 1,
             officialRoleLabel: p.officialRoleLabel,
+            roomJobTitle: p.roomJobTitle,
+            isRoomSupport: p.isRoomSupport,
             screenX: sx,
             screenY: sy,
             headScreenX: headSx,
@@ -1070,6 +1083,23 @@ export const Room3DViewport: React.FC<Room3DViewportProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* Linha 3: Cargo Oficial de Suporte (S dourado brilhante) OU Cargo simples da sala atual (sem emblema) */}
+              {lbl.isRoomSupport ? (
+                <div className="flex items-center gap-1.5 text-[9px] font-extrabold text-amber-300 tracking-wide pt-0.5 border-t border-white/10 w-full justify-center">
+                  <span
+                    className="w-4 h-4 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-yellow-600 text-[#451A03] font-black text-[9px] shadow-[0_0_10px_rgba(251,191,36,0.95)] ring-1 ring-yellow-200 animate-pulse inline-flex items-center justify-center shrink-0"
+                    aria-hidden="true"
+                  >
+                    S
+                  </span>
+                  <span>Suporte</span>
+                </div>
+              ) : lbl.roomJobTitle ? (
+                <div className="text-[9px] font-semibold text-stone-200 tracking-wide pt-0.5 border-t border-white/10 w-full text-center">
+                  {lbl.roomJobTitle}
+                </div>
+              ) : null}
             </div>
           </div>
         ))}

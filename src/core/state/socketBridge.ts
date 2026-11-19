@@ -7,6 +7,7 @@ import type { Socket } from 'socket.io-client';
 import type {
   DjMediaSyncPayload,
   PresenceHeartbeatRecord,
+  RoomMutationPayload,
   ServerDatabaseDocument,
   StaffAuditLogEntry,
   StateSyncPatchPayload,
@@ -16,11 +17,15 @@ import type {
   MarketListing,
   PremiumOrder,
   PremiumPixConfig,
+  RoomAvatarPresence,
+  RoomChatMessage,
   RoomDjTrack,
   RoomHealthMetric,
   RoomId,
+  SupportModMessage,
   SupportTicket,
 } from '../../types/game';
+import type { SharedRoomsSnapshot } from '../../utils/realtime';
 
 export interface RoomTerminatedNotice {
   roomId: string;
@@ -43,6 +48,15 @@ export type RemoteSyncListener = {
   onPremiumOrdersUpdated?: (orders: PremiumOrder[]) => void;
   onPremiumPixUpdated?: (config: PremiumPixConfig) => void;
   onMarketListingsUpdated?: (listings: MarketListing[]) => void;
+  onRoomPresenceDelta?: (presence: RoomAvatarPresence) => void;
+  onRoomPresenceRemoved?: (clientId: string) => void;
+  onRoomChatBroadcast?: (data: {
+    roomId: RoomId;
+    message: RoomChatMessage;
+    senderClientId?: string | null;
+  }) => void;
+  onRoomSnapshotSync?: (roomsSnapshot: SharedRoomsSnapshot) => void;
+  onSupportModMessagesUpdated?: (messages: SupportModMessage[]) => void;
 };
 
 let activeSocket: Socket | null = null;
@@ -132,10 +146,82 @@ export function notifyRemoteMarketListings(listings: MarketListing[]): void {
   listeners.forEach((l) => l.onMarketListingsUpdated?.(listings));
 }
 
+export function notifyRoomPresenceDelta(presence: RoomAvatarPresence): void {
+  listeners.forEach((l) => l.onRoomPresenceDelta?.(presence));
+}
+
+export function notifyRoomPresenceRemoved(clientId: string): void {
+  listeners.forEach((l) => l.onRoomPresenceRemoved?.(clientId));
+}
+
+export function notifyRoomChatBroadcast(data: {
+  roomId: RoomId;
+  message: RoomChatMessage;
+  senderClientId?: string | null;
+}): void {
+  listeners.forEach((l) => l.onRoomChatBroadcast?.(data));
+}
+
+export function notifyRoomSnapshotSync(roomsSnapshot: SharedRoomsSnapshot): void {
+  listeners.forEach((l) => l.onRoomSnapshotSync?.(roomsSnapshot));
+}
+
+export function notifySupportModMessages(messages: SupportModMessage[]): void {
+  listeners.forEach((l) => l.onSupportModMessagesUpdated?.(messages));
+}
+
 export function emitRoomTelemetryPing(roomId: RoomId, latencyMs = 28): void {
   if (activeSocket && activeSocket.connected && roomId) {
     activeSocket.emit('room:telemetry_ping', { roomId, latencyMs });
   }
+}
+
+/** Envia atualização atômica da presença do avatar local (sem sobrescrever outros IPs) */
+export function emitRoomPresenceUpsert(presence: RoomAvatarPresence): boolean {
+  if (applyingRemoteSync) return false;
+  if (activeSocket && activeSocket.connected) {
+    activeSocket.emit('room:presence_upsert', { presence });
+    return true;
+  }
+  return false;
+}
+
+/** Remove presença atômica de uma sala/aba no servidor */
+export function emitRoomPresenceLeave(clientId: string): boolean {
+  if (applyingRemoteSync) return false;
+  if (activeSocket && activeSocket.connected) {
+    activeSocket.emit('room:presence_leave', { clientId });
+    return true;
+  }
+  return false;
+}
+
+/** Envia mensagem de chat em sala de forma atômica */
+export function emitRoomChatSend(
+  roomId: RoomId,
+  message: RoomChatMessage,
+  senderClientId?: string | null,
+): boolean {
+  if (applyingRemoteSync) return false;
+  if (activeSocket && activeSocket.connected) {
+    activeSocket.emit('room:chat_send', {
+      roomId,
+      message,
+      senderClientId: senderClientId ?? null,
+    });
+    return true;
+  }
+  return false;
+}
+
+/** Envia mutação estrutural de sala (criar/editar/excluir/empregos/oficiais/kick/limpar) */
+export function emitRoomMutation(action: RoomMutationPayload): boolean {
+  if (applyingRemoteSync) return false;
+  if (activeSocket && activeSocket.connected) {
+    activeSocket.emit('room:mutate', action);
+    return true;
+  }
+  return false;
 }
 
 /** Envia atualização parcial para o servidor Socket.io (com fallback REST se desconectado) */

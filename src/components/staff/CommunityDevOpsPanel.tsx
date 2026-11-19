@@ -18,6 +18,7 @@ import type {
 } from '../../types/game';
 import { useGlobalState } from '../../core/state/GlobalStateManager';
 import { resolveCoreStaffRole } from '../../core/security/RoleGuard';
+import { resilientApiRequest } from '../../utils/apiClient';
 
 interface CommunityDevOpsPanelProps {
   currentUser: UserAccount;
@@ -92,17 +93,27 @@ export const CommunityDevOpsPanel: React.FC<CommunityDevOpsPanelProps> = ({
     if (!text || busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/support/tickets/${ticket.id}/reply`, {
-        method: 'POST',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          text,
-          senderName: actorName,
-          senderRole: role === 'admin' ? 'admin' : 'cm',
-          actorId: currentUser.id,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/support/tickets/${encodeURIComponent(ticket.id)}/reply`,
+        {
+          method: 'POST',
+          headers: staffHeaders,
+          body: {
+            text,
+            senderName: actorName,
+            senderRole: role === 'admin' ? 'admin' : 'cm',
+            actorId: currentUser.id,
+          },
+          socketEvent: 'support:reply_ticket',
+          socketPayload: {
+            ticketId: ticket.id,
+            text,
+            senderName: actorName,
+            senderRole: role === 'admin' ? 'admin' : 'cm',
+            actorId: currentUser.id,
+          },
+        },
+      );
       if (data.ok) {
         setTicketReplyById((prev) => ({ ...prev, [ticket.id]: '' }));
         setFeedback(
@@ -124,16 +135,18 @@ export const CommunityDevOpsPanel: React.FC<CommunityDevOpsPanelProps> = ({
     setBusy(true);
     try {
       const optionalReply = (ticketReplyById[ticket.id] || '').trim();
-      const res = await fetch(`/api/support/tickets/${ticket.id}`, {
-        method: 'PATCH',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          replyText: optionalReply || undefined,
-          status: 'resolved',
-          cmUsername: actorName,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/support/tickets/${encodeURIComponent(ticket.id)}`,
+        {
+          method: 'PATCH',
+          headers: staffHeaders,
+          body: {
+            replyText: optionalReply || undefined,
+            status: 'resolved',
+            cmUsername: actorName,
+          },
+        },
+      );
       if (data.ok) {
         setTicketReplyById((prev) => ({ ...prev, [ticket.id]: '' }));
         setFeedback(`Ticket #${ticket.id.slice(-8)} marcado como resolvido (histórico preservado).`);
@@ -154,15 +167,17 @@ export const CommunityDevOpsPanel: React.FC<CommunityDevOpsPanelProps> = ({
     if (!cleaned || busy) return;
     setBusy(true);
     try {
-      const res = await fetch('/api/premium-pix-config', {
-        method: 'PUT',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          pixKey: cleaned,
-          actorUsername: actorName,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        '/api/premium-pix-config',
+        {
+          method: 'PUT',
+          headers: staffHeaders,
+          body: {
+            pixKey: cleaned,
+            actorUsername: actorName,
+          },
+        },
+      );
       if (data.ok) {
         setFeedback(`Chave PIX da Loja Premium atualizada para "${cleaned}".`);
         await refreshPremiumPixConfig();
@@ -181,16 +196,25 @@ export const CommunityDevOpsPanel: React.FC<CommunityDevOpsPanelProps> = ({
     if (!text || busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/premium-orders/${order.id}/message`, {
-        method: 'POST',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          text,
-          senderName: actorName,
-          actorId: currentUser.id,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/premium-orders/${encodeURIComponent(order.id)}/message`,
+        {
+          method: 'POST',
+          headers: staffHeaders,
+          body: {
+            text,
+            senderName: actorName,
+            actorId: currentUser.id,
+          },
+          socketEvent: 'premium:message_order',
+          socketPayload: {
+            orderId: order.id,
+            text,
+            senderName: actorName,
+            actorId: currentUser.id,
+          },
+        },
+      );
       if (data.ok) {
         setOrderReplyById((prev) => ({ ...prev, [order.id]: '' }));
         setFeedback(`Mensagem enviada no chat do pedido #${order.id.slice(-8)}.`);
@@ -213,16 +237,18 @@ export const CommunityDevOpsPanel: React.FC<CommunityDevOpsPanelProps> = ({
     setBusy(true);
     try {
       const note = (orderReplyById[order.id] || '').trim() || undefined;
-      const res = await fetch(`/api/premium-orders/${order.id}/decide`, {
-        method: 'POST',
-        headers: staffHeaders,
-        body: JSON.stringify({
-          decision,
-          note,
-          actorUsername: actorName,
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await resilientApiRequest<{ ok?: boolean; error?: string }>(
+        `/api/premium-orders/${encodeURIComponent(order.id)}/decide`,
+        {
+          method: 'POST',
+          headers: staffHeaders,
+          body: {
+            decision,
+            note,
+            actorUsername: actorName,
+          },
+        },
+      );
       if (data.ok) {
         setOrderReplyById((prev) => ({ ...prev, [order.id]: '' }));
         setFeedback(

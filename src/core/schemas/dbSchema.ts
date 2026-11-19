@@ -16,12 +16,15 @@ import type {
   PremiumOrder,
   PremiumPixConfig,
   PrivateMessage,
+  RoomBackdropTheme,
   RoomDef,
   RoomDjQueuedTrack,
   RoomDjTrack,
   RoomHealthMetric,
   RoomId,
+  RoomInteractiveProp,
   ServerRegion,
+  SupportModMessage,
   SupportTicket,
   UserAccount,
   WorldModerationState,
@@ -144,7 +147,41 @@ export interface ServerDatabaseDocument {
   room_health: Record<string, RoomHealthMetric>;
   password_reset_tokens?: PasswordResetTokenRecord[];
   market_listings?: MarketListing[];
+  support_mod_messages?: SupportModMessage[];
 }
+
+/** Mutação atômica de sala enviada via Socket.io para evitar sobrescritas concorrentes */
+export type RoomMutationPayload =
+  | { type: 'create_custom'; room: RoomDef }
+  | { type: 'delete_custom'; roomId: RoomId }
+  | {
+      type: 'update_custom';
+      roomId: RoomId;
+      patch: {
+        roomNotice?: string | null;
+        byUsername?: string;
+        customBackgroundImageUrl?: string | null;
+        interactiveProps?: RoomInteractiveProp[];
+        employees?: RoomDef['employees'];
+      };
+    }
+  | {
+      type: 'update_official';
+      roomIds: RoomId[];
+      updates: {
+        backdropTheme?: RoomBackdropTheme;
+        interactiveProps?: RoomInteractiveProp[];
+        supportStaff?: string[];
+      };
+    }
+  | {
+      type: 'kick_avatar';
+      roomId: RoomId;
+      targetClientId: string;
+      targetUsername: string;
+      byUsername: string;
+    }
+  | { type: 'clear_messages'; roomId: RoomId };
 
 /** Subconjunto sincronizável via patch em tempo real */
 export interface StateSyncPatchPayload {
@@ -162,6 +199,7 @@ export interface StateSyncPatchPayload {
   premium_orders?: PremiumOrder[];
   premium_pix_config?: PremiumPixConfig;
   market_listings?: MarketListing[];
+  support_mod_messages?: SupportModMessage[];
   djTrackUpdate?: {
     roomId: RoomId;
     track: RoomDjTrack | null;

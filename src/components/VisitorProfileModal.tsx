@@ -117,6 +117,14 @@ export const VisitorProfileModal: React.FC<VisitorProfileModalProps> = ({
     };
     window.addEventListener('storage', onStorage);
 
+    const unsubRemote = subscribeRemoteSync({
+      onPatch: (patch) => {
+        if (patch.dms) {
+          setMessages(loadPrivateMessagesBetween(currentUser.username, profile.username));
+        }
+      },
+    });
+
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
       channel = new BroadcastChannel('starlight_atelier_realtime_v1');
@@ -129,6 +137,7 @@ export const VisitorProfileModal: React.FC<VisitorProfileModalProps> = ({
 
     return () => {
       window.removeEventListener('storage', onStorage);
+      unsubRemote();
       channel?.close();
     };
   }, [currentUser.username, profile.username]);
@@ -469,7 +478,7 @@ export const VisitorProfileModal: React.FC<VisitorProfileModalProps> = ({
                     Biografia / Recado
                   </h3>
                   <p className="mt-1.5 text-sm text-[#1C1917] bg-[#FAF8F5] border border-[#EFEAE3] rounded-xl px-4 py-3 leading-relaxed">
-                    “{profile.bio || 'Explorando estilos no Starlight Atelier.'}”
+                    “{profile.bio || 'Explorando estilos no Nocturne Vale Club.'}”
                   </p>
                 </div>
 

@@ -1,11 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Loader2, Mic, Send, ShieldAlert, ShieldCheck, Square, X } from 'lucide-react';
 import {
   ChatSenderAvatar,
   RoomAvatarPresence,
   RoomChatMessage,
+  RoomId,
   UserRole,
 } from '../types/game';
+import { useFirebase } from '../context/FirebaseContext';
+import {
+  sendRoomMessageToFirestore,
+  subscribeRoomMessagesFromFirestore,
+} from '../firebase';
 import { normalizeUsername } from '../utils/storage';
 import { ProfileAvatar } from './ProfileAvatar';
 import { StaffRoleBadge, VipBadge } from './StaffDirectory';
@@ -13,17 +19,20 @@ import { StaffRoleBadge, VipBadge } from './StaffDirectory';
 export type ChatModCapability = 'admin' | 'ban_only' | 'cm' | 'none';
 
 interface ChatBoxProps {
+  roomId?: RoomId;
   roomName: string;
   messages: RoomChatMessage[];
   presencesInRoom: RoomAvatarPresence[];
   currentUsername: string;
+  currentUserRole?: UserRole;
+  currentUserIsVip?: boolean;
   modCapability: ChatModCapability;
   modLabel?: string;
   sentinelLabel?: string;
   mutedUntil?: number | null;
   onSendMessage: (
     text: string,
-  ) => { blocked: boolean; reason?: string } | void;
+  ) => { blocked: boolean; reason?: string; messageId?: string } | void;
   onStaffCommand: (commandText: string) => string | null;
   onSelectProfile?: (
     username: string,
@@ -33,12 +42,17 @@ interface ChatBoxProps {
 
 /**
  * Caixa de Bate-Papo em Tempo Real por Sala (ChatBox.tsx).
- * Exibe insígnias metálicas/diamante, selo VIP, suporte a /report e contagem de mute progressivo.
+ * Sincroniza mensagens em tempo real via coleção Firestore `messages` + Socket.IO,
+ * exibe insígnias metálicas/diamante, selo VIP, suporte a /report e mute progressivo.
  */
 export const ChatBox: React.FC<ChatBoxProps> = ({
+  roomId,
   roomName,
   messages,
   presencesInRoom,
+  currentUsername,
+  currentUserRole = 'player',
+  currentUserIsVip = false,
   modCapability,
   modLabel,
   sentinelLabel,
@@ -47,6 +61,9 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
   onStaffCommand,
   onSelectProfile,
 }) => {
+  const { authReady, firebaseUser, signInWithGoogle } = useFirebase();
+  const [firestoreMessages, setFirestoreMessages] = useState<RoomChatMessage[]>([]);
+  const [linkingGoogle, setLinkingGoogle] = useState(false);
   const [draft, setDraft] = useState('');
   const [warning, setWarning] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -59,11 +76,45 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
   const shouldSendOnStopRef = useRef<boolean>(true);
   const recordTimerRef = useRef<number | null>(null);
 
+  // Sincronização em tempo real com a coleção Firestore `messages` por sala (apenas com auth pronto)
+  useEffect(() => {
+    setFirestoreMessages([]);
+    if (!authReady || !firebaseUser || !roomId) {
+      return;
+    }
+    const unsubscribe = subscribeRoomMessagesFromFirestore(roomId, (nextMsgs) => {
+      setFirestoreMessages(nextMsgs);
+    });
+    return () => unsubscribe();
+  }, [authReady, firebaseUser, roomId]);
+
+  const mergedMessages = useMemo(() => {
+    const byId = new Map<string, RoomChatMessage>();
+    for (const msg of firestoreMessages) {
+      if (msg?.id) {
+        byId.set(msg.id, msg);
+      }
+    }
+    for (const msg of messages) {
+      if (!msg?.id) continue;
+      const existing = byId.get(msg.id);
+      byId.set(msg.id, existing ? { ...existing, ...msg } : msg);
+    }
+    return Array.from(byId.values())
+      .sort((a, b) => {
+        if ((a.createdAt || 0) !== (b.createdAt || 0)) {
+          return (a.createdAt || 0) - (b.createdAt || 0);
+        }
+        return a.id.localeCompare(b.id);
+      })
+      .slice(-100);
+  }, [messages, firestoreMessages]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length]);
+  }, [mergedMessages.length]);
 
   useEffect(() => {
     if (!mutedUntil || mutedUntil <= Date.now()) return;
@@ -247,6 +298,17 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
             setWarning(
               sendRes.reason ?? 'Mensagem falada bloqueada pela moderação da sala.',
             );
+          } else if (roomId && firebaseUser?.emailVerified) {
+            void sendRoomMessageToFirestore({
+              id: sendRes?.messageId,
+              roomId,
+              senderUsername: currentUsername,
+              senderRole: currentUserRole,
+              isVip: currentUserIsVip,
+              text: spokenText,
+            }).catch(() => {
+              setWarning('Mensagem enviada na sala, mas falhou ao sincronizar no Firestore.');
+            });
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Erro ao processar áudio.';
@@ -319,7 +381,33 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
       return;
     }
 
+    if (roomId && firebaseUser?.emailVerified) {
+      void sendRoomMessageToFirestore({
+        id: sendRes?.messageId,
+        roomId,
+        senderUsername: currentUsername,
+        senderRole: currentUserRole,
+        isVip: currentUserIsVip,
+        text: trimmed,
+      }).catch(() => {
+        setWarning('Mensagem enviada na sala, mas falhou ao sincronizar no Firestore.');
+      });
+    }
+
     setDraft('');
+  };
+
+  const handleEnableCloudChat = async () => {
+    if (linkingGoogle) return;
+    setWarning(null);
+    setLinkingGoogle(true);
+    try {
+      await signInWithGoogle();
+    } catch {
+      setWarning('Não foi possível conectar sua conta Google para sincronizar o chat.');
+    } finally {
+      setLinkingGoogle(false);
+    }
   };
 
   return (
@@ -336,6 +424,16 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
         </div>
 
         <div className="flex flex-col items-end gap-0.5 shrink-0">
+          {authReady && !firebaseUser && (
+            <button
+              type="button"
+              onClick={handleEnableCloudChat}
+              disabled={linkingGoogle}
+              className="px-2 py-1 text-[10px] font-semibold rounded-md bg-[#FAF8F5] hover:bg-[#FCE8EF] text-[#C8235D] border border-[#E6E0D8] transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {linkingGoogle ? 'Conectando...' : 'Conectar Google'}
+            </button>
+          )}
           {modCapability !== 'none' && (
             <span
               title={
@@ -368,7 +466,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-[#FAF8F5]/60"
       >
-        {messages.map((msg) => {
+        {mergedMessages.map((msg) => {
           const timeLabel = new Date(msg.createdAt).toLocaleTimeString('pt-BR', {
             hour: '2-digit',
             minute: '2-digit',

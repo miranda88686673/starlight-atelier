@@ -30,6 +30,7 @@ import { useGlobalState } from '../core/state/GlobalStateManager';
 import { notifyRemoteMarketListings } from '../core/state/socketBridge';
 import { resolveCoreStaffRole } from '../core/security/RoleGuard';
 import { soundEngine } from '../utils/sound';
+import { resilientApiRequest } from '../utils/apiClient';
 import { VipBadge } from './StaffDirectory';
 import { Avatar3DViewport } from './three/Avatar3DViewport';
 import { ThreeClothingThumbnail } from './three/ThreeItemThumbnail';
@@ -235,25 +236,26 @@ export const MercadoView: React.FC<MercadoViewProps> = ({
 
     setSubmittingListing(true);
     try {
-      const response = await fetch('/api/market/listings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-actor-id': currentUser.id,
-        },
-        body: JSON.stringify({
-          sellerAccountId: currentUser.id,
-          itemId: selectedSellItem.id,
-          price: parsedPrice,
-        }),
-      });
-      const data = (await response.json()) as {
+      const payload = {
+        sellerAccountId: currentUser.id,
+        itemId: selectedSellItem.id,
+        price: parsedPrice,
+      };
+      const data = await resilientApiRequest<{
         ok?: boolean;
         error?: string;
         listings?: MarketListing[];
-      };
+      }>('/api/market/listings', {
+        method: 'POST',
+        headers: {
+          'x-actor-id': currentUser.id,
+        },
+        body: payload,
+        socketEvent: 'market:create_listing',
+        socketPayload: payload,
+      });
 
-      if (!response.ok || !data.ok) {
+      if (!data.ok) {
         setErrorMessage(data.error || 'Não foi possível publicar o anúncio no Mercado.');
         soundEngine.playModAction();
         return;
@@ -283,20 +285,24 @@ export const MercadoView: React.FC<MercadoViewProps> = ({
     setBusyId(listing.id);
     try {
       const staffRole = resolveCoreStaffRole(currentUser);
-      const response = await fetch(`/api/market/listings/${encodeURIComponent(listing.id)}`, {
+      const data = await resilientApiRequest<{
+        ok?: boolean;
+        error?: string;
+        listings?: MarketListing[];
+      }>(`/api/market/listings/${encodeURIComponent(listing.id)}`, {
         method: 'DELETE',
         headers: {
           'x-actor-id': currentUser.id,
           'x-actor-email': currentUser.email,
           ...(staffRole ? { 'x-staff-role': staffRole } : {}),
         },
+        socketEvent: 'market:cancel_listing',
+        socketPayload: {
+          listingId: listing.id,
+          actorAccountId: currentUser.id,
+        },
       });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-        listings?: MarketListing[];
-      };
-      if (!response.ok || !data.ok) {
+      if (!data.ok) {
         setErrorMessage(data.error || 'Erro ao cancelar anúncio.');
         soundEngine.playModAction();
         return;
@@ -321,26 +327,26 @@ export const MercadoView: React.FC<MercadoViewProps> = ({
     setStatusMessage(null);
     setBusyId(listing.id);
     try {
-      const response = await fetch(
-        `/api/market/listings/${encodeURIComponent(listing.id)}/buy`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-actor-id': currentUser.id,
-          },
-          body: JSON.stringify({
-            buyerAccountId: currentUser.id,
-          }),
-        },
-      );
-      const data = (await response.json()) as {
+      const data = await resilientApiRequest<{
         ok?: boolean;
         error?: string;
         listings?: MarketListing[];
         buyerProgress?: PlayerProgressState;
-      };
-      if (!response.ok || !data.ok) {
+      }>(`/api/market/listings/${encodeURIComponent(listing.id)}/buy`, {
+        method: 'POST',
+        headers: {
+          'x-actor-id': currentUser.id,
+        },
+        body: {
+          buyerAccountId: currentUser.id,
+        },
+        socketEvent: 'market:buy_listing',
+        socketPayload: {
+          listingId: listing.id,
+          buyerAccountId: currentUser.id,
+        },
+      });
+      if (!data.ok) {
         setErrorMessage(data.error || 'Não foi possível concluir a compra no Mercado.');
         soundEngine.playModAction();
         return;

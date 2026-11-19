@@ -784,7 +784,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
 
                 {/* Resumo da Bio sobre o banner */}
                 <p className="text-xs sm:text-sm text-white/80 max-w-2xl line-clamp-2 leading-relaxed pt-0.5">
-                  {playerState.bio || 'Explorando estilos e criações no Starlight Atelier.'}
+                  {playerState.bio || 'Explorando estilos e criações no Nocturne Vale Club.'}
                 </p>
 
                 {uploadError && (
@@ -1243,7 +1243,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                 </label>
 
                 <p className="text-[11px] text-[#6B645D] leading-relaxed">
-                  No Starlight Atelier cada conta possui um único nome próprio (usado simultaneamente como nome de exibição e identificação). Ninguém poderá copiar um nome já existente.
+                  No Nocturne Vale Club cada conta possui um único nome próprio (usado simultaneamente como nome de exibição e identificação). Ninguém poderá copiar um nome já existente.
                 </p>
 
                 {!hasEnoughForNameChange && identityChanged && (
@@ -1353,7 +1353,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                 Vitrine de Coleções
               </h3>
               <p className="text-xs text-[#6B645D] mt-0.5">
-                Peças, coroas e itens exclusivos guardados no seu closet do Starlight Atelier.
+                Peças, coroas e itens exclusivos guardados no seu closet do Nocturne Vale Club.
               </p>
             </div>
             <span className="font-mono-num text-xs font-semibold text-[#C8235D]">
@@ -1883,7 +1883,7 @@ export const ProfileAccountView: React.FC<ProfileAccountViewProps> = ({
                     Imagens Existentes do Jogo
                   </h4>
                   <span className="text-[11px] text-[#78716C]">
-                    Acervo oficial Starlight Atelier
+                    Acervo oficial Nocturne Vale Club
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

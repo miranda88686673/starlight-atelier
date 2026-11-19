@@ -347,6 +347,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
     loadBaseAvatarWithFallback({
       gender: displayAvatarGender,
       skinTone: displaySkinTone,
+      faceCustomization: displayFaceCustomization,
       withShadowDisc: true,
     }).then((loaded) => {
       if (cancelled) {
@@ -386,7 +387,7 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
       cancelled = true;
       cleanupAvatar();
     };
-  }, [three, three.isReady, displayAvatarGender, displaySkinTone]);
+  }, [three, three.isReady, displayAvatarGender, displaySkinTone, displayFaceCustomization]);
 
   // Sincroniza roupas e cabelo equipados no avatar injetado na Suíte
   useEffect(() => {
@@ -978,16 +979,14 @@ export const SuiteRoom: React.FC<SuiteRoomProps> = ({
                                 genderHint={avatarGender}
                                 className="w-16 h-16 object-contain transition-transform duration-200 group-hover:scale-105"
                               />
-                              {item.isVipOnly && (
-                                <div className="absolute top-1 left-1 flex flex-col items-start gap-0.5">
-                                  <VipBadge compact />
-                                  {item.isLegendary && (
-                                    <span className="px-1.5 py-0.5 rounded bg-[#78350F] text-[#FEF3C7] text-[9px] font-bold">
-                                      Lendário
-                                    </span>
-                                  )}
-                                </div>
-                              )}
+                              <div className="absolute top-1 left-1 flex flex-col items-start gap-0.5">
+                                {item.isVipOnly && <VipBadge compact />}
+                                {item.isLegendary && (
+                                  <span className="px-1.5 py-0.5 rounded bg-[#78350F] text-[#FEF3C7] text-[9px] font-bold">
+                                    Lendário
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <p className="text-[11px] font-semibold text-[#1C1917] line-clamp-1">
                               {item.name}
